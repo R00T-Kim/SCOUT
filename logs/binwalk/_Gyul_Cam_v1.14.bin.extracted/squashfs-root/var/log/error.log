@@ -1,0 +1,8 @@
+[Nov 14 09:00:00] [INFO] Apache/2.4.50 (Unix) configured -- resuming normal operations
+[Nov 14 10:12:33] [ERROR] [client 192.168.0.55] network.cgi: Invalid characters detected in 'ip' parameter.
+[Nov 14 10:12:35] [ERROR] [client 192.168.0.55] network.cgi: System call blocked by whitelist filter.
+[Nov 14 10:15:10] [ERROR] [client 192.168.0.55] upload.cgi: Fatal Error - Magic Header GYUL_V2 not found.
+[Nov 14 10:15:11] [ERROR] [client 192.168.0.55] upload.cgi: Premature end of script headers.
+[Nov 14 10:28:55] [WARN] [client 192.168.0.55] login.cgi: verify_password() computation lag detected.
+[Nov 14 10:29:59] [INFO] [client 192.168.0.55] login.cgi: Credentials verified.
+[Nov 14 10:45:00] [ERROR] [client 192.168.0.55] log_view.cgi: Directory traversal attempt (../etc/shadow) blocked.

@@ -45,7 +45,6 @@ class EMBARunner:
             "-v", f"{os.path.dirname(self.firmware_path)}:/firmware",
             "-v", f"{self.log_dir}:/logs",
             self.container_image,
-            "./emba",
             "-f", f"/firmware/{os.path.basename(self.firmware_path)}",
             "-l", "/logs",
             "-p", "./scan_profiles/default_scan.emba" # Assuming default profile
@@ -63,11 +62,16 @@ class EMBARunner:
                 )
                 
                 # Stream output
-                for line in process.stdout:
-                    print(line, end="")
-                    log_file.write(line)
-                    
-                process.wait()
+                try:
+                    for line in process.stdout:
+                        print(line, end="")
+                        log_file.write(line)
+                        
+                    process.wait()
+                except KeyboardInterrupt:
+                    print("\n    [!] User skipped EMBA (KeyboardInterrupt). Terminating process...")
+                    process.kill() # Docker run --rm should handle cleanup but kill is safer for script
+                    return ""
                 
             if process.returncode == 0:
                 print("\n[+] EMBA Analysis Finished Successfully.")

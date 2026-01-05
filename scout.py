@@ -10,6 +10,9 @@ from report.reporter import Reporter
 from collect.emba_runner import EMBARunner
 from collect.ghidra_runner import GhidraRunner
 from collect.firmae_runner import FirmAERunner
+from collect.binwalk_runner import BinwalkRunner
+from collect.static_scanner import SimpleStaticScanner
+from utils.schemas import StaticFacts, DynamicFacts, CodeFacts, ServiceFact, SecretFact, Evidence
 
 def run_mock_pipeline():
     print("\n[Mode] Running in MOCK Mode (No firmware provided)...")
@@ -20,44 +23,85 @@ def run_mock_pipeline():
     except FileNotFoundError:
         print("Error: Sample files not found.")
         sys.exit(1)
-    return emba_content, firmae_content, ghidra_content
+        
+    static_facts = StaticParser().parse(emba_content)
+    dynamic_facts = DynamicParser().parse(firmae_content)
+    code_facts = CodeParser().parse(ghidra_content)
+    
+    return static_facts, dynamic_facts, code_facts
 
 def run_real_pipeline(firmware_path):
     print(f"\n[Mode] Running in REAL Mode on {firmware_path}...")
     
-    # 1. EMBA
+    # 1. EMBA (Static Analysis)
     print("  [1/3] Running EMBA (Static Analysis)...")
     emba_log = EMBARunner(firmware_path).run()
+    static_facts = None
+    
     if emba_log and os.path.exists(emba_log):
-        with open(emba_log, "r", errors='ignore') as f: emba_content = f.read()
-    else:
-        print("    [!] EMBA failed or produced no log. Using empty input.")
-        emba_content = ""
+        with open(emba_log, "r", errors='ignore') as f: 
+            static_facts = StaticParser().parse(f.read())
+            
+    # Fallback: Binwalk + Simple Static Scanner
+    if not static_facts or (len(static_facts.services) == 0 and len(static_facts.secrets) == 0):
+        print("    [!] EMBA failed or produced no findings. Attempting Binwalk Fallback...")
+        extracted_path = BinwalkRunner(firmware_path).run()
+        if extracted_path:
+            scanner_results = SimpleStaticScanner(extracted_path).scan()
+            # Convert scanner dict to StaticFacts
+            static_facts = StaticFacts()
+            
+            # Map Files
+            for f in scanner_results.get("files", []):
+                static_facts.services.append(ServiceFact(
+                    service_name="unknown",
+                    protocol="file",
+                    port=0,
+                    evidence=Evidence(source="static", description=f"Interesting file: {f}", location=f)
+                ))
+            
+            # Map Binaries
+            for b in scanner_results.get("binaries", []):
+                static_facts.services.append(ServiceFact(
+                    service_name=b.split("/")[-1],
+                    protocol="binary",
+                    port=0,
+                    evidence=Evidence(source="static", description=f"Risky binary: {b}", location=b)
+                ))
 
-    # 2. FirmAE
+            # Map Secrets
+            for s in scanner_results.get("secrets", []):
+                static_facts.secrets.append(SecretFact(
+                    type=s["type"],
+                    value_masked=s["content"][:3]+"***",
+                    file_path=s["file"],
+                    evidence=Evidence(source="static", description=f"Potential {s['type']}: {s['content']}", location=s["file"])
+                ))
+        else:
+            print("    [!] Binwalk extraction failed properly. No static facts available.")
+            static_facts = StaticFacts() # Return empty if both fail
+
+    # 2. FirmAE (Dynamic Analysis)
     print("  [2/3] Running FirmAE (Dynamic Analysis)...")
     firmae_log = FirmAERunner(firmware_path).run()
     if firmae_log and os.path.exists(firmae_log):
-        with open(firmae_log, "r", errors='ignore') as f: firmae_content = f.read()
+        with open(firmae_log, "r", errors='ignore') as f: 
+            dynamic_facts = DynamicParser().parse(f.read())
     else:
         print("    [!] FirmAE failed or produced no log. Using empty input.")
-        firmae_content = ""
+        dynamic_facts = DynamicParser().parse("") # Empty facts
         
-    # 3. Ghidra
+    # 3. Ghidra (Code Analysis)
     print("  [3/3] Running Ghidra (Code Analysis)...")
-    # Note: Ghidra needs a binary, not the full firmware image usually.
-    # For SCOUT prototype, we'll try to run it on the firmware image itself 
-    # OR ideally we should extract the file system first. 
-    # For now, we pass the firmware image, but in reality we'd need an extractor step.
-    # Let's assume the user extracts it or we just analyze the image blob.
     ghidra_json = GhidraRunner(firmware_path).run()
     if ghidra_json and os.path.exists(ghidra_json):
-        with open(ghidra_json, "r", errors='ignore') as f: ghidra_content = f.read()
+        with open(ghidra_json, "r", errors='ignore') as f: 
+            code_facts = CodeParser().parse(f.read())
     else:
          print("    [!] Ghidra failed or produced no log. Using empty input.")
-         ghidra_content = "[]"
+         code_facts = CodeParser().parse("[]") # Empty facts
          
-    return emba_content, firmae_content, ghidra_content
+    return static_facts, dynamic_facts, code_facts
 
 def main():
     parser = argparse.ArgumentParser(description="SCOUT Firmware Vulnerability Scanner")
@@ -66,19 +110,14 @@ def main():
 
     print("[SCOUT] Starting Firmware Vulnerability Campaign...")
     
-    # Phase 1: Collection
+    # Phase 1: Collection & Normalization
     if args.firmware:
-        emba_content, firmae_content, ghidra_content = run_real_pipeline(args.firmware)
+        static_facts, dynamic_facts, code_facts = run_real_pipeline(args.firmware)
     else:
-        emba_content, firmae_content, ghidra_content = run_mock_pipeline()
+        static_facts, dynamic_facts, code_facts = run_mock_pipeline()
 
-    # Phase 1.5: Normalization
-    print("\n[Phase 1] Normalizing Tool Outputs...")
-    static_facts = StaticParser().parse(emba_content)
-    dynamic_facts = DynamicParser().parse(firmae_content)
-    code_facts = CodeParser().parse(ghidra_content)
-    
-    print(f"  - Static Facts: {len(static_facts.services)} services, {len(static_facts.secrets)} secrets")
+    print(f"\n[Phase 1] Collection & Normalization Complete")
+    print(f"  - Static Facts: {len(static_facts.services) + len(static_facts.files if hasattr(static_facts, 'files') else [])} findings")
     print(f"  - Dynamic Facts: {len(dynamic_facts.open_ports)} ports, {len(dynamic_facts.web_endpoints)} web paths")
     print(f"  - Code Signals: {len(code_facts.signals)} signals")
 

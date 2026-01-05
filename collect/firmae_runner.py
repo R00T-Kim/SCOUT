@@ -77,11 +77,21 @@ class FirmAERunner:
                 )
                 
                 # Stream output (FirmAE takes a long time, so streaming is important)
-                for line in process.stdout:
-                    print(line, end="")
-                    log_file.write(line)
-                    
-                process.wait()
+                try:
+                    for line in process.stdout:
+                        print(line, end="")
+                        log_file.write(line)
+                        log_file.flush() # Ensure it's written immediately
+                        
+                    process.wait()
+                except KeyboardInterrupt:
+                    print("\n    [!] User skipped FirmAE (KeyboardInterrupt). Terminating process...")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except:
+                        process.kill()
+                    return ""
                 
             print(f"[+] FirmAE run finished. Log saved to {log_run_path}")
             return log_run_path

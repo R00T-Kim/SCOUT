@@ -82,30 +82,43 @@ Example:
                 ],
                 temperature=0.2, # Low temperature for more deterministic output
             )
-            
             content = response.choices[0].message.content.strip()
             
             # Remove markdown code blocks if present
             if content.startswith("```json"):
                 content = content[7:]
-            if content.endswith("```"):
-                content = content[:-3]
-            
-            content = content.strip()
-            
             # Parse JSON
-            candidates_data = json.loads(content)
-            
-            candidates = []
-            for item in candidates_data:
-                try:
-                    candidates.append(VulnerabilityCandidate(**item))
-                except Exception as e:
-                    print(f"[Agent] Skipping invalid candidate: {e}")
-                    
-            return candidates
+            try:
+                # Sanitize markdown code blocks if present
+                clean_content = content.replace("```json", "").replace("```", "").strip()
+                data = json.loads(clean_content)
+                
+                candidates = []
+                for item in data:
+                    # Fix: Ensure evidence is a list of objects
+                    if "evidence" in item and isinstance(item["evidence"], list):
+                        fixed_evidence = []
+                        for ev in item["evidence"]:
+                            if isinstance(ev, str):
+                                # 'source' must be 'static', 'dynamic', or 'code'. defaulting to static for simplified fallback
+                                fixed_evidence.append({"description": ev, "source": "static", "confidence": "low"})
+                            elif isinstance(ev, dict):
+                                if "source" not in ev or ev["source"] not in ["static", "dynamic", "code"]:
+                                     ev["source"] = "static" # Fix invalid source in dict too
+                                fixed_evidence.append(ev)
+                        item["evidence"] = fixed_evidence
+                        
+                    try:
+                        candidates.append(VulnerabilityCandidate(**item))
+                    except Exception as e:
+                        print(f"  [!] validation error for candidate: {e}")
+                        continue
+                        
+                return candidates
+            except json.JSONDecodeError:
+                print(f"  [!] Failed to parse LLM response as JSON: {content[:100]}...")
+                return []   
 
         except Exception as e:
             print(f"[Agent] API Error: {e}")
             return []
-
