@@ -1,0 +1,4 @@
+[+] Found potential backdoor in /etc/init.d/rcS
+[+] User 'admin' with password '1234' found in /etc/shadow
+[+] Binary /usr/bin/telnetd is potentially vulnerable
+[+] Found HTTP server config in /etc/httpd.conf
