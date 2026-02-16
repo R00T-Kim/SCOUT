@@ -1,0 +1,23 @@
+{
+  "contract_version": "1",
+  "run_ref": {
+    "run_id": "terminator-20260213-153435",
+    "run_dir_abs": "/abs/path/to/aiedge-runs/2026-02-13_0000_sha256-deadbeef"
+  },
+  "profile": "analysis",
+  "exploit_gate": null,
+  "stage_names": ["tooling", "extraction"],
+  "budgets": {
+    "time_budget_s": 600,
+    "per_stage_timeout_s": 120,
+    "max_bytes_written": 1073741824
+  },
+  "params": {
+    "tooling": {},
+    "extraction": {
+      "matryoshka": true,
+      "matryoshka_depth": 8
+    }
+  },
+  "idempotency_key": "sha256:example"
+}

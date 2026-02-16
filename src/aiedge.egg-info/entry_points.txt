@@ -1,0 +1,2 @@
+[console_scripts]
+aiedge = aiedge.__main__:main

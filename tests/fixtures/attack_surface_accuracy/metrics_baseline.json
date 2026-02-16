@@ -1,0 +1,17 @@
+{
+  "calibration": {
+    "dataset": "benchmark_fixture_labels",
+    "mode": "rule_based",
+    "supports_probability_calibration": false
+  },
+  "fixture": "tests/fixtures/attack_surface_accuracy/benchmark_fixture.json",
+  "metrics": {
+    "duplicate_ratio": 0.0,
+    "promotion_precision": 1.0,
+    "promotion_recall": 1.0,
+    "static_only_ratio": 0.25,
+    "taxonomy_precision": 1.0,
+    "taxonomy_recall": 1.0
+  },
+  "schema_version": 1
+}

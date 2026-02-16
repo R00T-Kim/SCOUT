@@ -1,0 +1,9 @@
+pyproject.toml
+src/aiedge/__init__.py
+src/aiedge/__main__.py
+src/aiedge.egg-info/PKG-INFO
+src/aiedge.egg-info/SOURCES.txt
+src/aiedge.egg-info/dependency_links.txt
+src/aiedge.egg-info/entry_points.txt
+src/aiedge.egg-info/top_level.txt
+tests/test_smoke.py

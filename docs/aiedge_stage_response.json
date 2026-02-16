@@ -1,0 +1,43 @@
+{
+  "contract_version": "1",
+  "run_ref": {
+    "run_id": "terminator-20260213-153435",
+    "run_dir_abs": "/abs/path/to/aiedge-runs/2026-02-13_0000_sha256-deadbeef"
+  },
+  "status": "partial",
+  "limitations": ["binwalk not installed; skipping extraction."],
+  "stages": [
+    {
+      "stage_name": "tooling",
+      "status": "ok",
+      "attempt": 1,
+      "limitations": [],
+      "artifacts": [
+        {
+          "path": "stages/tooling/tools.json",
+          "sha256": "<sha256>"
+        },
+        {
+          "path": "stages/tooling/stage.json",
+          "sha256": "<sha256>"
+        }
+      ]
+    },
+    {
+      "stage_name": "extraction",
+      "status": "partial",
+      "attempt": 1,
+      "limitations": ["binwalk not installed; skipping extraction."],
+      "artifacts": [
+        {
+          "path": "stages/extraction/binwalk.log",
+          "sha256": "<sha256>"
+        },
+        {
+          "path": "stages/extraction/stage.json",
+          "sha256": "<sha256>"
+        }
+      ]
+    }
+  ]
+}

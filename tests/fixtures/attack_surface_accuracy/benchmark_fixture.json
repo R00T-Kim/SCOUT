@@ -1,0 +1,79 @@
+{
+  "categories": [
+    {
+      "name": "agentic_security_orchestration",
+      "refs": [
+        "https://github.com/KeygraphHQ/shannon",
+        "https://github.com/GreyDGL/PentestGPT",
+        "https://github.com/aliasrobotics/cai"
+      ]
+    },
+    {
+      "name": "defensive_hardening",
+      "refs": [
+        "https://github.com/CISOfy/lynis",
+        "https://github.com/aquasecurity/trivy",
+        "https://github.com/fail2ban/fail2ban",
+        "https://github.com/trufflesecurity/trufflehog"
+      ]
+    },
+    {
+      "name": "reporting_and_workflow",
+      "refs": [
+        "https://github.com/Syslifters/OffSec-Reporting",
+        "https://github.com/Syslifters/sysreptor",
+        "https://github.com/juliocesarfort/public-pentesting-reports"
+      ]
+    },
+    {
+      "name": "scanner_coverage_ecosystem",
+      "refs": [
+        "https://github.com/OWASP/Nettacker",
+        "https://github.com/future-architect/vuls",
+        "https://github.com/projectdiscovery/nuclei"
+      ]
+    }
+  ],
+  "labels": {
+    "negative": {
+      "noise_tokens": [
+        "*.ko",
+        "accountmsg.*",
+        "authority.*",
+        "config*.*"
+      ]
+    },
+    "positive": {
+      "endpoint_candidates": [
+        {
+          "type": "domain",
+          "value": "api.example.test"
+        },
+        {
+          "type": "domain",
+          "value": "support.example.test"
+        },
+        {
+          "type": "url",
+          "value": "https://api.example.test/v1"
+        },
+        {
+          "type": "url",
+          "value": "https://support.example.test/status"
+        }
+      ],
+      "promotion_labels": [
+        {
+          "type": "url",
+          "value": "https://api.example.test/v1"
+        },
+        {
+          "type": "url",
+          "value": "https://support.example.test/status"
+        }
+      ]
+    }
+  },
+  "schema_version": 1,
+  "source": "ref.md"
+}

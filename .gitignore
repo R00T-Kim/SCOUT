@@ -1,0 +1,36 @@
+# Runtime artifacts
+aiedge-runs/
+aiedge-inputs/
+aiedge-8mb-runs/
+.sisyphus/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Test caches
+.pytest_cache/
+
+# Lint/typecheck caches
+.ruff_cache/
+
+# Virtual environments
+.venv/
+
+# Firmware/artifact blobs
+ER-e50.v3.0.1.tar
+*.tar
+
+# Secrets and credentials
+.env*
+*.pem
+*.key
+id_rsa*
+*.p12
+*.pfx
+credentials*.json
+
+# Logs and caches
+*.log
+*.cache
