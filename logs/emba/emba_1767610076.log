@@ -1,4 +1,0 @@
-Unable to find image 'e-m-b-a/emba:latest' locally
-docker: Error response from daemon: pull access denied for e-m-b-a/emba, repository does not exist or may require 'docker login'
-
-Run 'docker run --help' for more information

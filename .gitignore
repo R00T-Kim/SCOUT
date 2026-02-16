@@ -3,6 +3,8 @@ aiedge-runs/
 aiedge-inputs/
 aiedge-8mb-runs/
 .sisyphus/
+.local/
+.omc/
 
 # Python
 __pycache__/
@@ -21,6 +23,15 @@ __pycache__/
 # Firmware/artifact blobs
 ER-e50.v3.0.1.tar
 *.tar
+*.zip
+*.deb
+*.bin
+*.dtb
+*.dts
+*.lzo
+*_dump*
+*.extracted/
+_full_nand_dump.bin.extracted/
 
 # Secrets and credentials
 .env*
@@ -34,6 +45,12 @@ credentials*.json
 # Logs and caches
 *.log
 *.cache
+
+# Legacy pipeline outputs / scratch
+logs/
+firmware/
+report/
+samples/
 
 # Private / not-yet-disclosed notes
 ubiquiti_overall_process.md

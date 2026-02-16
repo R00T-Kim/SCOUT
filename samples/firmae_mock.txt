@@ -1,5 +1,0 @@
-[+] Network check:
-    192.168.0.1:80 (http) - Title: "Router Login"
-    192.168.0.1:23 (telnet) - Banner: "Welcome to Linux"
-[+] Web page found: /cgi-bin/login.cgi (Status: 200)
-[+] Web page found: /admin.html (Status: 403)

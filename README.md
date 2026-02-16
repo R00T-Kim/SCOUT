@@ -1,93 +1,620 @@
-# SCOUT: Surface Candidate Outline & Unified Triage
-**Agent 기반 IoT 펌웨어 취약점 후보 자동 생성 시스템**
-*(Agent-based Vulnerability Candidate Generation for IoT Firmware)*
+<div align="center">
 
-SCOUT는 IoT 펌웨어의 공격면(Attack Surface)을 정찰하고, 증거(Evidence)를 기반으로 실제로 검증해볼 가치가 있는 취약점 후보(Vulnerability Candidate)를 자동으로 생성하는 시스템입니다.
+# SCOUT (AIEdge)
 
-## 🚀 Key Features
+### Firmware-to-Exploit Evidence Engine
 
-*   **Multi-Tool Integration**: EMBA (정적), FirmAE (동적), Ghidra (코드), IDA Pro(Optional) 등 도구 자동 실행
-*   **Fact-Based Reasoning**: 도구의 로그에서 '사실(Fact)'과 '증거(Evidence)'를 추출하여 분석
-*   **LLM Agent Synthesis**: 수집된 정보를 바탕으로 취약점 후보를 추론하고, 검증 우선순위와 재현 가이드 제시
-*   **Real-Time Dashboard**: CLI 기반의 TUI(Terminal UI) 대시보드 (`tui_app.py`) 제공
+**From firmware blob to verified exploit chain — deterministic evidence at every step.**
+
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 ---
 
-## 🛠 Prerequisites & Installation
+*Deterministic firmware analysis engine that produces hash-anchored evidence artifacts — from unpacking through vulnerability discovery to full-chain exploit verification.*
 
-SCOUT는 **Linux 환경 (Ubuntu 20.04/22.04 LTS 권장)** 또는 **WSL2**에서 실행해야 합니다.
-
-### 1. 필수 의존성 설치
-**Python 3.10+** 및 필수 라이브러리를 설치합니다. (FirmAE 등을 위해 `root` 권한 필요)
-
-```bash
-# 시스템 패키지 업데이트
-sudo apt update && sudo apt install -y python3-pip docker.io
-
-# SCOUT 필수 라이브러리 설치 (Sudo 필수!)
-# 주의: FirmAE 호환성을 위해 capstone 버전을 5.0 미만으로 고정해야 할 수 있습니다.
-sudo pip3 install "capstone<5.0" pydantic python-dotenv openai textual
-```
-
-### 2. 외부 도구 준비
-*   **Docker**: EMBA 실행을 위해 Docker가 설치 및 실행 중이어야 합니다 (`sudo systemctl start docker`).
-*   **FirmAE**: 홈 디렉토리 등 접근 가능한 경로에 설치되어 있어야 합니다 (SCOUT는 기본적으로 `~/FirmAE`를 탐색).
-*   **Ghidra (Optional)**: 코드 분석을 위해 `analyzeHeadless`가 PATH에 있거나 `GHIDRA_HEADLESS_PATH` 환경변수 설정 필요.
+</div>
 
 ---
 
-## 📖 Usage
+## Philosophy
 
-### 1. Mock Mode (테스트 실행)
-펌웨어 파일 없이 샘플 데이터를 사용하여 파이프라인 전 과정을 테스트합니다.
-```bash
-python3 scout.py
+**Every exploit starts with evidence. SCOUT produces the evidence chain.**
+
+Most firmware analysis tools stop at "here's a list of potential vulnerabilities." SCOUT is designed around a different premise: the end goal is a **verified, reproducible exploit chain** — and every stage exists to build toward that.
+
+```
+Firmware blob → Structure → Attack surface → Vulnerability → Exploit primitive → PoC → Verified chain
 ```
 
-### 2. Real Mode (실전 분석)
-실제 펌웨어를 분석합니다. **반드시 `sudo` 권한으로 실행해야 합니다.** (FirmAE/Binwalk 권한 문제 해결)
+SCOUT doesn't guess. Each stage produces **hash-anchored artifacts** in a `run_dir`, and no claim advances without traceable evidence. The engine is deterministic by default — LLM judgment and dynamic validation are layered on top by an orchestrator (Terminator), never baked into the evidence chain itself.
 
-```bash
-# 1. 파일명에 공백이 없도록 변경 (필수!)
-mv "firmware/Gyul Cam v1.14.bin" "firmware/Gyul_Cam_v1.14.bin"
+### Core Principles
 
-# 2. 실행
-sudo python3 scout.py --firmware "firmware/Gyul_Cam_v1.14.bin"
+- **Evidence-first** — No finding exists without a file path, offset, hash, and rationale anchored to artifacts
+- **Fail-open stages, fail-closed governance** — Individual stages degrade gracefully (partial results over crashes); final promotion gates reject anything without complete evidence
+- **Full-chain or nothing** — The pipeline doesn't stop at "potential command injection." It traces source→sink→primitive→chain→PoC→verification, marking exactly where the chain breaks
+- **Deterministic engine, non-deterministic judgment** — SCOUT produces reproducible artifacts; LLM tribunal and exploit generation happen in the orchestrator layer with full audit trails
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         SCOUT (Evidence Engine)                          │
+│                                                                          │
+│  Firmware ──► Unpack ──► Profile ──► Inventory ──► Surface ──► Findings  │
+│                                                                          │
+│  Every stage:  stage.json (sha256 manifest)                              │
+│                *.json     (structured artifacts)                          │
+│                All paths run-relative, all hashes recorded               │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────┤
+│                    Handoff (JSON contract)                                │
+├──────────────────────────────────────────────────────────────────────────┤
+│                   Terminator (Orchestrator)                               │
+│                                                                          │
+│  Tribunal ──► Validator ──► Exploit Dev ──► Verified Chain               │
+│  (LLM judge)  (emulation)   (lab-gated)    (confirmed only              │
+│                                              with dynamic evidence)      │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. TUI Dashboard (대시보드)
-분석 진행 상황이나 결과를 그래픽하게 확인하려면 TUI를 실행하세요.
-```bash
-python3 tui_app.py
+**Separation of concerns:**
+
+| Layer | Role | Deterministic? |
+|:------|:-----|:--------------:|
+| **SCOUT** | Evidence production (extraction, profiling, inventory, surfaces, findings) | Yes |
+| **Handoff** | JSON contract between engine and orchestrator (`firmware_handoff.json`) | Yes |
+| **Terminator** | LLM tribunal, dynamic validation, exploit development, report promotion | No (auditable) |
+
+---
+
+## The Pipeline: Firmware → Full-Chain Exploit
+
+```mermaid
+flowchart TD
+    F["Firmware Input<br/>(bin/tar/img)"] --> S0["Stage 0: Ingest<br/>manifest.json + input copy"]
+    S0 --> S1["Stage 1: Extraction<br/>binwalk/unblob → rootfs + kernel"]
+    S1 --> S1H{"Extracted<br/>filesystem?"}
+    S1H -->|Yes| S15L["Stage 1.5: Profile<br/>Linux FS path"]
+    S1H -->|No| S15R["Stage 1.5: Profile<br/>RTOS / monolithic path"]
+    S1H -->|Encrypted| S15E["Stage 1.5: Profile<br/>flag: needs key extraction"]
+
+    S15L --> S2L["Stage 2: Inventory<br/>file tree + ELF/scripts/configs"]
+    S15R --> S2R["Stage 2: Inventory<br/>binary-only (strings/sections/prologue)"]
+    S15E --> S2E["Stage 2: Inventory<br/>minimal (entropy + headers only)"]
+
+    S2L --> S3["Stage 3: Attack Surface<br/>source→sink graph"]
+    S2R --> S3
+    S2E --> S3
+
+    S3 --> S4["Stage 4: Findings<br/>2-layer: pattern_scan + binary_strings"]
+    S4 --> S4G["Review Gates<br/>critic/triager scoring"]
+
+    S4G --> HO["═══ HANDOFF ═══<br/>firmware_handoff.json"]
+
+    HO --> T1["Tribunal<br/>(Analyst → Critic → Arbiter)"]
+    T1 --> T2{"Verdict?"}
+    T2 -->|"≥0.8 + evidence"| V["Validator<br/>(QEMU/container sandbox)"]
+    T2 -->|"<0.5 or rebutted"| DISMISS["Dismissed"]
+    T2 -->|"0.5-0.8"| CAND["Candidate<br/>(needs investigation)"]
+
+    V --> V1{"Dynamic<br/>evidence?"}
+    V1 -->|"crash/trace/response"| CONF["✅ CONFIRMED"]
+    V1 -->|"infeasible/failed"| HCS["⚠️ HIGH_CONFIDENCE_STATIC"]
+
+    CONF --> E["Exploit Chain Dev<br/>(lab-gated, authorized only)"]
+    E --> E1["Primitive Assembly<br/>leak → write → control"]
+    E1 --> E2["PoC Script<br/>(pwntools/requests)"]
+    E2 --> E3["Local Verification<br/>(3x reproduce)"]
+    E3 --> CHAIN["🔗 VERIFIED CHAIN<br/>Full exploit with evidence"]
+
+    style CONF fill:#22c55e,color:#fff
+    style HCS fill:#f59e0b,color:#fff
+    style DISMISS fill:#6b7280,color:#fff
+    style CHAIN fill:#8b5cf6,color:#fff
 ```
 
 ---
 
-## 📂 Project Structure
+## Stage Details
 
-```bash
-scout/
-├── collect/       # 외부 도구 실행 모듈 (emba_runner, firmae_runner 등)
-├── normalize/     # 로그 파싱 및 표준화 모듈 (Parser)
-├── agent/         # LLM 프롬프트 및 추론 로직 (Core Agent)
-├── validate/      # 데이터 검증 및 룰 기반 필터링
-├── report/        # 리포트 생성 (Markdown/JSON)
-├── firmware/      # 분석할 펌웨어 저장소
-└── tui_app.py     # 터미널 UI 대시보드
+### Stage 0: Ingest + Run Setup
+
+Creates the immutable run directory and locks all inputs.
+
+```
+run_dir/
+├── manifest.json          # sha256, size, case_id, time_budget, egress policy
+└── input/firmware.bin     # immutable copy of input
+```
+
+No analysis happens here — just identity, policy, and directory reservation.
+
+### Stage 1: Extraction / Unpack
+
+Maximally extracts filesystem, kernel, and partition fragments from the firmware blob.
+
+```
+stages/extraction/
+├── stage.json             # sha256 of all artifacts
+├── binwalk.log            # full extraction log
+└── _firmware.bin.extracted/
+    ├── squashfs-root/     # extracted rootfs (if Linux)
+    ├── *.uImage           # kernel images
+    └── ...                # partition fragments
+```
+
+**Tools**: binwalk, unblob, jefferson, sasquatch, ubi_reader
+
+**AI role**: None (rule-based). Custom format detection is a future extension.
+
+### Stage 1.5: Firmware Profiling
+
+Classifies the firmware and decides the pipeline branch. This is the routing decision for everything downstream.
+
+```
+stages/firmware_profile/
+├── stage.json
+└── firmware_profile.json
+```
+
+**`firmware_profile.json` schema:**
+
+```json
+{
+  "schema_version": "1.0",
+  "firmware_id": "sha256:e3d3fe...",
+  "os_type_guess": "linux_fs | rtos_monolithic | unextractable_or_unknown",
+  "arch_hints": {
+    "arch": "mips32",
+    "endian": "big",
+    "evidence_refs": ["stages/extraction/binwalk.log:line:42"]
+  },
+  "sdk_hints": {
+    "rule_based": ["EdgeOS", "Debian-derivative"],
+    "ai_hypotheses": []
+  },
+  "fs_type": "squashfs",
+  "emulation_feasibility": "high | medium | low",
+  "branch_plan": {
+    "inventory_mode": "linux_fs_walk | binary_only | minimal_entropy",
+    "surface_extraction": true,
+    "dynamic_validation_viable": true
+  },
+  "evidence_refs": [...],
+  "limitations": [...]
+}
+```
+
+**Branching logic:**
+
+| Profile Result | Inventory Mode | Surface Extraction | Dynamic Validation |
+|:---------------|:---------------|:-------------------|:-------------------|
+| `linux_fs` | Full file tree walk | Yes (init/services/web/CGI) | Viable (QEMU/FirmAE) |
+| `rtos_monolithic` | Binary-only (strings/sections/prologues) | Limited (string-inferred) | Limited (Unicorn/partial) |
+| `unextractable_or_unknown` | Minimal (entropy + headers) | No | No |
+
+### Stage 2: Inventory / Enumeration
+
+Catalogs everything in the extracted firmware. **Never crashes** — partial results are always better than no results.
+
+```
+stages/inventory/
+├── stage.json
+├── inventory.json         # file/binary catalog with coverage metrics
+└── string_hits.json       # interesting string patterns across all binaries
+```
+
+**`inventory.json` key fields:**
+
+```json
+{
+  "status": "ok | partial",
+  "coverage_metrics": {
+    "roots_considered": 3,
+    "roots_scanned": 2,
+    "files_seen": 4521,
+    "skipped_dirs_count": 2,
+    "skipped_files_count": 14
+  },
+  "errors": [
+    {
+      "path": "etc/ssh/ssh_config.d/etc",
+      "op": "listdir",
+      "errno": 13,
+      "message": "Permission denied (sanitized)"
+    }
+  ],
+  "entries": [...]
+}
+```
+
+**Robustness guarantees:**
+- Permission-denied directories → skip and record in `errors[]`, continue scanning
+- Symlink loops → detect via `os.lstat()`, skip, record
+- Dangling symlinks → record as metadata, don't follow
+- Corrupt filenames → hex-escape, record
+- `inventory.json` is **always written**, even if completely empty (with `status: "partial"` and reason)
+
+### Stage 3: Attack Surface Mapping
+
+Identifies the entry points an attacker can reach and traces them toward dangerous sinks.
+
+```
+stages/surfaces/
+├── surfaces.json          # network services, web endpoints, CLI interfaces
+├── endpoints.json         # specific input handlers (CGI, REST, SOAP, MQTT, ...)
+└── source_sink_graph.json # source→processing→sink candidate paths
+```
+
+**Source categories:**
+- Network: HTTP/HTTPS, MQTT, CoAP, UPnP/SSDP, Telnet, SSH, custom TCP/UDP
+- Local: CLI, NVRAM reads, environment variables, config file parsing, IPC/Unix sockets
+- Hardware: UART, JTAG, SPI/I2C (noted for physical access scenarios)
+
+**Sink categories (exploit-relevant):**
+- Command execution: `system()`, `popen()`, `execve()`, shell invocations
+- Memory corruption: `strcpy()`, `sprintf()`, `memcpy()` without bounds, heap ops
+- File operations: `open()` with user-controlled paths, symlink races
+- Authentication: hardcoded credentials, bypass conditions, weak token generation
+- Crypto: weak algorithms, key reuse, nonce mismanagement
+
+**The graph is the exploit planner's input** — each path from source to sink is a potential exploit chain candidate.
+
+### Stage 4: Findings + Review Gates
+
+Two-layer findings with deterministic scoring, designed for tribunal consumption.
+
+```
+stages/findings/
+├── pattern_scan.json          # high-level findings (AI-consumable)
+├── binary_strings_hits.json   # low-level string evidence across binaries
+├── chains.json                # kill-chain hypotheses (source→sink→primitive→impact)
+├── review_gates.json          # critic/triager scoring per finding
+├── known_disclosures.json     # CVE matches with NVD citations
+└── poc_skeletons/
+    └── README.txt             # safe placeholders (no weaponized content)
+```
+
+**Finding structure (each entry in `pattern_scan.json`):**
+
+```json
+{
+  "finding_id": "F-037",
+  "title": "Command injection via HTTP POST parameter in lighttpd CGI handler",
+  "vuln_class": "CWE-78",
+  "severity_estimate": "critical",
+  "source": {
+    "type": "http_post",
+    "binary": "usr/sbin/lighttpd",
+    "handler": "cgi_handler",
+    "parameter": "cmd"
+  },
+  "sink": {
+    "function": "system",
+    "binary": "usr/lib/cgi-bin/admin.cgi",
+    "offset": "0x401890"
+  },
+  "taint_path": ["recv", "parse_post_params", "build_command", "system"],
+  "evidence_refs": [
+    "stages/inventory/inventory.json:entries[142]",
+    "stages/findings/binary_strings_hits.json:hits[37]"
+  ],
+  "chain_potential": {
+    "primitive": "arbitrary_command_execution",
+    "auth_required": false,
+    "network_reachable": true,
+    "exploit_complexity": "low"
+  },
+  "rationale": "...",
+  "limitations": ["static analysis only, sink reachability not dynamically confirmed"]
+}
+```
+
+**`chains.json` — Kill-chain hypotheses:**
+
+Each chain maps a complete attack path from initial access to impact:
+
+```json
+{
+  "chain_id": "KC-003",
+  "title": "Unauthenticated RCE via CGI command injection",
+  "steps": [
+    {"step": 1, "action": "HTTP POST to /cgi-bin/admin.cgi", "finding_ref": "F-037"},
+    {"step": 2, "action": "Inject shell command via 'cmd' parameter", "finding_ref": "F-037"},
+    {"step": 3, "action": "Achieve root shell (CGI runs as root)", "finding_ref": "F-012"}
+  ],
+  "preconditions": ["network access to management interface", "no authentication required"],
+  "impact": "full device compromise (root shell)",
+  "confidence": "high_confidence_static",
+  "exploit_feasibility": "high"
+}
 ```
 
 ---
 
-## ⚠️ Troubleshooting
+## Exploit Promotion Policy
 
-1.  **Permission Denied (Binwalk/FirmAE)**
-    *   원인: 펌웨어 추출 시 root 권한이 필요합니다.
-    *   해결: `sudo python3 scout.py ...` 명령어로 실행하세요.
+**Iron Rule: No Evidence, No Confirmed.**
 
-2.  **`capstone` Error (AttributeError: CS_ARCH_ARM64)**
-    *   원인: 최신 capstone 5.0+ 버전 호환성 문제.
-    *   해결: `sudo pip3 install "capstone<5.0"` 로 다운그레이드 하세요.
+```
+┌─────────────┬──────────────────────────────────────┬────────────────────┐
+│ Level       │ Requirements                          │ Appears In         │
+├─────────────┼──────────────────────────────────────┼────────────────────┤
+│ dismissed   │ Critic rebuttal strong OR             │ Appendix only      │
+│             │ tribunal confidence < 0.5             │                    │
+├─────────────┼──────────────────────────────────────┼────────────────────┤
+│ candidate   │ Tribunal confidence 0.5 - 0.8        │ Report (flagged)   │
+│             │ Evidence exists but chain incomplete  │                    │
+├─────────────┼──────────────────────────────────────┼────────────────────┤
+│ high_conf   │ Tribunal confidence ≥ 0.8            │ Report (prominent) │
+│ _static     │ Static evidence strong                │                    │
+│             │ No dynamic validation available       │                    │
+├─────────────┼──────────────────────────────────────┼────────────────────┤
+│ confirmed   │ Tribunal confidence ≥ 0.8 AND        │ Report (top)       │
+│             │ ≥1 dynamic validation artifact:      │                    │
+│             │  • crash trace                        │                    │
+│             │  • execution log with controlled I/O  │                    │
+│             │  • network response showing code path │                    │
+├─────────────┼──────────────────────────────────────┼────────────────────┤
+│ verified    │ Confirmed AND full PoC reproduces 3x │ Exploit report     │
+│ _chain      │ in sandboxed environment             │                    │
+│             │ Complete: access → primitive → impact │                    │
+└─────────────┴──────────────────────────────────────┴────────────────────┘
+```
 
-3.  **EMBA 오류 (Code 126/127)**
-    *   원인: Docker 이미지 버전이나 스크립트 경로 문제.
-    *   해조: 현재 `embeddedanalyzer/emba` 이미지를 사용 중이며, 실패하더라도 SCOUT는 건너뛰고 나머지 분석(FirmAE/Agent)을 수행합니다. 만약 EMBA가 필수라면 추후 Binwalk 추출 후 수동 분석이 권장됩니다.
+`verified_chain` is the end goal. Everything before it is a step on the path.
+
+---
+
+## Integration with Terminator
+
+SCOUT produces evidence. Terminator consumes it, judges it, validates it, and builds exploits.
+
+```
+SCOUT run_dir/                     Terminator report_dir/
+├── manifest.json                  ├── tribunal/
+├── stages/                        │   ├── analyst_candidates.jsonl
+│   ├── extraction/                │   ├── critic_reviews.jsonl
+│   ├── firmware_profile/          │   ├── judged_findings.jsonl
+│   ├── inventory/                 │   └── decision_trace.jsonl
+│   ├── surfaces/                  ├── validation/
+│   └── findings/                  │   └── emulation_results/
+│       ├── pattern_scan.json      ├── exploits/
+│       ├── chains.json            │   ├── chain_KC-003/
+│       └── known_disclosures.json │   │   ├── exploit.py
+│                                  │   │   ├── local_test_log.txt (3x)
+│                                  │   │   └── evidence_bundle.json
+│                                  └── report/
+│                                      ├── report.json
+│                                      └── audit_trail.json
+
+firmware_handoff.json (index only)
+├── aiedge_run_dir: "path/to/run"
+├── terminator_report_dir: "path/to/report"
+├── stage_status: {...}
+├── tribunal_summary: {total: 120, confirmed: 8, verified_chains: 2}
+└── orchestration_meta: {wallclock, token_cost, ...}
+```
+
+**Terminator agents for firmware pipeline:**
+
+| Agent | Role | Reused? |
+|:------|:-----|:--------|
+| `fw_profiler` | Interprets profiling artifacts, suggests analysis strategy | New |
+| `fw_surface` | Deep-dives attack surface using decompiled code | New |
+| `fw_analyst` | Tribunal Analyst — aggressive finding generation | New |
+| `critic` | Tribunal Critic — adversarial rebuttal | **Reused from Terminator** |
+| `triager_sim` | Tribunal Arbiter — final verdict | **Reused from Terminator** |
+| `fw_validator` | Dynamic validation via emulation/sandbox | New |
+| `chain` | Exploit chain assembly (leak→write→control) | **Reused from Terminator** |
+| `verifier` | 3x local reproduction of full exploit | **Reused from Terminator** |
+| `reporter` | Final report with evidence citations | **Reused from Terminator** |
+
+---
+
+## Quick Start
+
+### Basic Analysis (SCOUT only, no LLM)
+
+```bash
+cd /path/to/SCOUT
+
+# Full deterministic analysis
+PYTHONPATH=src python3 -m aiedge analyze firmware.bin \
+  --ack-authorization --no-llm \
+  --case-id my-analysis \
+  --stages tooling,extraction,structure,carving,firmware_profile,inventory
+
+# Rerun specific stages on existing run
+PYTHONPATH=src python3 -m aiedge stages aiedge-runs/<run_id> \
+  --ack-authorization --no-llm \
+  --stages inventory
+```
+
+### With Terminator Orchestration (Full Pipeline)
+
+```bash
+cd /path/to/Terminator
+
+# Full firmware pipeline: SCOUT analysis → tribunal → validation → exploit dev
+./terminator.sh firmware /path/to/firmware.bin
+
+# Monitor
+./terminator.sh status
+./terminator.sh logs
+```
+
+### Verifying Results
+
+```bash
+# SCOUT evidence integrity
+python3 scripts/verify_aiedge_analyst_report.py --run-dir aiedge-runs/<run_id>
+
+# Terminator tribunal artifacts
+python3 bridge/validate_tribunal_artifacts.py --report-dir reports/<report_id>
+
+# Confirmed policy enforcement
+python3 bridge/validate_confirmed_policy.py --report-dir reports/<report_id>
+```
+
+---
+
+## Run Directory Structure
+
+Every analysis produces a self-contained, reproducible `run_dir`:
+
+```
+aiedge-runs/<timestamp>_<sha256-prefix>/
+├── manifest.json                              # immutable: input identity + policy
+├── input/
+│   └── firmware.bin                           # immutable copy
+├── stages/
+│   ├── tooling/
+│   │   └── stage.json                         # tool versions + availability
+│   ├── extraction/
+│   │   ├── stage.json
+│   │   ├── binwalk.log
+│   │   └── _firmware.bin.extracted/           # extracted filesystem tree
+│   ├── structure/
+│   │   ├── stage.json
+│   │   └── structure.json                     # partition layout + magic bytes
+│   ├── carving/
+│   │   ├── stage.json
+│   │   └── carving.json                       # carved fragments + rootfs candidates
+│   ├── firmware_profile/
+│   │   ├── stage.json
+│   │   └── firmware_profile.json              # OS/arch/SDK/branch_plan
+│   ├── inventory/
+│   │   ├── stage.json
+│   │   ├── inventory.json                     # file catalog + coverage metrics
+│   │   └── string_hits.json                   # interesting strings across binaries
+│   ├── surfaces/
+│   │   ├── stage.json
+│   │   ├── surfaces.json                      # network services + interfaces
+│   │   ├── endpoints.json                     # input handlers
+│   │   └── source_sink_graph.json             # taint path candidates
+│   └── findings/
+│       ├── stage.json
+│       ├── pattern_scan.json                  # structured findings
+│       ├── binary_strings_hits.json           # string-level evidence
+│       ├── chains.json                        # kill-chain hypotheses
+│       ├── review_gates.json                  # scoring per finding
+│       ├── known_disclosures.json             # CVE matches
+│       └── poc_skeletons/                     # safe templates
+└── report/
+    ├── report.json                            # aggregated report
+    └── report.html                            # human-readable
+```
+
+**Every `stage.json` contains:**
+
+```json
+{
+  "stage": "inventory",
+  "status": "ok | partial | failed",
+  "started_at": "2026-02-16T03:26:00Z",
+  "finished_at": "2026-02-16T03:27:14Z",
+  "artifacts": [
+    {
+      "path": "stages/inventory/inventory.json",
+      "sha256": "a1b2c3..."
+    }
+  ],
+  "limitations": [...]
+}
+```
+
+---
+
+## Contracts & Documentation
+
+| Document | Purpose |
+|:---------|:--------|
+| `docs/blueprint.md` | Full pipeline architecture and design rationale |
+| `docs/status.md` | Current implementation status — single source of truth |
+| `docs/aiedge_firmware_artifacts_v1.md` | Schema contracts for profiling + inventory artifacts |
+| `docs/aiedge_adapter_contract.md` | Terminator↔SCOUT handoff protocol |
+| `docs/aiedge_report_contract.md` | Report structure and governance rules |
+
+---
+
+## Toolchain
+
+### Extraction & Unpacking
+
+| Tool | Purpose |
+|:-----|:--------|
+| binwalk | Signature scanning + recursive extraction |
+| unblob | Modern firmware extraction (handles edge cases binwalk misses) |
+| jefferson | JFFS2 extraction |
+| sasquatch | Non-standard squashfs extraction |
+| ubi_reader | UBI/UBIFS extraction |
+
+### Binary Analysis
+
+| Tool | Purpose |
+|:-----|:--------|
+| Ghidra (headless + MCP) | Decompilation, CFG, function signatures |
+| radare2 (+ MCP) | Disassembly, xrefs, string analysis |
+| readelf / objdump | ELF metadata, sections, symbols |
+| checksec | Protection matrix (NX/PIE/RELRO/Canary) |
+| strings | Raw string extraction |
+| FLIRT/Lumina | Library function signature matching |
+| rbasefind | Base address detection for RTOS blobs |
+
+### Emulation & Dynamic
+
+| Tool | Purpose |
+|:-----|:--------|
+| QEMU user-mode | Single binary execution (cross-arch) |
+| QEMU system-mode | Full system emulation |
+| FirmAE | Automated firmware emulation (~80% boot rate) |
+| Unicorn Engine | Partial function emulation |
+| GDB + pwndbg | Debugging in emulated environment |
+
+### Fuzzing (Stage 6+)
+
+| Tool | Purpose |
+|:-----|:--------|
+| AFL++ QEMU mode | Cross-architecture greybox fuzzing |
+| libFuzzer | In-process fuzzing (when source available) |
+| Boofuzz | Network protocol fuzzing |
+| AFLNet | Stateful network protocol fuzzing |
+
+### Exploit Development
+
+| Tool | Purpose |
+|:-----|:--------|
+| pwntools | Exploit framework (ROP, shellcraft, tubes) |
+| ROPgadget / ropper | Gadget discovery |
+| one_gadget | Quick win exploit primitives |
+| angr | Symbolic execution for path validation |
+
+---
+
+## Security & Ethics
+
+> **AUTHORIZED ENVIRONMENTS ONLY**
+
+SCOUT and the Terminator firmware pipeline are designed for:
+
+- **Authorized security assessments** — contracted firmware security audits with explicit vendor permission
+- **Vulnerability research** — responsible disclosure with coordinated timelines
+- **CTF / lab environments** — practice and training on designated targets
+
+**Strict guardrails:**
+- Dynamic validation runs in sandboxed containers with no external network access
+- Exploit development requires explicit `--ack-authorization` and lab environment confirmation
+- No weaponized payloads in default output — `poc_skeletons/` contains safe templates only
+- Full audit trail for every LLM judgment and exploit generation step
+- `confirmed` status requires dynamic evidence — no exceptions
+
+---
+
+## License
+
+MIT License

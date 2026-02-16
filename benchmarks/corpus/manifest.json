@@ -1,0 +1,36 @@
+{
+  "corpus_id": "scout-production-readiness-corpus",
+  "samples": [
+    {
+      "id": "attack-surface-benchmark-fixture",
+      "labels": [
+        "attack_surface",
+        "taxonomy"
+      ],
+      "license": "MIT",
+      "notes": "Seed fixture for benchmark contract validation.",
+      "path": "tests/fixtures/attack_surface_accuracy/benchmark_fixture.json",
+      "split": "dev"
+    },
+    {
+      "id": "attack-surface-metrics-baseline",
+      "labels": [
+        "attack_surface",
+        "metrics"
+      ],
+      "license": "MIT",
+      "path": "tests/fixtures/attack_surface_accuracy/metrics_baseline.json",
+      "split": "eval"
+    },
+    {
+      "id": "governed-reference-markdown",
+      "labels": [
+        "reference_context"
+      ],
+      "license": "Internal",
+      "path": "ref.md",
+      "split": "holdout"
+    }
+  ],
+  "version": "1.0.0"
+}
