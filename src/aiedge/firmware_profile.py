@@ -26,13 +26,146 @@ def _sha256_file(path: Path) -> str:
 def _run_relative(path: Path, run_dir: Path) -> str | None:
     try:
         rel = path.resolve().relative_to(run_dir.resolve())
+        return rel.as_posix()
+    except (OSError, RuntimeError, ValueError):
+        pass
+    try:
+        rel = path.relative_to(run_dir)
     except ValueError:
         return None
     return rel.as_posix()
 
 
-def _iter_dirs_sorted(root: Path) -> list[Path]:
-    if not root.is_dir():
+def _sanitize_os_error(exc: OSError) -> str:
+    kind = exc.__class__.__name__
+    detail = exc.strerror or "OS error"
+    return f"{kind}: {detail}"
+
+
+def _record_probe_error(
+    *,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+    run_dir: Path,
+    path: Path,
+    op: str,
+    exc: OSError,
+) -> None:
+    rel = _run_relative(path, run_dir) or "<outside_run_dir>"
+    err: dict[str, JsonValue] = {
+        "error": _sanitize_os_error(exc),
+        "op": op,
+        "path": rel,
+    }
+    if exc.errno is not None:
+        err["errno"] = exc.errno
+    errors.append(err)
+    limitations.append(
+        f"Probe failed at {rel} ({op}); best-effort classification applied."
+    )
+
+
+def _probe_is_dir(
+    path: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+    op: str,
+) -> bool:
+    try:
+        return path.is_dir()
+    except OSError as exc:
+        _record_probe_error(
+            errors=errors,
+            limitations=limitations,
+            run_dir=run_dir,
+            path=path,
+            op=op,
+            exc=exc,
+        )
+        return False
+
+
+def _probe_is_file(
+    path: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+    op: str,
+) -> bool:
+    try:
+        return path.is_file()
+    except OSError as exc:
+        _record_probe_error(
+            errors=errors,
+            limitations=limitations,
+            run_dir=run_dir,
+            path=path,
+            op=op,
+            exc=exc,
+        )
+        return False
+
+
+def _probe_exists(
+    path: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+    op: str,
+) -> bool:
+    try:
+        return path.exists()
+    except OSError as exc:
+        _record_probe_error(
+            errors=errors,
+            limitations=limitations,
+            run_dir=run_dir,
+            path=path,
+            op=op,
+            exc=exc,
+        )
+        return False
+
+
+def _sorted_unique_errors(
+    errors: list[dict[str, JsonValue]],
+) -> list[dict[str, JsonValue]]:
+    deduped: dict[tuple[str, str, int | None, str], dict[str, JsonValue]] = {}
+    for err in errors:
+        op = str(err.get("op", ""))
+        path = str(err.get("path", ""))
+        errno_raw = err.get("errno")
+        errno = int(errno_raw) if isinstance(errno_raw, int) else None
+        error = str(err.get("error", ""))
+        key = (op, path, errno, error)
+        if key not in deduped:
+            deduped[key] = err
+    return [
+        deduped[key]
+        for key in sorted(
+            deduped.keys(), key=lambda item: (item[0], item[1], item[2] or -1, item[3])
+        )
+    ]
+
+
+def _iter_dirs_sorted(
+    root: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+) -> list[Path]:
+    if not _probe_is_dir(
+        root,
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+        op="rootfs_probe.root_is_dir",
+    ):
         return []
     out: list[Path] = [root]
     queue: list[Path] = [root]
@@ -41,7 +174,15 @@ def _iter_dirs_sorted(root: Path) -> list[Path]:
         try:
             with os.scandir(current) as it:
                 entries = sorted(list(it), key=lambda e: e.name)
-        except OSError:
+        except OSError as exc:
+            _record_probe_error(
+                errors=errors,
+                limitations=limitations,
+                run_dir=run_dir,
+                path=current,
+                op="rootfs_probe.listdir",
+                exc=exc,
+            )
             continue
 
         child_dirs: list[Path] = []
@@ -49,7 +190,15 @@ def _iter_dirs_sorted(root: Path) -> list[Path]:
             try:
                 if not entry.is_dir(follow_symlinks=False):
                     continue
-            except OSError:
+            except OSError as exc:
+                _record_probe_error(
+                    errors=errors,
+                    limitations=limitations,
+                    run_dir=run_dir,
+                    path=current / entry.name,
+                    op="rootfs_probe.entry_is_dir",
+                    exc=exc,
+                )
                 continue
             child = Path(entry.path)
             child_dirs.append(child)
@@ -58,19 +207,65 @@ def _iter_dirs_sorted(root: Path) -> list[Path]:
     return out
 
 
-def _looks_like_rootfs(path: Path) -> bool:
-    if not path.is_dir():
+def _looks_like_rootfs(
+    path: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+) -> bool:
+    if not _probe_is_dir(
+        path,
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+        op="rootfs_probe.candidate_is_dir",
+    ):
         return False
     etc_dir = path / "etc"
-    if not etc_dir.is_dir():
+    if not _probe_is_dir(
+        etc_dir,
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+        op="rootfs_probe.etc_is_dir",
+    ):
         return False
-    return (path / "bin").is_dir() or (path / "usr").is_dir()
+    return _probe_is_dir(
+        path / "bin",
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+        op="rootfs_probe.bin_is_dir",
+    ) or _probe_is_dir(
+        path / "usr",
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+        op="rootfs_probe.usr_is_dir",
+    )
 
 
-def _find_rootfs_candidates(extracted_dir: Path, run_dir: Path) -> list[str]:
+def _find_rootfs_candidates(
+    extracted_dir: Path,
+    run_dir: Path,
+    *,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+) -> list[str]:
     candidates: list[str] = []
-    for directory in _iter_dirs_sorted(extracted_dir):
-        if not _looks_like_rootfs(directory):
+    for directory in _iter_dirs_sorted(
+        extracted_dir,
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+    ):
+        if not _looks_like_rootfs(
+            directory,
+            run_dir=run_dir,
+            errors=errors,
+            limitations=limitations,
+        ):
             continue
         rel = _run_relative(directory, run_dir)
         if rel is not None and rel not in candidates:
@@ -78,7 +273,13 @@ def _find_rootfs_candidates(extracted_dir: Path, run_dir: Path) -> list[str]:
     return sorted(candidates)
 
 
-def _extract_sdk_hints(extracted_dir: Path) -> list[str]:
+def _extract_sdk_hints(
+    extracted_dir: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+) -> list[str]:
     hints: list[str] = []
     checks: list[tuple[str, Path]] = [
         ("openwrt", extracted_dir / "etc" / "openwrt_release"),
@@ -86,7 +287,16 @@ def _extract_sdk_hints(extracted_dir: Path) -> list[str]:
         ("buildroot", extracted_dir / "etc" / "init.d" / "rcS"),
     ]
     for hint, marker in checks:
-        if marker.exists() and hint not in hints:
+        if (
+            _probe_exists(
+                marker,
+                run_dir=run_dir,
+                errors=errors,
+                limitations=limitations,
+                op="sdk_probe.exists",
+            )
+            and hint not in hints
+        ):
             hints.append(hint)
     return sorted(hints)
 
@@ -110,6 +320,9 @@ class FirmwareProfileStage:
         carving_roots = ctx.run_dir / "stages" / "carving" / "roots.json"
         carving_partitions = ctx.run_dir / "stages" / "carving" / "partitions.json"
 
+        limitations: list[str] = []
+        errors: list[dict[str, JsonValue]] = []
+
         evidence_refs: list[str] = []
         for candidate in [
             binwalk_log,
@@ -117,17 +330,38 @@ class FirmwareProfileStage:
             carving_roots,
             carving_partitions,
         ]:
-            if not candidate.exists():
+            if not _probe_exists(
+                candidate,
+                run_dir=ctx.run_dir,
+                errors=errors,
+                limitations=limitations,
+                op="evidence_probe.exists",
+            ):
                 continue
             rel = _run_relative(candidate, ctx.run_dir)
             if rel is not None and rel not in evidence_refs:
                 evidence_refs.append(rel)
 
-        rootfs_candidates = _find_rootfs_candidates(extraction_dir, ctx.run_dir)
-        sdk_hints = _extract_sdk_hints(extraction_dir)
+        rootfs_candidates = _find_rootfs_candidates(
+            extraction_dir,
+            ctx.run_dir,
+            errors=errors,
+            limitations=limitations,
+        )
+        sdk_hints = _extract_sdk_hints(
+            extraction_dir,
+            run_dir=ctx.run_dir,
+            errors=errors,
+            limitations=limitations,
+        )
 
-        limitations: list[str] = []
-        if not extraction_dir.exists():
+        if not _probe_exists(
+            extraction_dir,
+            run_dir=ctx.run_dir,
+            errors=errors,
+            limitations=limitations,
+            op="extraction_probe.exists",
+        ):
             limitations.append(
                 "Extraction directory is missing; rootfs classification may be incomplete."
             )
@@ -137,8 +371,25 @@ class FirmwareProfileStage:
             )
 
         firmware_id = "firmware:unknown"
-        if firmware_path.is_file():
-            firmware_id = f"firmware:{_sha256_file(firmware_path)}"
+        firmware_is_file = _probe_is_file(
+            firmware_path,
+            run_dir=ctx.run_dir,
+            errors=errors,
+            limitations=limitations,
+            op="firmware_probe.is_file",
+        )
+        if firmware_is_file:
+            try:
+                firmware_id = f"firmware:{_sha256_file(firmware_path)}"
+            except OSError as exc:
+                _record_probe_error(
+                    errors=errors,
+                    limitations=limitations,
+                    run_dir=ctx.run_dir,
+                    path=firmware_path,
+                    op="firmware_probe.read",
+                    exc=exc,
+                )
         else:
             limitations.append(
                 "input/firmware.bin is missing; profile confidence is reduced."
@@ -156,7 +407,7 @@ class FirmwareProfileStage:
             why = (
                 "Found extracted rootfs candidate(s) containing etc/ and bin/ or usr/."
             )
-        elif firmware_path.is_file():
+        elif firmware_is_file:
             os_type_guess = "rtos_monolithic"
             inventory_mode = "binary_only"
             emulation_feasibility = "medium"
@@ -176,6 +427,10 @@ class FirmwareProfileStage:
             "evidence_refs": cast(
                 list[JsonValue], cast(list[object], sorted(evidence_refs))
             ),
+            "errors": cast(
+                list[JsonValue],
+                cast(list[object], _sorted_unique_errors(errors)),
+            ),
             "firmware_id": firmware_id,
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
@@ -194,7 +449,7 @@ class FirmwareProfileStage:
         if out_rel is not None:
             details["profile_path"] = out_rel
 
-        status = "ok" if firmware_path.is_file() else "partial"
+        status = "ok" if firmware_is_file else "partial"
         return StageOutcome(
             status=status,
             details=details,

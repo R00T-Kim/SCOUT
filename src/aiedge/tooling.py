@@ -48,11 +48,39 @@ def _truncate_text(s: str, *, max_chars: int) -> str:
 
 
 _VERSION_RE = re.compile(r"\b(\d+\.)+\d+\b")
+_ABS_PATH_TOKEN_RE = re.compile(r"(?P<path>/[^\s\"'`]+)")
 
 
 def _extract_version(text: str) -> str:
     m = _VERSION_RE.search(text)
     return m.group(0) if m else ""
+
+
+def _sanitize_string_paths(text: str) -> str:
+    def repl(m: re.Match[str]) -> str:
+        token = m.group("path")
+        p = Path(token)
+        if not p.is_absolute():
+            return token
+        if token == "/":
+            return token
+        name = p.name
+        return name if name else "<abs-path>"
+
+    return _ABS_PATH_TOKEN_RE.sub(repl, text)
+
+
+def _sanitize_argv_for_output(argv: list[str], *, tool_key: str) -> list[str]:
+    if not argv:
+        return []
+
+    out = list(argv)
+    out[0] = tool_key
+    for idx, token in enumerate(out[1:], start=1):
+        p = Path(token)
+        if p.is_absolute():
+            out[idx] = p.name if p.name else "<abs-path>"
+    return out
 
 
 @dataclass(frozen=True)
@@ -193,6 +221,8 @@ class ToolingStage:
                 "available": False,
                 "version": "",
                 "argv": [],
+                "which_name": p.which_name or p.key,
+                "resolved": False,
                 "timeout_s": float(p.timeout_s),
                 "exit_code": None,
                 "stdout": "",
@@ -210,7 +240,12 @@ class ToolingStage:
                 )
                 argv0, ok = _resolve_argv(cand, which_name=which_for_cand)
                 last_argv = argv0
-                tool_obj["argv"] = cast(JsonValue, list(argv0))
+                tool_obj["argv"] = cast(
+                    JsonValue, _sanitize_argv_for_output(argv0, tool_key=p.key)
+                )
+                tool_obj["resolved"] = bool(
+                    which_for_cand and argv0 and Path(argv0[0]).is_absolute()
+                )
 
                 if not ok:
                     continue
@@ -223,6 +258,11 @@ class ToolingStage:
                 )
                 for k in ["exit_code", "stdout", "stderr"]:
                     tool_obj[k] = last_result.get(k)
+
+                stdout_s = cast(str, tool_obj.get("stdout") or "")
+                stderr_s = cast(str, tool_obj.get("stderr") or "")
+                tool_obj["stdout"] = _sanitize_string_paths(stdout_s)
+                tool_obj["stderr"] = _sanitize_string_paths(stderr_s)
 
                 exit_code = last_result.get("exit_code")
                 if exit_code is None:
@@ -257,12 +297,15 @@ class ToolingStage:
                     missing_required.append(p.key)
                 else:
                     missing_optional.append(p.key)
-                tool_obj["argv"] = cast(JsonValue, list(last_argv))
+                tool_obj["argv"] = cast(
+                    JsonValue, _sanitize_argv_for_output(last_argv, tool_key=p.key)
+                )
                 tool_obj["version"] = ""
                 if not found_any_candidate:
                     tool_obj["stdout"] = ""
                     tool_obj["stderr"] = ""
                     tool_obj["exit_code"] = None
+                tool_obj["resolved"] = False
             else:
                 v = tool_obj.get("version")
                 if not isinstance(v, str):

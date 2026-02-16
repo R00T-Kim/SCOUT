@@ -1703,6 +1703,30 @@ def _apply_stage_result_to_report(
         }
         return
 
+    if stage == "dynamic_validation":
+        dynamic_validation_evidence = normalize_evidence_list(
+            details.get("evidence"),
+            fallback=[
+                {
+                    "path": "stages/dynamic_validation",
+                    "note": "evidence missing",
+                }
+            ],
+        )
+        dynamic_scope_any = details.get("dynamic_scope")
+        dynamic_scope = (
+            dynamic_scope_any if isinstance(dynamic_scope_any, str) else "single_binary"
+        )
+        report["dynamic_validation"] = {
+            "status": stage_result.status,
+            "dynamic_scope": dynamic_scope,
+            "evidence": cast(
+                list[JsonValue], cast(list[object], dynamic_validation_evidence)
+            ),
+            "details": details,
+        }
+        return
+
     if stage == "emulation":
         emu_evidence = normalize_evidence_list(
             details.get("evidence"),

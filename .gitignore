@@ -51,6 +51,8 @@ logs/
 firmware/
 report/
 samples/
+exploits/
+private_exploits/
 
 # Private / not-yet-disclosed notes
 ubiquiti_overall_process.md

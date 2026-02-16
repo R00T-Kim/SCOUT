@@ -168,6 +168,8 @@ def test_analyze_run_writes_stages_tooling_tools_json(
             "available",
             "version",
             "argv",
+            "which_name",
+            "resolved",
             "timeout_s",
             "exit_code",
             "stdout",
@@ -177,6 +179,8 @@ def test_analyze_run_writes_stages_tooling_tools_json(
         assert isinstance(entry["available"], bool)
         assert isinstance(entry["version"], str)
         assert isinstance(entry["argv"], list)
+        assert isinstance(entry["which_name"], str)
+        assert isinstance(entry["resolved"], bool)
         assert isinstance(entry["timeout_s"], (int, float))
         assert entry["exit_code"] is None or isinstance(entry["exit_code"], int)
         assert isinstance(entry["stdout"], str)
@@ -245,3 +249,63 @@ def test_tooling_stage_optional_missing_keeps_status_ok(
     assert out.details.get("missing_required_tools") == []
     assert out.details.get("missing_optional_tools") == ["lzop", "ubidump"]
     assert out.details.get("missing_tools") == ["lzop", "ubidump"]
+
+
+def test_tooling_stage_tools_json_sanitizes_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+
+    seen_argv: list[list[str]] = []
+
+    tool_paths = {
+        "dtc": "/home/rootk1m/.local/bin/dtc",
+        "fdtget": None,
+        "fdtdump": None,
+        "binwalk": None,
+        "unsquashfs": None,
+        "lzop": None,
+        "docker": None,
+        "ubidump": None,
+    }
+
+    def fake_which(name: str) -> str | None:
+        return tool_paths.get(name)
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        _ = kwargs
+        seen_argv.append(list(args))
+        if args == ["/home/rootk1m/.local/bin/dtc", "-v"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="",
+                stderr="dtc from /home/rootk1m/.local/bin/dtc\n",
+            )
+        if args[:3] == [sys.executable, "-m", "ubidump"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=1,
+                stdout="",
+                stderr="No module named ubidump\n",
+            )
+        raise AssertionError(f"unexpected subprocess args: {args}")
+
+    monkeypatch.setattr("aiedge.tooling.shutil.which", fake_which)
+    monkeypatch.setattr("aiedge.tooling.subprocess.run", fake_run)
+
+    _ = ToolingStage(timeout_s=0.1, max_output_chars=256).run(ctx)
+
+    assert ["/home/rootk1m/.local/bin/dtc", "-v"] in seen_argv
+
+    tools_path = ctx.run_dir / "stages" / "tooling" / "tools.json"
+    file_text = tools_path.read_text(encoding="utf-8")
+    assert "/home/" not in file_text
+
+    tools = cast(dict[str, object], json.loads(file_text))
+    dtc_any = tools.get("dtc")
+    assert isinstance(dtc_any, dict)
+    dtc = cast(dict[str, object], dtc_any)
+    assert dtc["argv"] == ["dtc", "-v"]
+    assert dtc["resolved"] is True
+    assert dtc["which_name"] == "dtc"

@@ -49,6 +49,18 @@ def _make_emulation_stage(
     return cls()
 
 
+def _make_dynamic_validation_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    _ = info, source_input_path, remaining_s, no_llm
+    mod = importlib.import_module("aiedge.dynamic_validation")
+    cls = cast(type[Stage], getattr(mod, "DynamicValidationStage"))
+    return cls()
+
+
 def _make_exploit_gate_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -328,6 +340,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "llm_synthesis": _make_llm_synthesis_stage,
     "attribution": _make_attribution_stage,
     "emulation": _make_emulation_stage,
+    "dynamic_validation": _make_dynamic_validation_stage,
     "exploit_gate": _make_exploit_gate_stage,
     "exploit_chain": _make_exploit_chain_stage,
     "poc_validation": _make_poc_validation_stage,

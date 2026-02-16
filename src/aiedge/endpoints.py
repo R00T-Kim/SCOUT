@@ -48,19 +48,49 @@ _ENDPOINT_PATTERN_SPECS: tuple[tuple[str, re.Pattern[str], float], ...] = (
 
 
 def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
+    base = _safe_resolve(base_dir) or base_dir.absolute()
+    resolved = _safe_resolve(target) or target.absolute()
     if not resolved.is_relative_to(base):
         raise AIEdgePolicyViolation(
             f"Refusing to write outside run dir: target={resolved} base={base}"
         )
 
 
-def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
+def _safe_resolve(path: Path) -> Path | None:
     try:
-        return str(path.resolve().relative_to(run_dir.resolve()))
+        return path.resolve()
+    except OSError:
+        return None
+
+
+def _safe_non_absolute_rel(value: str, *, fallback: str = "unresolved_path") -> str:
+    norm = value.replace("\\", "/").strip()
+    if not norm:
+        return fallback
+    if norm.startswith("/"):
+        norm = norm.lstrip("/")
+    if not norm or norm.startswith("../") or "/home/" in norm:
+        return fallback
+    return norm
+
+
+def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
+    run_resolved = _safe_resolve(run_dir) or run_dir.absolute()
+    path_resolved = _safe_resolve(path)
+    if isinstance(path_resolved, Path):
+        try:
+            return _safe_non_absolute_rel(str(path_resolved.relative_to(run_resolved)))
+        except Exception:
+            pass
+    try:
+        return _safe_non_absolute_rel(str(path.relative_to(run_resolved)))
     except Exception:
-        return str(path)
+        try:
+            return _safe_non_absolute_rel(
+                os.path.relpath(str(path), start=str(run_resolved))
+            )
+        except Exception:
+            return _safe_non_absolute_rel(path.name)
 
 
 def _clamp01(v: float) -> float:
@@ -104,21 +134,36 @@ def _load_inventory_roots(
     roots_any = inv.get("roots")
     roots: list[Path] = []
     limits: list[str] = []
+    run_resolved = _safe_resolve(run_dir) or run_dir.absolute()
     if isinstance(roots_any, list):
         for item in cast(list[object], roots_any):
             if not isinstance(item, str) or not item or item.startswith("/"):
                 continue
-            p = (run_dir / item).resolve()
-            if not p.is_relative_to(run_dir.resolve()):
+            p = _safe_resolve(run_dir / item)
+            if p is None:
+                limits.append(
+                    f"Inventory root normalization failed; skipped root entry: {item}"
+                )
                 continue
-            if p.is_dir():
+            if not p.is_relative_to(run_resolved):
+                continue
+            try:
+                is_dir = p.is_dir()
+            except OSError:
+                limits.append(f"Inventory root stat failed; skipped root entry: {item}")
+                continue
+            if is_dir:
                 roots.append(p)
 
     extracted_dir: Path | None = None
     ext_any = inv.get("extracted_dir")
     if isinstance(ext_any, str) and ext_any and not ext_any.startswith("/"):
-        extracted_dir_candidate = (run_dir / ext_any).resolve()
-        if extracted_dir_candidate.is_relative_to(run_dir.resolve()):
+        extracted_dir_candidate = _safe_resolve(run_dir / ext_any)
+        if extracted_dir_candidate is None:
+            limits.append(
+                "Inventory extracted_dir normalization failed; extracted_dir fallback unavailable"
+            )
+        elif extracted_dir_candidate.is_relative_to(run_resolved):
             extracted_dir = extracted_dir_candidate
 
     if not roots:
@@ -133,7 +178,14 @@ def _load_inventory_roots(
     unique_roots: list[Path] = []
     seen: set[str] = set()
     for root in sorted(roots, key=lambda p: str(p)):
-        key = str(root.resolve())
+        resolved_root = _safe_resolve(root)
+        if isinstance(resolved_root, Path):
+            key = str(resolved_root)
+        else:
+            key = str(root)
+            limits.append(
+                f"Inventory root dedupe used unresolved path key for: {_rel_to_run_dir(run_dir, root)}"
+            )
         if key in seen:
             continue
         seen.add(key)
@@ -188,7 +240,8 @@ def _iter_candidate_files(
             except OSError:
                 continue
 
-            key = str(p.resolve())
+            resolved_path = _safe_resolve(p)
+            key = str(resolved_path) if isinstance(resolved_path, Path) else str(p)
             if key in seen:
                 continue
             seen.add(key)

@@ -5,9 +5,10 @@
 ## 현재 구현됨
 
 - AIEdge CLI: `python3 -m aiedge analyze`, `python3 -m aiedge stages`
-- Stage evidence store(run_dir) + `stages/<name>/stage.json` 기반의 artifact hashing
+- Stage evidence store(run_dir): StageFactory stage는 `stages/<name>/stage.json` 기반 artifact hashing을 사용하고, findings는 `run_findings()`가 `stages/findings/*.json`을 직접 생성
 - `firmware_profile` stage:
-  - 디렉토리 및 stage.json 생성이 확인됨 (run 예: `aiedge-runs/2026-02-16_0536_sha256-e3d3fe0697bc/stages/firmware_profile/`)
+  - `stages/firmware_profile/stage.json`과 `stages/firmware_profile/firmware_profile.json` 생성이 확인됨
+  - `firmware_profile.json` 누락을 전제로 한 과거 run_dir 예시는 stale 상태이므로 문서에서 제거하거나 최신 run으로 갱신해야 함
 - Inventory stage는 "죽지 않고" `inventory.json`/`string_hits.json`을 남김
 
 ## Known Issues (중요)

@@ -46,8 +46,8 @@ SCOUT doesn't guess. Each stage produces **hash-anchored artifacts** in a `run_d
 │                                                                          │
 │  Firmware ──► Unpack ──► Profile ──► Inventory ──► Surface ──► Findings  │
 │                                                                          │
-│  Every stage:  stage.json (sha256 manifest)                              │
-│                *.json     (structured artifacts)                          │
+│  StageFactory stages: stage.json (sha256 manifest)                       │
+│  Findings step: run_findings() writes structured artifacts               │
 │                All paths run-relative, all hashes recorded               │
 │                                                                          │
 ├──────────────────────────────────────────────────────────────────────────┤
@@ -498,7 +498,6 @@ aiedge-runs/<timestamp>_<sha256-prefix>/
 │   │   ├── endpoints.json                     # input handlers
 │   │   └── source_sink_graph.json             # taint path candidates
 │   └── findings/
-│       ├── stage.json
 │       ├── pattern_scan.json                  # structured findings
 │       ├── binary_strings_hits.json           # string-level evidence
 │       ├── chains.json                        # kill-chain hypotheses
@@ -510,7 +509,7 @@ aiedge-runs/<timestamp>_<sha256-prefix>/
     └── report.html                            # human-readable
 ```
 
-**Every `stage.json` contains:**
+**Every StageFactory `stage.json` contains (findings is emitted by `run_findings()`):**
 
 ```json
 {

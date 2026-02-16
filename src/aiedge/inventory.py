@@ -23,14 +23,20 @@ def _assert_under_dir(base_dir: Path, target: Path) -> None:
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
-    run_resolved = run_dir.resolve()
+    try:
+        run_resolved = run_dir.resolve()
+    except OSError:
+        run_resolved = run_dir
     try:
         return str(path.resolve().relative_to(run_resolved))
     except Exception:
         try:
             return str(path.relative_to(run_resolved))
         except Exception:
-            return os.path.relpath(str(path), start=str(run_resolved))
+            try:
+                return os.path.relpath(str(path), start=str(run_resolved))
+            except Exception:
+                return str(path)
 
 
 def _append_error(
@@ -47,6 +53,7 @@ def _append_error(
         detail = os.strerror(exc.errno)
     else:
         detail = "os_error"
+    detail = _sanitize_error_message(run_dir, detail)
     errors.append(
         {
             "path": _rel_to_run_dir(run_dir, path),
@@ -61,8 +68,39 @@ _ABS_PATH_RE = re.compile(r"/(?:[^\s'\"]+/)+[^\s'\"]+")
 
 
 def _sanitize_error_message(run_dir: Path, message: str) -> str:
-    out = message.replace(str(run_dir.resolve()), "<run_dir>")
+    try:
+        run_dir_s = str(run_dir.resolve())
+    except OSError:
+        run_dir_s = str(run_dir)
+    out = message.replace(run_dir_s, "<run_dir>")
     return _ABS_PATH_RE.sub("<path>", out)
+
+
+def _resolve_or_record(
+    *,
+    run_dir: Path,
+    path: Path,
+    errors: list[dict[str, JsonValue]],
+    op: str,
+) -> Path | None:
+    try:
+        return path.resolve()
+    except OSError as exc:
+        _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)
+        return None
+
+
+def _dedupe_key(
+    *,
+    run_dir: Path,
+    path: Path,
+    errors: list[dict[str, JsonValue]],
+    op: str,
+) -> str:
+    resolved = _resolve_or_record(run_dir=run_dir, path=path, errors=errors, op=op)
+    if isinstance(resolved, Path):
+        return str(resolved)
+    return str(path)
 
 
 def _sorted_errors(
@@ -150,16 +188,49 @@ def _iter_files(
     return len(files), files, skipped_dirs, skipped_files
 
 
-def _resolve_run_relative_dir(run_dir: Path, rel_path: str) -> Path | None:
-    p = (run_dir / rel_path).resolve()
-    if not p.is_relative_to(run_dir.resolve()):
+def _resolve_run_relative_dir(
+    run_dir: Path,
+    rel_path: str,
+    *,
+    errors: list[dict[str, JsonValue]],
+    op: str,
+) -> Path | None:
+    run_resolved = _resolve_or_record(
+        run_dir=run_dir,
+        path=run_dir,
+        errors=errors,
+        op=f"{op}.run_dir_resolve",
+    )
+    if not isinstance(run_resolved, Path):
         return None
-    if not p.is_dir():
+
+    candidate = run_dir / rel_path
+    p = _resolve_or_record(
+        run_dir=run_dir,
+        path=candidate,
+        errors=errors,
+        op=f"{op}.path_resolve",
+    )
+    if not isinstance(p, Path):
+        return None
+
+    if not p.is_relative_to(run_resolved):
+        return None
+    try:
+        is_dir = p.is_dir()
+    except OSError as exc:
+        _append_error(errors, run_dir=run_dir, path=p, op=f"{op}.is_dir", exc=exc)
+        return None
+    if not is_dir:
         return None
     return p
 
 
-def _load_carving_roots(run_dir: Path) -> tuple[list[Path], list[str]]:
+def _load_carving_roots(
+    run_dir: Path,
+    *,
+    errors: list[dict[str, JsonValue]],
+) -> tuple[list[Path], list[str]]:
     roots_path = run_dir / "stages" / "carving" / "roots.json"
     if not roots_path.is_file():
         return [], []
@@ -189,10 +260,20 @@ def _load_carving_roots(run_dir: Path) -> tuple[list[Path], list[str]]:
             continue
         if item.startswith("/"):
             continue
-        p = _resolve_run_relative_dir(run_dir, item)
+        p = _resolve_run_relative_dir(
+            run_dir,
+            item,
+            errors=errors,
+            op="carving_root_normalize",
+        )
         if not isinstance(p, Path):
             continue
-        key = str(p.resolve())
+        key = _dedupe_key(
+            run_dir=run_dir,
+            path=p,
+            errors=errors,
+            op="carving_root_dedupe_key",
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -201,7 +282,11 @@ def _load_carving_roots(run_dir: Path) -> tuple[list[Path], list[str]]:
     return out, []
 
 
-def _load_ota_roots(run_dir: Path) -> tuple[list[Path], list[str]]:
+def _load_ota_roots(
+    run_dir: Path,
+    *,
+    errors: list[dict[str, JsonValue]],
+) -> tuple[list[Path], list[str]]:
     roots_path = run_dir / "stages" / "ota" / "roots.json"
     if not roots_path.is_file():
         return [], []
@@ -229,10 +314,20 @@ def _load_ota_roots(run_dir: Path) -> tuple[list[Path], list[str]]:
             continue
         if item.startswith("/"):
             continue
-        p = _resolve_run_relative_dir(run_dir, item)
+        p = _resolve_run_relative_dir(
+            run_dir,
+            item,
+            errors=errors,
+            op="ota_root_normalize",
+        )
         if not isinstance(p, Path):
             continue
-        key = str(p.resolve())
+        key = _dedupe_key(
+            run_dir=run_dir,
+            path=p,
+            errors=errors,
+            op="ota_root_dedupe_key",
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -425,15 +520,31 @@ def _find_rootfs_candidates(
     candidates: list[Path] = []
     skipped_dirs = 0
 
+    def is_dir_safe(path: Path, *, op: str) -> bool:
+        try:
+            return path.is_dir()
+        except OSError as exc:
+            _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)
+            return False
+
+    def is_file_safe(path: Path, *, op: str) -> bool:
+        try:
+            return path.is_file()
+        except OSError as exc:
+            _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)
+            return False
+
     def looks_like_rootfs(d: Path) -> bool:
-        if not d.is_dir():
+        if not is_dir_safe(d, op="rootfs_probe.is_dir"):
             return False
         etc_dir = d / "etc"
-        if etc_dir.is_dir() and (
-            (d / "bin").is_dir() or (d / "usr").is_dir() or (d / "sbin").is_dir()
+        if is_dir_safe(etc_dir, op="rootfs_probe.etc_is_dir") and (
+            is_dir_safe(d / "bin", op="rootfs_probe.bin_is_dir")
+            or is_dir_safe(d / "usr", op="rootfs_probe.usr_is_dir")
+            or is_dir_safe(d / "sbin", op="rootfs_probe.sbin_is_dir")
         ):
             return True
-        if (etc_dir / "passwd").is_file():
+        if is_file_safe(etc_dir / "passwd", op="rootfs_probe.passwd_is_file"):
             return True
         if d.name.endswith("-root") or d.name.endswith("rootfs"):
             return True
@@ -491,7 +602,12 @@ def _find_rootfs_candidates(
     uniq: list[Path] = []
     seen: set[str] = set()
     for p in sorted(candidates, key=lambda x: (len(x.parts), str(x))):
-        key = str(p.resolve())
+        key = _dedupe_key(
+            run_dir=run_dir,
+            path=p,
+            errors=errors,
+            op="rootfs_candidate_dedupe_key",
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -706,8 +822,10 @@ class InventoryStage:
             )
 
         try:
-            ota_roots, ota_limits = _load_ota_roots(ctx.run_dir)
-            carving_roots, carving_limits = _load_carving_roots(ctx.run_dir)
+            ota_roots, ota_limits = _load_ota_roots(ctx.run_dir, errors=errors)
+            carving_roots, carving_limits = _load_carving_roots(
+                ctx.run_dir, errors=errors
+            )
             limitations.extend(ota_limits)
             limitations.extend(carving_limits)
 
@@ -737,7 +855,12 @@ class InventoryStage:
             roots: list[Path] = []
             seen_roots: set[str] = set()
             for p in list(carving_roots) + list(extracted_roots):
-                key = str(p.resolve())
+                key = _dedupe_key(
+                    run_dir=ctx.run_dir,
+                    path=p,
+                    errors=errors,
+                    op="root_dedupe_key",
+                )
                 if key in seen_roots:
                     continue
                 seen_roots.add(key)

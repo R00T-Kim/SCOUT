@@ -42,6 +42,7 @@ This document describes the machine-consumable report fields that gate whether r
 
 - `scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>` is fail-closed for `CONTRACT_ANALYST` in release governance.
 - Required stage artifacts include:
+  - findings artifacts are emitted by `run_findings()` (integrated step), so `stages/findings/stage.json` is not expected
   - `stages/findings/pattern_scan.json` with `schema_version="pattern-scan-v1"`
   - `stages/findings/binary_strings_hits.json` with `schema_version="binary-strings-hits-v1"`
 - For all stage artifacts checked by the verifier:

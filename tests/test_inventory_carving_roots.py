@@ -350,3 +350,83 @@ def test_inventory_exception_recovery_still_writes_string_hits(
         assert isinstance(error_obj, str)
         assert "/home/" not in error_obj
         assert not error_obj.startswith("/")
+
+
+def test_inventory_resolve_permission_error_is_recorded_without_run_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+
+    deny_root = ctx.run_dir / "stages" / "carving" / "roots" / "denyresolve"
+    good_root = ctx.run_dir / "stages" / "carving" / "roots" / "goodroot"
+    (deny_root / "etc").mkdir(parents=True)
+    (good_root / "etc").mkdir(parents=True)
+    _ = (deny_root / "etc" / "passwd").write_text("root:x:0:0\n", encoding="utf-8")
+    _ = (good_root / "etc" / "passwd").write_text("root:x:0:0\n", encoding="utf-8")
+
+    roots_json = ctx.run_dir / "stages" / "carving" / "roots.json"
+    roots_json.parent.mkdir(parents=True, exist_ok=True)
+    _ = roots_json.write_text(
+        json.dumps(
+            {
+                "roots": [
+                    "stages/carving/roots/denyresolve",
+                    "stages/carving/roots/goodroot",
+                ]
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    real_resolve = Path.resolve
+
+    def _resolve_with_targeted_permission_error(
+        self: Path, strict: bool = False
+    ) -> Path:
+        if "denyresolve" in self.parts:
+            raise PermissionError(EACCES, "Permission denied", str(self))
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _resolve_with_targeted_permission_error)
+
+    outcome = InventoryStage().run(ctx)
+    assert outcome.status in {"partial", "ok"}
+
+    inv_path = ctx.run_dir / "stages" / "inventory" / "inventory.json"
+    string_hits_path = ctx.run_dir / "stages" / "inventory" / "string_hits.json"
+    assert inv_path.is_file()
+    assert string_hits_path.is_file()
+
+    inv = _read_inventory(inv_path)
+    assert inv.get("reason") != "inventory_recovered_from_exception"
+
+    errors_obj = inv.get("errors")
+    assert isinstance(errors_obj, list)
+    errors = cast(list[object], errors_obj)
+    assert errors
+
+    non_run_permission_ops: list[str] = []
+    for item in errors:
+        if not isinstance(item, dict):
+            continue
+        item_d = cast(dict[str, object], item)
+        op_obj = item_d.get("op")
+        errno_obj = item_d.get("errno")
+        if isinstance(op_obj, str) and errno_obj == EACCES and op_obj != "run":
+            non_run_permission_ops.append(op_obj)
+
+    assert non_run_permission_ops
+    assert any(
+        "normalize" in op or "dedupe_key" in op or op.startswith("rootfs_probe.")
+        for op in non_run_permission_ops
+    )
+
+    coverage_obj = inv.get("coverage_metrics")
+    assert isinstance(coverage_obj, dict)
+    coverage = cast(dict[str, object], coverage_obj)
+    files_seen_obj = coverage.get("files_seen")
+    assert isinstance(files_seen_obj, int)
+    assert files_seen_obj > 0

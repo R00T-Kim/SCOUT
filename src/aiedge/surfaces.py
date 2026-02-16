@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -12,19 +13,49 @@ from .stage import StageContext, StageOutcome, StageStatus
 
 
 def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
+    base = _safe_resolve(base_dir) or base_dir.absolute()
+    resolved = _safe_resolve(target) or target.absolute()
     if not resolved.is_relative_to(base):
         raise AIEdgePolicyViolation(
             f"Refusing to write outside run dir: target={resolved} base={base}"
         )
 
 
-def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
+def _safe_resolve(path: Path) -> Path | None:
     try:
-        return str(path.resolve().relative_to(run_dir.resolve()))
+        return path.resolve()
+    except OSError:
+        return None
+
+
+def _safe_non_absolute_rel(value: str, *, fallback: str = "unresolved_path") -> str:
+    norm = value.replace("\\", "/").strip()
+    if not norm:
+        return fallback
+    if norm.startswith("/"):
+        norm = norm.lstrip("/")
+    if not norm or norm.startswith("../") or "/home/" in norm:
+        return fallback
+    return norm
+
+
+def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
+    run_resolved = _safe_resolve(run_dir) or run_dir.absolute()
+    path_resolved = _safe_resolve(path)
+    if isinstance(path_resolved, Path):
+        try:
+            return _safe_non_absolute_rel(str(path_resolved.relative_to(run_resolved)))
+        except Exception:
+            pass
+    try:
+        return _safe_non_absolute_rel(str(path.relative_to(run_resolved)))
     except Exception:
-        return str(path)
+        try:
+            return _safe_non_absolute_rel(
+                os.path.relpath(str(path), start=str(run_resolved))
+            )
+        except Exception:
+            return _safe_non_absolute_rel(path.name)
 
 
 def _clamp01(v: float) -> float:

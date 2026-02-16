@@ -17,7 +17,8 @@
 
 - 입력: firmware 파일
 - 출력: `aiedge-runs/<run_id>/` (evidence store)
-- 각 stage는 `stages/<stage_name>/stage.json`을 남기고, 산출물은 `artifacts[]`에 sha256로 기록
+- StageFactory 기반 stage는 `stages/<stage_name>/stage.json`을 남기고, 산출물은 `artifacts[]`에 sha256로 기록
+- findings는 StageFactory stage가 아니라 `run_findings()` 통합 단계로 실행되며 `stages/findings/*.json` 산출물을 직접 생성
 
 ### Orchestrator (예: Terminator)
 
