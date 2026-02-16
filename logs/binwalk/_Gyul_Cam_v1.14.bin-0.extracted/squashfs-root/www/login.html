@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Login - Gyul Cam v1.14</title>
+    <style>
+   
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            background: linear-gradient(135deg, #FF9900 0%, #FFCC66 100%); 
+            color: #333;
+        }
+
+        .login-box { 
+            background: #FFFFFF; 
+            padding: 40px 50px; 
+            border-radius: 12px; 
+            max-width: 400px; 
+            width: 100%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); 
+            border: 1px solid #FF9900; 
+            animation: fadeIn 0.8s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+
+        h2 { 
+            text-align: center; 
+            color: #FF6600;
+            margin-bottom: 30px; 
+            font-weight: 600;
+        }
+        
+    
+        input { 
+            width: 100%; 
+            padding: 12px 15px; 
+            margin: 15px 0; 
+            border: 2px solid #EEE; 
+            border-radius: 6px; 
+            box-sizing: border-box; 
+            transition: border-color 0.3s;
+            font-size: 16px;
+        }
+        input:focus {
+            border-color: #FF9900; 
+            box-shadow: 0 0 5px rgba(255, 153, 0, 0.5);
+            outline: none;
+        }
+
+
+        button { 
+            width: 100%; 
+            padding: 14px; 
+            margin-top: 20px;
+            background: #FF6600; 
+            color: white; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 18px; 
+            font-weight: bold;
+            transition: background 0.3s ease, transform 0.1s;
+        }
+        button:hover { 
+            background: #FF8533;
+            transform: translateY(-2px);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        p { text-align: center; margin-top: 25px; font-size: 14px; }
+        a { color: #FF6600; text-decoration: none; transition: color 0.3s; }
+        a:hover { color: #FF9900; text-decoration: underline; }
+
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>🍊 GyulCam Admin Access</h2>
+        <form action="/cgi-bin/login.cgi" method="post">
+            <input type="text" name="username" placeholder="Username" value="admin" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">LOGIN TO CONSOLE</button>
+        </form>
+        <p><a href="index.html">← Back to GyulCam Homepage</a></p>
+    </div>
+</body>
+</html>

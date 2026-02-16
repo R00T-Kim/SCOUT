@@ -1,0 +1,10 @@
+
+Scan Time:     2026-01-05 20:42:32
+Target File:   /home/rootk1m/SCOUT/firmware/Gyul_Cam_v1.14.bin
+MD5 Checksum:  88badd1487eb30ffdfbc092ddfcef79c
+Signatures:    411
+
+DECIMAL       HEXADECIMAL     DESCRIPTION
+--------------------------------------------------------------------------------
+0             0x0             Squashfs filesystem, little endian, version 4.0, compression:xz, size: 1821858 bytes, 66 inodes, blocksize: 131072 bytes, created: 2025-11-19 23:27:04
+

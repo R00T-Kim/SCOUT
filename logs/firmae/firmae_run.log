@@ -1,0 +1,16 @@
+[*] /home/rootk1m/SCOUT/firmware/Gyul_Cam_v1.14.bin emulation start!!!
+[*] Extract done!!!
+[+] get architecture done!!!
+[+] Start emulation!!!
+
+[IID] 576
+[[33mMODE[0m] run
+mke2fs 1.46.5 (30-Dec-2021)
+e2fsck 1.46.5 (30-Dec-2021)
+[*] infer network start!!!
+ln: failed to create symbolic link '/home/rootk1m/FirmAE/scratch/576/run_debug.sh': File exists
+ln: failed to create symbolic link '/home/rootk1m/FirmAE/scratch/576/run_analyze.sh': File exists
+ln: failed to create symbolic link '/home/rootk1m/FirmAE/scratch/576/run_boot.sh': File exists
+Creating TAP device tap576_0...
+Set 'tap576_0' persistent and owned by uid 0
+Bringing up TAP device...
