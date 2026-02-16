@@ -34,3 +34,6 @@ credentials*.json
 # Logs and caches
 *.log
 *.cache
+
+# Private / not-yet-disclosed notes
+ubiquiti_overall_process.md
