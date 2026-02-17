@@ -451,6 +451,17 @@ cd /path/to/Terminator
 ### Verifying Results
 
 ```bash
+# Digest-first analyst entrypoint (must exist and verify)
+test -f aiedge-runs/<run_id>/report/analyst_digest.json
+test -f aiedge-runs/<run_id>/report/analyst_digest.md
+python3 scripts/verify_analyst_digest.py --run-dir aiedge-runs/<run_id>
+
+# Verified-chain hard gates (all must return [OK] for VERIFIED)
+python3 scripts/verify_run_dir_evidence_only.py --run-dir aiedge-runs/<run_id>
+python3 scripts/verify_network_isolation.py --run-dir aiedge-runs/<run_id>
+python3 scripts/verify_exploit_meaningfulness.py --run-dir aiedge-runs/<run_id>
+python3 scripts/verify_verified_chain.py --run-dir aiedge-runs/<run_id>
+
 # SCOUT evidence integrity
 python3 scripts/verify_aiedge_analyst_report.py --run-dir aiedge-runs/<run_id>
 
@@ -538,6 +549,9 @@ aiedge-runs/<timestamp>_<sha256-prefix>/
 | `docs/aiedge_firmware_artifacts_v1.md` | Schema contracts for profiling + inventory artifacts |
 | `docs/aiedge_adapter_contract.md` | Terminator↔SCOUT handoff protocol |
 | `docs/aiedge_report_contract.md` | Report structure and governance rules |
+| `docs/analyst_digest_contract.md` | Canonical `report/analyst_digest.json` schema and verdict semantics |
+| `docs/runbook.md` | Operator flow for digest-first review + verified-chain proof gates |
+| `docs/codex_first_agent_policy.md` | Codex-first execution policy and fallback/limitations |
 
 ---
 
