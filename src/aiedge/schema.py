@@ -19,6 +19,42 @@ JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"
 REPORT_SCHEMA_VERSION = "1.1"
 
 ANALYST_REPORT_SCHEMA_VERSION = "0.1"
+ANALYST_DIGEST_SCHEMA_VERSION = "analyst_digest-v1"
+
+ANALYST_DIGEST_VERDICTS: tuple[str, ...] = (
+    "VERIFIED",
+    "ATTEMPTED_INCONCLUSIVE",
+    "NOT_ATTEMPTED",
+    "NOT_APPLICABLE",
+)
+_ANALYST_DIGEST_VERDICTS_SET: frozenset[str] = frozenset(ANALYST_DIGEST_VERDICTS)
+ANALYST_DIGEST_AGGREGATION_RULE = "worst_state_precedence_v1"
+ANALYST_DIGEST_STATE_PRECEDENCE: tuple[str, ...] = (
+    "ATTEMPTED_INCONCLUSIVE",
+    "NOT_ATTEMPTED",
+    "VERIFIED",
+    "NOT_APPLICABLE",
+)
+_ANALYST_DIGEST_STATE_RANK: dict[str, int] = {
+    state: idx for idx, state in enumerate(ANALYST_DIGEST_STATE_PRECEDENCE)
+}
+ANALYST_DIGEST_REASON_CODES: tuple[str, ...] = (
+    "ATTEMPTED_EVIDENCE_TAMPERED",
+    "ATTEMPTED_VERIFIER_FAILED",
+    "ATTEMPTED_REPRO_INSUFFICIENT",
+    "ATTEMPTED_EVIDENCE_INCOMPLETE",
+    "NOT_ATTEMPTED_REQUIRED_VERIFIER_MISSING",
+    "NOT_ATTEMPTED_DYNAMIC_VALIDATION_MISSING",
+    "NOT_ATTEMPTED_RUN_INCOMPLETE",
+    "NOT_APPLICABLE_NO_RELEVANT_FINDINGS",
+    "NOT_APPLICABLE_PLATFORM_UNSUPPORTED",
+    "VERIFIED_ALL_GATES_PASSED",
+    "VERIFIED_REPRO_3_OF_3",
+)
+_ANALYST_DIGEST_REASON_SET: frozenset[str] = frozenset(ANALYST_DIGEST_REASON_CODES)
+_ANALYST_DIGEST_REASON_RANK: dict[str, int] = {
+    code: idx for idx, code in enumerate(ANALYST_DIGEST_REASON_CODES)
+}
 
 
 _SEVERITIES = {"info", "low", "medium", "high", "critical"}
@@ -73,6 +109,35 @@ def _is_safe_ascii_text(value: object) -> bool:
     if not value.isascii():
         return False
     return all(32 <= ord(ch) <= 126 for ch in value)
+
+
+def _is_sha256_hex(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _validate_analyst_digest_reason_codes(
+    *, value: object, path: str, errors: list[str]
+) -> list[str]:
+    if not isinstance(value, list) or not value:
+        errors.append(f"{path} must be non-empty list")
+        return []
+    codes: list[str] = []
+    for i, code_any in enumerate(cast(list[object], value)):
+        if not isinstance(code_any, str) or code_any not in _ANALYST_DIGEST_REASON_SET:
+            errors.append(
+                f"{path}[{i}] must be one of {sorted(_ANALYST_DIGEST_REASON_SET)}"
+            )
+            continue
+        codes.append(code_any)
+    if len(codes) != len(set(codes)):
+        errors.append(f"{path} must not contain duplicates")
+    if codes:
+        ranked = [_ANALYST_DIGEST_REASON_RANK[c] for c in codes]
+        if ranked != sorted(ranked):
+            errors.append(f"{path} must be sorted by reason precedence")
+    return codes
 
 
 def validate_report(report: object) -> list[str]:
@@ -832,3 +897,232 @@ def empty_analyst_report() -> dict[str, JsonValue]:
         "artifacts": {},
         "limitations": [],
     }
+
+
+def validate_analyst_digest(digest: object) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(digest, dict):
+        return ["analyst_digest must be an object"]
+
+    d = cast(dict[str, object], digest)
+    allowed_top_level = {
+        "schema_version",
+        "run",
+        "top_risk_summary",
+        "finding_verdicts",
+        "exploitability_verdict",
+        "evidence_index",
+        "next_actions",
+    }
+    for key in d.keys():
+        if key not in allowed_top_level:
+            errors.append(f"unsupported top-level key: {key}")
+
+    def req_key(key: str, typ: type) -> object | None:
+        if key not in d:
+            errors.append(f"missing top-level key: {key}")
+            return None
+        value = d.get(key)
+        if not isinstance(value, typ):
+            errors.append(f"top-level '{key}' must be {typ.__name__}")
+            return None
+        return value
+
+    schema_version = req_key("schema_version", str)
+    if schema_version != ANALYST_DIGEST_SCHEMA_VERSION:
+        errors.append(f"schema_version must equal {ANALYST_DIGEST_SCHEMA_VERSION!r}")
+
+    run_any = req_key("run", dict)
+    if isinstance(run_any, dict):
+        run = cast(dict[str, object], run_any)
+        run_id = run.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            errors.append("run.run_id must be non-empty string")
+        firmware_sha = run.get("firmware_sha256")
+        if not _is_sha256_hex(firmware_sha):
+            errors.append("run.firmware_sha256 must be lowercase hex sha256")
+        generated_at = run.get("generated_at")
+        if not isinstance(generated_at, str) or not generated_at:
+            errors.append("run.generated_at must be non-empty string")
+
+    top_risk_any = req_key("top_risk_summary", dict)
+    if isinstance(top_risk_any, dict):
+        top_risk = cast(dict[str, object], top_risk_any)
+        total_findings = top_risk.get("total_findings")
+        if not isinstance(total_findings, int) or total_findings < 0:
+            errors.append("top_risk_summary.total_findings must be non-negative int")
+        severity_counts_any = top_risk.get("severity_counts")
+        if not isinstance(severity_counts_any, dict):
+            errors.append("top_risk_summary.severity_counts must be object")
+        else:
+            severity_counts = cast(dict[str, object], severity_counts_any)
+            required_severities = {"critical", "high", "medium", "low", "info"}
+            if set(severity_counts.keys()) != required_severities:
+                errors.append(
+                    "top_risk_summary.severity_counts must contain exactly critical/high/medium/low/info"
+                )
+            for sev, value in severity_counts.items():
+                if not isinstance(value, int) or value < 0:
+                    errors.append(
+                        f"top_risk_summary.severity_counts.{sev} must be non-negative int"
+                    )
+
+    finding_verdicts_any = req_key("finding_verdicts", list)
+    finding_verdicts: list[dict[str, object]] = []
+    if isinstance(finding_verdicts_any, list):
+        for i, item_any in enumerate(cast(list[object], finding_verdicts_any)):
+            if not isinstance(item_any, dict):
+                errors.append(f"finding_verdicts[{i}] must be object")
+                continue
+            item = cast(dict[str, object], item_any)
+            finding_verdicts.append(item)
+            finding_id = item.get("finding_id")
+            if not isinstance(finding_id, str) or not finding_id:
+                errors.append(
+                    f"finding_verdicts[{i}].finding_id must be non-empty string"
+                )
+            verdict = item.get("verdict")
+            if (
+                not isinstance(verdict, str)
+                or verdict not in _ANALYST_DIGEST_VERDICTS_SET
+            ):
+                errors.append(
+                    f"finding_verdicts[{i}].verdict must be one of {sorted(_ANALYST_DIGEST_VERDICTS_SET)}"
+                )
+            _ = _validate_analyst_digest_reason_codes(
+                value=item.get("reason_codes"),
+                path=f"finding_verdicts[{i}].reason_codes",
+                errors=errors,
+            )
+            evidence_refs_any = item.get("evidence_refs")
+            if not isinstance(evidence_refs_any, list) or not evidence_refs_any:
+                errors.append(
+                    f"finding_verdicts[{i}].evidence_refs must be non-empty list"
+                )
+            else:
+                for j, ref_any in enumerate(cast(list[object], evidence_refs_any)):
+                    if not isinstance(ref_any, str) or not _is_run_relative_path(
+                        ref_any
+                    ):
+                        errors.append(
+                            f"finding_verdicts[{i}].evidence_refs[{j}] must be run-relative path"
+                        )
+            verifier_refs_any = item.get("verifier_refs")
+            if not isinstance(verifier_refs_any, list):
+                errors.append(
+                    f"finding_verdicts[{i}].verifier_refs must be list"
+                )
+            else:
+                for j, ref_any in enumerate(cast(list[object], verifier_refs_any)):
+                    if not isinstance(ref_any, str) or not _is_run_relative_path(
+                        ref_any
+                    ):
+                        errors.append(
+                            f"finding_verdicts[{i}].verifier_refs[{j}] must be run-relative path"
+                        )
+
+    verdict_any = req_key("exploitability_verdict", dict)
+    verdict_state: str | None = None
+    verdict_reason_codes: list[str] = []
+    if isinstance(verdict_any, dict):
+        verdict_obj = cast(dict[str, object], verdict_any)
+        state_any = verdict_obj.get("state")
+        if (
+            not isinstance(state_any, str)
+            or state_any not in _ANALYST_DIGEST_VERDICTS_SET
+        ):
+            errors.append(
+                f"exploitability_verdict.state must be one of {sorted(_ANALYST_DIGEST_VERDICTS_SET)}"
+            )
+        else:
+            verdict_state = state_any
+        verdict_reason_codes = _validate_analyst_digest_reason_codes(
+            value=verdict_obj.get("reason_codes"),
+            path="exploitability_verdict.reason_codes",
+            errors=errors,
+        )
+        aggregation_rule = verdict_obj.get("aggregation_rule")
+        if aggregation_rule != ANALYST_DIGEST_AGGREGATION_RULE:
+            errors.append(
+                f"exploitability_verdict.aggregation_rule must equal {ANALYST_DIGEST_AGGREGATION_RULE!r}"
+            )
+
+    evidence_index_any = req_key("evidence_index", list)
+    if isinstance(evidence_index_any, list):
+        for i, item_any in enumerate(cast(list[object], evidence_index_any)):
+            if not isinstance(item_any, dict):
+                errors.append(f"evidence_index[{i}] must be object")
+                continue
+            item = cast(dict[str, object], item_any)
+            ref = item.get("ref")
+            if not isinstance(ref, str) or not _is_run_relative_path(ref):
+                errors.append(f"evidence_index[{i}].ref must be run-relative path")
+            sha = item.get("sha256")
+            if not _is_sha256_hex(sha):
+                errors.append(
+                    f"evidence_index[{i}].sha256 must be lowercase hex sha256"
+                )
+
+    next_actions_any = req_key("next_actions", list)
+    if isinstance(next_actions_any, list):
+        if not next_actions_any:
+            errors.append("next_actions must be non-empty list")
+        for i, action_any in enumerate(cast(list[object], next_actions_any)):
+            if not isinstance(action_any, str) or not action_any:
+                errors.append(f"next_actions[{i}] must be non-empty string")
+
+    if isinstance(top_risk_any, dict) and isinstance(finding_verdicts_any, list):
+        top_risk = cast(dict[str, object], top_risk_any)
+        total_findings = top_risk.get("total_findings")
+        if isinstance(total_findings, int) and total_findings != len(finding_verdicts):
+            errors.append(
+                "top_risk_summary.total_findings must equal len(finding_verdicts)"
+            )
+
+    if verdict_state is not None:
+        if not finding_verdicts:
+            if verdict_state != "NOT_APPLICABLE":
+                errors.append(
+                    "exploitability_verdict.state must be NOT_APPLICABLE when finding_verdicts is empty"
+                )
+            if verdict_reason_codes != ["NOT_APPLICABLE_NO_RELEVANT_FINDINGS"]:
+                errors.append(
+                    "exploitability_verdict.reason_codes must equal ['NOT_APPLICABLE_NO_RELEVANT_FINDINGS'] when finding_verdicts is empty"
+                )
+        else:
+            finding_states = [
+                cast(str, item["verdict"])
+                for item in finding_verdicts
+                if isinstance(item.get("verdict"), str)
+                and cast(str, item.get("verdict")) in _ANALYST_DIGEST_STATE_RANK
+            ]
+            if finding_states:
+                expected_state = min(
+                    finding_states,
+                    key=lambda state: _ANALYST_DIGEST_STATE_RANK[state],
+                )
+                if verdict_state != expected_state:
+                    errors.append(
+                        "exploitability_verdict.state must match aggregated worst-state precedence"
+                    )
+
+                expected_reason_codes_set: set[str] = set()
+                for item in finding_verdicts:
+                    item_state_any = item.get("verdict")
+                    if item_state_any != expected_state:
+                        continue
+                    rc_any = item.get("reason_codes")
+                    if isinstance(rc_any, list):
+                        for code_any in cast(list[object], rc_any):
+                            if (
+                                isinstance(code_any, str)
+                                and code_any in _ANALYST_DIGEST_REASON_SET
+                            ):
+                                expected_reason_codes_set.add(code_any)
+
+                if set(verdict_reason_codes) != expected_reason_codes_set:
+                    errors.append(
+                        "exploitability_verdict.reason_codes must equal union of reason_codes for findings in aggregated state"
+                    )
+
+    return errors

@@ -21,12 +21,21 @@ def _make_firmware(path: Path, payload: bytes = b"dup-gate-fw") -> Path:
 
 def _make_run(tmp_path: Path, *, firmware_payload: bytes = b"dup-gate-fw") -> RunInfo:
     fw = _make_firmware(tmp_path / "fw.bin", payload=firmware_payload)
-    return create_run(
+    info = create_run(
         str(fw),
         case_id="case-duplicate-gate",
         ack_authorization=True,
         runs_root=tmp_path / "runs",
     )
+
+    extracted_dir = info.run_dir / "stages" / "extraction" / "_firmware.bin.extracted"
+    extracted_dir.mkdir(parents=True, exist_ok=True)
+    _ = (extracted_dir / "signals.txt").write_text(
+        "password admin@example.com 1.2.3.4 http://example.com\n",
+        encoding="utf-8",
+    )
+
+    return info
 
 
 def _load_report(path: Path) -> dict[str, object]:
@@ -56,7 +65,26 @@ def test_analyze_run_suppresses_exact_duplicates_across_runs(
     findings_second = cast(list[object], report_second.get("findings", []))
 
     assert exact_duplicates >= 1
-    assert len(findings_second) + exact_duplicates == len(findings_first)
+    assert findings_second
+    assert len(findings_second) == len(findings_first)
+
+    stage_findings_path = info_second.run_dir / "stages" / "findings" / "findings.json"
+    stage_payload = cast(
+        dict[str, object], json.loads(stage_findings_path.read_text(encoding="utf-8"))
+    )
+    stage_findings = cast(list[object], stage_payload.get("findings", []))
+
+    assert any(
+        isinstance(f, dict)
+        and f.get("id") == "aiedge.findings.inventory.string_hits_present"
+        and f.get("severity") == "info"
+        for f in stage_findings
+    )
+    assert any(
+        isinstance(f, dict)
+        and f.get("id") == "aiedge.findings.inventory.string_hits_present"
+        for f in findings_second
+    )
 
     artifact_path = info_second.run_dir / "report" / "duplicate_gate.json"
     artifact = cast(

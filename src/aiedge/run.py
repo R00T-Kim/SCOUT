@@ -1082,6 +1082,28 @@ def _write_analyst_report_artifacts(
     _ = reporting.write_analyst_report_v2_json(report_dir, report)
     _ = reporting.write_analyst_report_v2_md(report_dir, report)
     _ = reporting.write_analyst_report_v2_viewer(report_dir, report)
+    _ = reporting.write_analyst_digest_json(report_dir, report)
+    _ = reporting.write_analyst_digest_md(report_dir, report)
+
+
+def _mark_report_incomplete_due_to_digest(
+    *,
+    report: dict[str, JsonValue],
+    info: RunInfo,
+    err: Exception,
+) -> None:
+    reason = f"analyst digest emission failed: {err}"
+    _set_report_completion(
+        report,
+        is_final=False,
+        reason=reason,
+        findings_executed=True,
+    )
+    _refresh_integrity_and_completeness(report, info, findings_executed=True)
+    limits = normalize_limitations_list(report.get("limitations"))
+    if reason not in limits:
+        limits.append(reason)
+    report["limitations"] = cast(list[JsonValue], cast(list[object], limits))
 
 
 def _apply_duplicate_gate_to_findings(
@@ -1120,7 +1142,10 @@ def _apply_duplicate_gate_to_findings(
             list[JsonValue], cast(list[object], existing_limits)
         )
 
-    return gate.findings
+    # Duplicate gate is an informational/triage signal. The top-level report
+    # must preserve stage-produced findings (including `info` severity) even
+    # when the gate suppresses exact duplicates.
+    return findings
 
 
 def _apply_stage_result_to_report(
@@ -2679,7 +2704,13 @@ def analyze_run(
         report_dir = info.run_dir / "report"
         _ = reporting.write_report_json(report_dir, report)
         _ = reporting.write_report_html(report_dir, report)
-        _write_analyst_report_artifacts(report_dir, report)
+        try:
+            _write_analyst_report_artifacts(report_dir, report)
+        except Exception as exc:
+            _mark_report_incomplete_due_to_digest(report=report, info=info, err=exc)
+            _ = reporting.write_report_json(report_dir, report)
+            _ = reporting.write_report_html(report_dir, report)
+            raise
         return combine_overall_status("skipped", inv_status, emu_status)
 
     extraction_timeout_s = min(
@@ -3486,7 +3517,13 @@ def analyze_run(
     report_dir = info.run_dir / "report"
     _ = reporting.write_report_json(report_dir, report)
     _ = reporting.write_report_html(report_dir, report)
-    _write_analyst_report_artifacts(report_dir, report)
+    try:
+        _write_analyst_report_artifacts(report_dir, report)
+    except Exception as exc:
+        _mark_report_incomplete_due_to_digest(report=report, info=info, err=exc)
+        _ = reporting.write_report_json(report_dir, report)
+        _ = reporting.write_report_html(report_dir, report)
+        raise
 
     extraction_status = cast(str, report["extraction"].get("status", "failed"))
     inventory_status = cast(str, report["inventory"].get("status", "failed"))
