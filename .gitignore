@@ -6,6 +6,11 @@ aiedge-8mb-runs/
 .local/
 .omc/
 
+# Local quality artifacts
+metrics.json
+quality_gate.json
+surface
+
 # Python
 __pycache__/
 *.pyc
