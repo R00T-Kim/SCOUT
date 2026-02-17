@@ -60,6 +60,21 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
   - any JSON string value that looks like an absolute path (`/`-prefixed or `^[A-Za-z]:\\`) is rejected
   - `evidence_refs` must remain run-relative and resolve under the run directory
 
+### Single-Pane Viewer + Overview Payload (Additive)
+
+- Viewer artifact: `report/viewer.html` (operator-facing single-pane overview).
+- Overview payload: `report/analyst_overview.json` with `schema_version="analyst_overview-v1"`; this is a derived additive payload and does not replace existing report/digest contracts.
+- Offline behavior: `viewer.html` embeds bootstrap JSON for local rendering and includes `#file-warning` when `file://` fetch limitations apply.
+- Gate applicability caveats in overview payload:
+  - `manifest.profile=analysis` => `verified_chain` gate is `not_applicable`.
+  - `manifest.track.track_id=8mb` => `final_report_contract_8mb` gate is applicable.
+- Trust boundary: viewer output is convenience UI only. Contract authority remains with verifier scripts:
+
+```bash
+python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
+python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
+```
+
 ## Analyst Digest Verifier (Digest-First Entry)
 
 - Canonical digest artifacts:

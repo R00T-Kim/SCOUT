@@ -83,14 +83,29 @@ All four commands must return `[OK]` for a fully verified run.
 
 `VERIFIED` is only meaningful when digest verification passes and all four verified-chain verifiers pass.
 
-## 8) Notes for operators
+## 8) Single-pane overview (additive, offline-safe)
+
+- Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
+- The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.
+- Offline behavior is supported via embedded bootstrap JSON in `viewer.html`; when opened via `file://`, browser fetch restrictions are surfaced in the in-page warning anchor `#file-warning`.
+- Gate applicability caveats:
+  - `manifest.profile=analysis` -> verified-chain gate is `not_applicable`.
+  - `manifest.track.track_id=8mb` -> final 8MB report-contract gate is applicable.
+- Trust boundary: `viewer.html` is an operator aid, not a verifier. Verifier scripts remain authoritative:
+
+```bash
+python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
+python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
+```
+
+## 9) Notes for operators
 
 - `--exploit-dir` is private input only; exploit source must not be copied into `run_dir`.
 - Evidence files under `run_dir/exploits/` and `run_dir/verified_chain/` are policy-checked as evidence-only.
 - `report/duplicate_gate.json` is triage metadata only; it does not suppress/remove items from top-level `report/report.json` `findings`.
 - Dynamic validation requires non-interactive `sudo -n` for FirmAE/isolation captures (tight allowlist, no broad sudoers rules).
 
-## 9) Codex-first execution policy check
+## 10) Codex-first execution policy check
 
 - Policy reference: `docs/codex_first_agent_policy.md`.
 - Before execution, confirm runtime metadata reports main model `gpt-5.3-codex` (or `openai/gpt-5.3-codex`).

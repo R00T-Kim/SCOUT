@@ -472,6 +472,18 @@ python3 bridge/validate_tribunal_artifacts.py --report-dir reports/<report_id>
 python3 bridge/validate_confirmed_policy.py --report-dir reports/<report_id>
 ```
 
+Single-pane operator overview (additive, offline-safe):
+
+- Open `aiedge-runs/<run_id>/report/viewer.html`.
+- Derived payload is `aiedge-runs/<run_id>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`).
+- `viewer.html` embeds bootstrap JSON and shows `#file-warning` for `file://` fetch limitations.
+- Caveats:
+  - `manifest.profile=analysis` means verified-chain gate is not applicable.
+  - `manifest.track.track_id=8mb` means final 8MB report-contract gate is applicable.
+- Trust boundary: viewer output is not a verifier; authoritative checks remain:
+  - `python3 scripts/verify_analyst_digest.py --run-dir aiedge-runs/<run_id>`
+  - `python3 scripts/verify_aiedge_analyst_report.py --run-dir aiedge-runs/<run_id>`
+
 ---
 
 ## Run Directory Structure
@@ -517,7 +529,9 @@ aiedge-runs/<timestamp>_<sha256-prefix>/
 │       └── poc_skeletons/                     # safe templates
 └── report/
     ├── report.json                            # aggregated report
-    └── report.html                            # human-readable
+    ├── report.html                            # human-readable
+    ├── analyst_overview.json                  # additive operator payload (derived)
+    └── viewer.html                            # additive single-pane viewer (offline-safe)
 ```
 
 **Every StageFactory `stage.json` contains (findings is emitted by `run_findings()`):**
