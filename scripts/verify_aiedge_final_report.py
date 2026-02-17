@@ -96,7 +96,12 @@ def _verify_final_report(run_dir: Path) -> None:
     if findings_status == "pending":
         raise ValueError("run_completion.required_stage_statuses.findings is pending")
 
-    track = _as_object_dict(manifest.get("track"), path="manifest.track")
+    track_any = manifest.get("track")
+    if not isinstance(track_any, dict):
+        raise ValueError(
+            "canonical 8MB-only verifier: manifest.track is required and must be object"
+        )
+    track = cast(dict[str, object], track_any)
     if track.get("track_id") != "8mb":
         raise ValueError(f"manifest.track.track_id != '8mb': {track.get('track_id')!r}")
     if track.get("canonical_sha256_prefix") != _CANONICAL_8MB_SHA256_PREFIX:

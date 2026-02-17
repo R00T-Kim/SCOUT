@@ -20,6 +20,8 @@ This document describes the machine-consumable report fields that gate whether r
 
 ## Final Report Verifier
 
+- Scope note: this verifier is canonical 8MB-only (requires `manifest.track.track_id="8mb"`). ER-e50 `analysis` manifests omit `manifest.track`, so this verifier will fail on ER-e50 `analysis` runs by design.
+
 - `scripts/verify_aiedge_final_report.py --run-dir <run_dir>` validates finalized report contract invariants for the canonical 8MB track.
 - It asserts:
   - `report.report_completeness.gate_passed=true`
@@ -34,11 +36,20 @@ This document describes the machine-consumable report fields that gate whether r
   - the referenced duplicate artifact must load as JSON with:
     - `schema_version="duplicate-gate-v1"`
     - `novelty` and `ranked` keys present as lists
+  - Duplicate gate is triage metadata only; it MUST NOT suppress or remove items from top-level `report.findings`.
+  - `report.duplicate_gate` provides novelty/suppression metadata; it does not remove items from `report.findings`.
   - `report.firmware_lineage` is required and must include:
     - `details.lineage` and `details.lineage_diff` as run-relative existing paths
     - referenced lineage JSON artifacts with `schema_version=1`
 
 ## Analyst Report Verifier
+
+- ER-e50 `analysis` operator gates (fail-closed) are:
+
+```bash
+python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
+python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
+```
 
 - `scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>` is fail-closed for `CONTRACT_ANALYST` in release governance.
 - Required stage artifacts include:
@@ -48,6 +59,27 @@ This document describes the machine-consumable report fields that gate whether r
 - For all stage artifacts checked by the verifier:
   - any JSON string value that looks like an absolute path (`/`-prefixed or `^[A-Za-z]:\\`) is rejected
   - `evidence_refs` must remain run-relative and resolve under the run directory
+
+## Analyst Digest Verifier (Digest-First Entry)
+
+- Canonical digest artifacts:
+  - `report/analyst_digest.json`
+  - `report/analyst_digest.md`
+- Contract reference: `docs/analyst_digest_contract.md` (`analyst_digest-v1`).
+- Verifier command (fail-closed):
+
+```bash
+python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
+```
+
+- Operator interpretation:
+  - Digest is the first analyst entrypoint, not a replacement for proof gates.
+  - `VERIFIED` must be backed by successful digest verification and successful verified-chain verifier checks.
+  - Any digest/verifier mismatch or missing artifact must be treated as non-verified.
+
+Compatibility note:
+
+- This digest contract supplements analyst/operator flow and does not change final report contract semantics under `report/report.json`.
 
 ## Profiles (Analysis vs Exploit)
 
@@ -63,6 +95,8 @@ Executor behavior:
 - Exploit profile evidence MUST include `stages/exploit_chain/milestones.json` with deterministic `canonical_input` binding and `exploit_gate` metadata when available.
 
 ## Findings Evidence
+
+- Findings policy (locked): top-level `report/report.json` `findings` MUST include `info` severity items (no severity-based suppression at report aggregation).
 
 - Each finding MUST include a non-empty `evidence[]` list.
 - Each evidence entry MUST include a run-relative `path`.

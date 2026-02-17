@@ -123,6 +123,42 @@ def test_verify_final_report_fails_when_findings_pending(tmp_path: Path) -> None
     )
 
 
+def test_verify_final_report_fails_when_manifest_track_missing(tmp_path: Path) -> None:
+    run_dir = _write_run_fixture(tmp_path)
+    manifest_path = run_dir / "manifest.json"
+    manifest_obj = cast(
+        dict[str, object], json.loads(manifest_path.read_text(encoding="utf-8"))
+    )
+    del manifest_obj["track"]
+    _ = manifest_path.write_text(
+        json.dumps(manifest_obj, ensure_ascii=True) + "\n", encoding="utf-8"
+    )
+
+    res = _run_verifier(run_dir)
+    assert res.returncode != 0
+    assert "[FAIL] canonical 8MB-only verifier:" in res.stdout
+    assert "manifest.track is required" in res.stdout
+
+
+def test_verify_final_report_fails_when_manifest_track_not_object(tmp_path: Path) -> None:
+    for i, bad_track in enumerate(("8mb", None)):
+        case_root = tmp_path / f"case_{i}"
+        run_dir = _write_run_fixture(case_root)
+        manifest_path = run_dir / "manifest.json"
+        manifest_obj = cast(
+            dict[str, object], json.loads(manifest_path.read_text(encoding="utf-8"))
+        )
+        manifest_obj["track"] = bad_track
+        _ = manifest_path.write_text(
+            json.dumps(manifest_obj, ensure_ascii=True) + "\n", encoding="utf-8"
+        )
+
+        res = _run_verifier(run_dir)
+        assert res.returncode != 0
+        assert "[FAIL] canonical 8MB-only verifier:" in res.stdout
+        assert "manifest.track is required" in res.stdout
+
+
 def test_verify_final_report_fails_when_manifest_identity_mismatch(
     tmp_path: Path,
 ) -> None:
