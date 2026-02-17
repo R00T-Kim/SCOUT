@@ -1082,6 +1082,7 @@ def _write_analyst_report_artifacts(
     _ = reporting.write_analyst_report_v2_json(report_dir, report)
     _ = reporting.write_analyst_report_v2_md(report_dir, report)
     _ = reporting.write_analyst_report_v2_viewer(report_dir, report)
+    _ = reporting.write_analyst_overview_json(report_dir, report)
     _ = reporting.write_analyst_digest_json(report_dir, report)
     _ = reporting.write_analyst_digest_md(report_dir, report)
 

@@ -75,6 +75,175 @@ ANALYST_REPORT_V2_SCHEMA_VERSION = "0.2"
 ANALYST_DIGEST_JSON_RELATIVE_PATH = "report/analyst_digest.json"
 ANALYST_DIGEST_MD_RELATIVE_PATH = "report/analyst_digest.md"
 
+ANALYST_OVERVIEW_JSON_RELATIVE_PATH = "report/analyst_overview.json"
+
+# Single-pane aggregated overview payload schema version.
+ANALYST_OVERVIEW_SCHEMA_VERSION = "analyst_overview-v1"
+
+# Viewer-only anchors for single-pane navigation in report/viewer.html.
+# Keep these IDs stable (not part of analyst_digest-v1 contract).
+ANALYST_OVERVIEW_PANE_ANCHOR_OVERVIEW_GATES = "overview-gates"
+ANALYST_OVERVIEW_PANE_ANCHOR_VULNERABILITIES_VERDICTS = "vulnerabilities-verdicts"
+ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES = "structure-binaries"
+ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE = "protocols-attack-surface"
+ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS = "evidence-next-actions"
+ANALYST_OVERVIEW_PANE_ANCHOR_ORDER: tuple[str, ...] = (
+    ANALYST_OVERVIEW_PANE_ANCHOR_OVERVIEW_GATES,
+    ANALYST_OVERVIEW_PANE_ANCHOR_VULNERABILITIES_VERDICTS,
+    ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES,
+    ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE,
+    ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS,
+)
+
+ANALYST_OVERVIEW_PANE_TITLES: dict[str, str] = {
+    ANALYST_OVERVIEW_PANE_ANCHOR_OVERVIEW_GATES: "Overview & Gates",
+    ANALYST_OVERVIEW_PANE_ANCHOR_VULNERABILITIES_VERDICTS: "Vulnerabilities & Verdicts",
+    ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES: "Structure & Binaries",
+    ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE: "Protocols & Attack Surface",
+    ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS: "Evidence & Next Actions",
+}
+
+# Single-pane overview gate IDs (viewer-only, additive; keep stable).
+ANALYST_OVERVIEW_GATE_ID_REPORT_COMPLETENESS = "report_completeness"
+ANALYST_OVERVIEW_GATE_ID_ANALYST_DIGEST = "analyst_digest"
+ANALYST_OVERVIEW_GATE_ID_ANALYST_REPORT_LINKAGE = "analyst_report_linkage"
+ANALYST_OVERVIEW_GATE_ID_VERIFIED_CHAIN = "verified_chain"
+ANALYST_OVERVIEW_GATE_ID_FINAL_REPORT_CONTRACT_8MB = "final_report_contract_8mb"
+
+
+# Single-pane overview gate statuses.
+ANALYST_OVERVIEW_GATE_STATUS_PASS = "pass"
+ANALYST_OVERVIEW_GATE_STATUS_FAIL = "fail"
+ANALYST_OVERVIEW_GATE_STATUS_BLOCKED = "blocked"
+ANALYST_OVERVIEW_GATE_STATUS_NOT_APPLICABLE = "not_applicable"
+
+
+def resolve_overview_gate_applicability(
+    manifest: dict[str, JsonValue],
+) -> list[dict[str, JsonValue]]:
+    """Resolve which single-pane overview gates apply.
+
+    This resolver is applicability only. It does not run verifiers and does not
+    infer outcomes from partial evidence.
+
+    Convention: any applicable-but-unevaluated gate is represented as:
+      - status="blocked"
+      - reasons includes "not evaluated"
+    """
+
+    def gate_item(
+        gate_id: str, status: str, reasons: list[str]
+    ) -> dict[str, JsonValue]:
+        return {
+            "id": gate_id,
+            "status": status,
+            "reasons": cast(list[JsonValue], cast(list[object], list(reasons))),
+        }
+
+    not_evaluated = "not evaluated"
+
+    profile: str | None = None
+    profile_err: str | None = None
+    profile_any = manifest.get("profile")
+    if profile_any is None:
+        profile_err = "manifest.profile missing"
+    elif not isinstance(profile_any, str) or not profile_any:
+        profile_err = "manifest.profile malformed (expected non-empty string)"
+    elif profile_any not in ("analysis", "exploit"):
+        profile_err = "manifest.profile malformed (unexpected value)"
+    else:
+        profile = profile_any
+
+    track_id: str | None = None
+    track_err: str | None = None
+    if "track" in manifest:
+        track_any = manifest.get("track")
+        if not isinstance(track_any, dict):
+            track_err = "manifest.track malformed (expected object)"
+        else:
+            tid_any = track_any.get("track_id")
+            if tid_any is None:
+                track_err = "manifest.track.track_id missing"
+            elif not isinstance(tid_any, str) or not tid_any:
+                track_err = (
+                    "manifest.track.track_id malformed (expected non-empty string)"
+                )
+            else:
+                track_id = tid_any
+
+    # Deterministic ordering: always return gate list in the same ID order.
+    gates: list[dict[str, JsonValue]] = [
+        gate_item(
+            ANALYST_OVERVIEW_GATE_ID_REPORT_COMPLETENESS,
+            ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+            [not_evaluated],
+        ),
+        gate_item(
+            ANALYST_OVERVIEW_GATE_ID_ANALYST_DIGEST,
+            ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+            [not_evaluated],
+        ),
+        gate_item(
+            ANALYST_OVERVIEW_GATE_ID_ANALYST_REPORT_LINKAGE,
+            ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+            [not_evaluated],
+        ),
+    ]
+
+    if profile_err is not None:
+        gates.append(
+            gate_item(
+                ANALYST_OVERVIEW_GATE_ID_VERIFIED_CHAIN,
+                ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+                [profile_err],
+            )
+        )
+    elif profile == "exploit":
+        gates.append(
+            gate_item(
+                ANALYST_OVERVIEW_GATE_ID_VERIFIED_CHAIN,
+                ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+                ["requires verifier artifacts"],
+            )
+        )
+    else:
+        gates.append(
+            gate_item(
+                ANALYST_OVERVIEW_GATE_ID_VERIFIED_CHAIN,
+                ANALYST_OVERVIEW_GATE_STATUS_NOT_APPLICABLE,
+                ["profile!=exploit"],
+            )
+        )
+
+    if track_err is not None:
+        gates.append(
+            gate_item(
+                ANALYST_OVERVIEW_GATE_ID_FINAL_REPORT_CONTRACT_8MB,
+                ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+                [track_err],
+            )
+        )
+    elif track_id == "8mb":
+        gates.append(
+            gate_item(
+                ANALYST_OVERVIEW_GATE_ID_FINAL_REPORT_CONTRACT_8MB,
+                ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+                ["requires final report verifier"],
+            )
+        )
+    else:
+        # Covers both track missing and non-8mb tracks.
+        gates.append(
+            gate_item(
+                ANALYST_OVERVIEW_GATE_ID_FINAL_REPORT_CONTRACT_8MB,
+                ANALYST_OVERVIEW_GATE_STATUS_NOT_APPLICABLE,
+                ["track!=8mb or track missing"],
+            )
+        )
+
+    return gates
+
+
 _ANALYST_DIGEST_REASON_RANK: dict[str, int] = {
     reason: idx for idx, reason in enumerate(ANALYST_DIGEST_REASON_CODES)
 }
@@ -482,6 +651,329 @@ def _build_evidence_index(
             )
         out.append({"ref": ref, "sha256": _sha256_file(candidate)})
     return out
+
+
+def _validate_run_relative_artifact_ref(
+    *, run_dir: Path, ref: str
+) -> tuple[str, Path | None, str | None]:
+    """Validate and resolve a run-relative artifact ref.
+
+    Returns (normalized_ref, resolved_path_or_none, invalid_reason_or_none).
+
+    This is stricter than `_is_run_relative_path`: in addition to rejecting
+    absolute paths, it fail-closes on any `..` traversal segment and on refs
+    that escape `run_dir` after resolution.
+    """
+
+    ref_norm = ref.replace("\\", "/")
+    if not _is_run_relative_path(ref):
+        return ref_norm, None, "ref must be run-relative"
+
+    # `_is_run_relative_path` only rejects `C:\\...`; this collector also rejects
+    # Windows drive absolute paths in `C:/...` form.
+    if re.match(r"^[A-Za-z]:[\\/]", ref_norm):
+        return ref_norm, None, "ref must not be an absolute drive path"
+
+    if ".." in Path(ref_norm).parts:
+        return ref_norm, None, "ref must not contain '..'"
+
+    run_root = run_dir.resolve()
+    candidate = (run_dir / ref_norm).resolve()
+    try:
+        _ = candidate.relative_to(run_root)
+    except ValueError:
+        return ref_norm, None, "ref escapes run_dir"
+    return ref_norm, candidate, None
+
+
+def collect_overview_artifact_statuses(
+    run_dir: Path,
+    refs: list[tuple[str, bool]],
+) -> list[dict[str, JsonValue]]:
+    """Collect deterministic artifact statuses for the overview payload.
+
+    Each input item is (ref, required). Output items are:
+      {"ref": str, "required": bool, "status": "present"|"missing"|"invalid",
+       "reason"?: str, "sha256"?: str}
+    """
+
+    out: list[dict[str, JsonValue]] = []
+    for ref, required in refs:
+        ref_norm, resolved, invalid_reason = _validate_run_relative_artifact_ref(
+            run_dir=run_dir, ref=ref
+        )
+        if invalid_reason is not None or resolved is None:
+            out.append(
+                {
+                    "ref": ref_norm,
+                    "required": bool(required),
+                    "status": "invalid",
+                    "reason": invalid_reason
+                    if invalid_reason is not None
+                    else "invalid",
+                }
+            )
+            continue
+
+        if resolved.is_file():
+            out.append(
+                {
+                    "ref": ref_norm,
+                    "required": bool(required),
+                    "status": "present",
+                    "sha256": _sha256_file(resolved),
+                }
+            )
+            continue
+
+        if resolved.exists():
+            out.append(
+                {
+                    "ref": ref_norm,
+                    "required": bool(required),
+                    "status": "invalid",
+                    "reason": "artifact exists but is not a file",
+                }
+            )
+            continue
+
+        out.append({"ref": ref_norm, "required": bool(required), "status": "missing"})
+
+    # Deterministic ordering: always return in normalized ref order.
+    return sorted(out, key=lambda item: str(item.get("ref", "")))
+
+
+def _safe_load_manifest_json(
+    run_dir: Path,
+) -> tuple[dict[str, JsonValue], str | None]:
+    path = run_dir / "manifest.json"
+    if not path.is_file():
+        return {}, "manifest missing/invalid"
+    try:
+        obj_any = cast(object, json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return {}, "manifest missing/invalid"
+    if not isinstance(obj_any, dict):
+        return {}, "manifest missing/invalid"
+    return cast(dict[str, JsonValue], obj_any), None
+
+
+def _overview_artifact_refs() -> list[tuple[str, bool]]:
+    # Deterministic ordering is handled by the collector (sorted by ref).
+    return [
+        ("report/report.json", True),
+        (ANALYST_DIGEST_JSON_RELATIVE_PATH, True),
+        (ANALYST_REPORT_V2_JSON_RELATIVE_PATH, True),
+        (ANALYST_REPORT_V2_VIEWER_RELATIVE_PATH, True),
+        ("stages/surfaces/surfaces.json", False),
+        ("stages/surfaces/endpoints.json", False),
+        ("stages/surfaces/source_sink_graph.json", False),
+        ("stages/findings/pattern_scan.json", False),
+        ("stages/findings/binary_strings_hits.json", False),
+    ]
+
+
+def _overview_links() -> dict[str, JsonValue]:
+    # Canonical run-relative links for consumers (viewer, CLI).
+    return {
+        "report_json": "report/report.json",
+        "analyst_digest_json": ANALYST_DIGEST_JSON_RELATIVE_PATH,
+        "analyst_overview_json": ANALYST_OVERVIEW_JSON_RELATIVE_PATH,
+        "analyst_report_v2_json": ANALYST_REPORT_V2_JSON_RELATIVE_PATH,
+        "viewer_html": ANALYST_REPORT_V2_VIEWER_RELATIVE_PATH,
+        "surfaces_json": "stages/surfaces/surfaces.json",
+        "endpoints_json": "stages/surfaces/endpoints.json",
+        "source_sink_graph_json": "stages/surfaces/source_sink_graph.json",
+        "pattern_scan_json": "stages/findings/pattern_scan.json",
+        "binary_strings_hits_json": "stages/findings/binary_strings_hits.json",
+    }
+
+
+def _overview_panes() -> list[dict[str, JsonValue]]:
+    panes: list[dict[str, JsonValue]] = []
+    for pane_id in ANALYST_OVERVIEW_PANE_ANCHOR_ORDER:
+        title = ANALYST_OVERVIEW_PANE_TITLES.get(pane_id, pane_id)
+        panes.append({"id": pane_id, "title": title})
+    return panes
+
+
+def _blocked_overview_gates(reason: str) -> list[dict[str, JsonValue]]:
+    def gate_item(gate_id: str) -> dict[str, JsonValue]:
+        return {
+            "id": gate_id,
+            "status": ANALYST_OVERVIEW_GATE_STATUS_BLOCKED,
+            "reasons": cast(list[JsonValue], cast(list[object], [reason])),
+        }
+
+    return [
+        gate_item(ANALYST_OVERVIEW_GATE_ID_REPORT_COMPLETENESS),
+        gate_item(ANALYST_OVERVIEW_GATE_ID_ANALYST_DIGEST),
+        gate_item(ANALYST_OVERVIEW_GATE_ID_ANALYST_REPORT_LINKAGE),
+        gate_item(ANALYST_OVERVIEW_GATE_ID_VERIFIED_CHAIN),
+        gate_item(ANALYST_OVERVIEW_GATE_ID_FINAL_REPORT_CONTRACT_8MB),
+    ]
+
+
+_OVERVIEW_ABSOLUTE_PATH_REDACTION = "(redacted: absolute path)"
+
+
+def _looks_like_absolute_path_string(value: str) -> bool:
+    if not value:
+        return False
+    return value.startswith("/") or bool(re.match(r"^[A-Za-z]:[\\/]", value))
+
+
+def _sanitize_overview_summary_value(value: JsonValue) -> JsonValue:
+    if isinstance(value, str):
+        if _looks_like_absolute_path_string(value):
+            return _OVERVIEW_ABSOLUTE_PATH_REDACTION
+        return value
+    if isinstance(value, list):
+        items = cast(list[JsonValue], value)
+        return cast(
+            JsonValue,
+            [_sanitize_overview_summary_value(item) for item in items],
+        )
+    if isinstance(value, dict):
+        src = cast(dict[str, JsonValue], value)
+        out: dict[str, JsonValue] = {}
+        for key, item in src.items():
+            out[key] = _sanitize_overview_summary_value(item)
+        return cast(JsonValue, out)
+    return value
+
+
+def build_analyst_overview(
+    report: dict[str, JsonValue],
+    *,
+    run_dir: Path,
+    manifest: dict[str, JsonValue] | None = None,
+    digest: dict[str, JsonValue] | None = None,
+) -> dict[str, JsonValue]:
+    """Build a deterministic single-pane overview payload.
+
+    Input sources:
+      - report/report.json (passed as `report`)
+      - manifest (passed as `manifest` or loaded from run_dir/manifest.json)
+      - report/analyst_digest.json (passed as `digest` or built from `report`)
+      - stage artifacts are referenced only (no loading required)
+    """
+
+    manifest_obj: dict[str, JsonValue]
+    manifest_block_reason: str | None = None
+    if manifest is None:
+        manifest_obj, manifest_block_reason = _safe_load_manifest_json(run_dir)
+    else:
+        manifest_obj = dict(manifest)
+
+    if manifest_block_reason is not None:
+        gates = _blocked_overview_gates(manifest_block_reason)
+    else:
+        gates = resolve_overview_gate_applicability(manifest_obj)
+
+    refs = _overview_artifact_refs()
+    artifacts = collect_overview_artifact_statuses(run_dir, refs)
+
+    summary: dict[str, JsonValue] = {}
+
+    def add_status_and_summary_only(*, report_key: str, out_key: str) -> None:
+        section_any = report.get(report_key)
+        if not isinstance(section_any, dict):
+            return
+        section_obj = cast(dict[str, JsonValue], section_any)
+        out: dict[str, JsonValue] = {}
+        status_any = section_obj.get("status")
+        if isinstance(status_any, str) and status_any:
+            out["status"] = status_any
+        section_summary_any = section_obj.get("summary")
+        if isinstance(section_summary_any, dict):
+            out["summary"] = _sanitize_overview_summary_value(
+                cast(JsonValue, dict(section_summary_any))
+            )
+        if out:
+            summary[out_key] = cast(JsonValue, out)
+
+    report_completeness_any = report.get("report_completeness")
+    if isinstance(report_completeness_any, dict):
+        summary["report_completeness"] = cast(JsonValue, dict(report_completeness_any))
+
+    extraction_any = report.get("extraction")
+    if isinstance(extraction_any, dict):
+        extraction_obj = cast(dict[str, JsonValue], extraction_any)
+        extraction_summary: dict[str, JsonValue] = {}
+        status_any = extraction_obj.get("status")
+        if isinstance(status_any, str) and status_any:
+            extraction_summary["status"] = status_any
+        confidence_any = extraction_obj.get("confidence")
+        if isinstance(confidence_any, (int, float)) and not isinstance(
+            confidence_any, bool
+        ):
+            extraction_summary["confidence"] = float(confidence_any)
+        summary_any = extraction_obj.get("summary")
+        if isinstance(summary_any, dict):
+            extraction_summary["summary"] = _sanitize_overview_summary_value(
+                cast(JsonValue, dict(summary_any))
+            )
+        if extraction_summary:
+            summary["extraction_summary"] = cast(JsonValue, extraction_summary)
+
+    inventory_any = report.get("inventory")
+    if isinstance(inventory_any, dict):
+        inventory_obj = cast(dict[str, JsonValue], inventory_any)
+        inventory_summary: dict[str, JsonValue] = {}
+        status_any = inventory_obj.get("status")
+        if isinstance(status_any, str) and status_any:
+            inventory_summary["status"] = status_any
+        summary_any = inventory_obj.get("summary")
+        if isinstance(summary_any, dict):
+            inventory_summary["summary"] = _sanitize_overview_summary_value(
+                cast(JsonValue, dict(summary_any))
+            )
+        if inventory_summary:
+            summary["inventory_summary"] = cast(JsonValue, inventory_summary)
+
+    add_status_and_summary_only(report_key="endpoints", out_key="endpoints_summary")
+    add_status_and_summary_only(report_key="surfaces", out_key="surfaces_summary")
+    add_status_and_summary_only(report_key="graph", out_key="graph_summary")
+    add_status_and_summary_only(
+        report_key="attack_surface", out_key="attack_surface_summary"
+    )
+
+    digest_obj: dict[str, JsonValue] | None = None
+    if isinstance(digest, dict):
+        digest_obj = dict(digest)
+    else:
+        try:
+            digest_obj = build_analyst_digest(report, run_dir=run_dir)
+        except Exception:
+            digest_obj = None
+
+    if digest_obj is not None:
+        verdict_any = digest_obj.get("exploitability_verdict")
+        if isinstance(verdict_any, dict):
+            summary["exploitability_verdict"] = cast(JsonValue, dict(verdict_any))
+        top_risk_any = digest_obj.get("top_risk_summary")
+        if isinstance(top_risk_any, dict):
+            summary["top_risk_summary"] = cast(JsonValue, dict(top_risk_any))
+
+    return {
+        "schema_version": ANALYST_OVERVIEW_SCHEMA_VERSION,
+        "panes": cast(list[JsonValue], cast(list[object], _overview_panes())),
+        "gates": cast(list[JsonValue], cast(list[object], gates)),
+        "artifacts": cast(list[JsonValue], cast(list[object], artifacts)),
+        "links": cast(JsonValue, _overview_links()),
+        "summary": cast(JsonValue, summary),
+    }
+
+
+def write_analyst_overview_json(report_dir: Path, report: dict[str, JsonValue]) -> Path:
+    report_path = report_dir.parent / ANALYST_OVERVIEW_JSON_RELATIVE_PATH
+    payload = build_analyst_overview(report, run_dir=report_dir.parent)
+    _ = report_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
 
 
 def _severity_counts_from_findings(
@@ -1060,6 +1552,25 @@ def write_analyst_report_v2_viewer(
         "</", "<\\/"
     )
 
+    try:
+        digest_payload: dict[str, JsonValue] = build_analyst_digest(
+            report, run_dir=report_dir.parent
+        )
+    except Exception:
+        digest_payload = {}
+    digest_bootstrap = json.dumps(
+        digest_payload, sort_keys=True, ensure_ascii=True
+    ).replace("</", "<\\/")
+
+    overview_payload = build_analyst_overview(
+        report,
+        run_dir=report_dir.parent,
+        digest=digest_payload,
+    )
+    overview_bootstrap = json.dumps(
+        overview_payload, sort_keys=True, ensure_ascii=True
+    ).replace("</", "<\\/")
+
     doc = "\n".join(
         [
             "<!doctype html>",
@@ -1081,6 +1592,18 @@ def write_analyst_report_v2_viewer(
             "    .warn { border-left: 4px solid #f59e0b; padding: 10px 12px; background: #fff7ed; color: #7c2d12; margin-top: 12px; }",
             "    .risk { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }",
             "    .muted { color: var(--muted); }",
+            "    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; border: 1px solid var(--line); background: #f9fafb; color: var(--ink); }",
+            "    .badge.pass { background: #ecfdf3; border-color: #a6f4c5; color: #027a48; }",
+            "    .badge.fail { background: #fef3f2; border-color: #fecdca; color: #b42318; }",
+            "    .badge.blocked { background: #fffaeb; border-color: #fedf89; color: #b54708; }",
+            "    .badge.not_applicable { background: #f2f4f7; border-color: #e4e7ec; color: #344054; }",
+            "    .badge.unknown { background: #f2f4f7; border-color: #e4e7ec; color: #344054; }",
+            "    .overview-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }",
+            "    .gate-matrix { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }",
+            "    .gate-row { display: flex; gap: 12px; justify-content: space-between; padding: 10px 12px; border-top: 1px solid var(--line); }",
+            "    .gate-row:first-child { border-top: none; }",
+            "    .gate-id { font-weight: 600; }",
+            "    .gate-reasons { margin: 6px 0 0 18px; padding: 0; color: var(--muted); }",
             "    ul { margin: 8px 0 0 18px; padding: 0; }",
             "    li { margin: 4px 0; }",
             "  </style>",
@@ -1091,6 +1614,26 @@ def write_analyst_report_v2_viewer(
             "      <h1>AIEdge Analyst Report v2 Viewer</h1>",
             '      <div id="meta" class="meta"></div>',
             '      <div id="file-warning" class="warn" hidden>Tip: Local file mode can block fetch(). Run a local server (for example: python3 -m http.server) from this report directory.</div>',
+            "    </section>",
+            '    <section class="card" id="pane-overview-gates">',
+            "      <h2>Overview & Gates</h2>",
+            '      <div id="overview-gates"></div>',
+            "    </section>",
+            '    <section class="card" id="pane-vulnerabilities-verdicts">',
+            "      <h2>Vulnerabilities & Verdicts</h2>",
+            '      <div id="vulnerabilities-verdicts"></div>',
+            "    </section>",
+            '    <section class="card" id="pane-structure-binaries">',
+            "      <h2>Structure & Binaries</h2>",
+            '      <div id="structure-binaries"></div>',
+            "    </section>",
+            '    <section class="card" id="pane-protocols-attack-surface">',
+            "      <h2>Protocols & Attack Surface</h2>",
+            '      <div id="protocols-attack-surface"></div>',
+            "    </section>",
+            '    <section class="card" id="pane-evidence-next-actions">',
+            "      <h2>Evidence & Next Actions</h2>",
+            '      <div id="evidence-next-actions"></div>',
             "    </section>",
             '    <section class="card">',
             "      <h2>Executive Summary</h2>",
@@ -1108,6 +1651,12 @@ def write_analyst_report_v2_viewer(
             '  <script id="bootstrap-data" type="application/json">',
             bootstrap,
             "  </script>",
+            '  <script id="bootstrap-overview-data" type="application/json">',
+            overview_bootstrap,
+            "  </script>",
+            '  <script id="bootstrap-digest-data" type="application/json">',
+            digest_bootstrap,
+            "  </script>",
             "  <script>",
             "    function asText(v) {",
             "      if (typeof v === 'string' || typeof v === 'number') return String(v);",
@@ -1118,6 +1667,510 @@ def write_analyst_report_v2_viewer(
             "      const li = document.createElement('li');",
             "      li.textContent = text;",
             "      list.appendChild(li);",
+            "    }",
+            "",
+            "    function badgeClassForStatus(status) {",
+            "      const s = asText(status);",
+            "      if (s === 'pass') return 'pass';",
+            "      if (s === 'fail') return 'fail';",
+            "      if (s === 'blocked') return 'blocked';",
+            "      if (s === 'not_applicable') return 'not_applicable';",
+            "      return 'unknown';",
+            "    }",
+            "",
+            "    function clearNode(node) {",
+            "      if (!node) return;",
+            "      while (node.firstChild) node.removeChild(node.firstChild);",
+            "    }",
+            "",
+            "    function badgeClassForVerdictState(state) {",
+            "      const s = asText(state);",
+            "      if (s === 'VERIFIED') return 'pass';",
+            "      if (s === 'ATTEMPTED_INCONCLUSIVE') return 'blocked';",
+            "      if (s === 'NOT_ATTEMPTED') return 'blocked';",
+            "      if (s === 'NOT_APPLICABLE') return 'not_applicable';",
+            "      return 'unknown';",
+            "    }",
+            "",
+            "    function formatArrayInline(arrAny) {",
+            "      if (!Array.isArray(arrAny)) return '(unavailable)';",
+            "      const parts = arrAny.map(asText).filter(function(x) { return x !== ''; });",
+            "      if (parts.length === 0) return '(none)';",
+            "      return parts.join(', ');",
+            "    }",
+            "",
+            "    function asTextOr(v, fallback) {",
+            "      const t = asText(v);",
+            "      return t ? t : fallback;",
+            "    }",
+            "",
+            "    function renderVulnerabilities(digest) {",
+            "      const mount = document.getElementById('vulnerabilities-verdicts');",
+            "      if (!mount) return;",
+            "      clearNode(mount);",
+            "",
+            "      const digestObj = (digest && typeof digest === 'object') ? digest : {};",
+            "      const evAny = digestObj.exploitability_verdict;",
+            "      const ev = (evAny && typeof evAny === 'object') ? evAny : null;",
+            "      const findingVerdicts = Array.isArray(digestObj.finding_verdicts) ? digestObj.finding_verdicts : null;",
+            "",
+            "      if (!ev && !findingVerdicts) {",
+            "        const degraded = document.createElement('p');",
+            "        degraded.className = 'muted';",
+            "        degraded.textContent = 'Digest unavailable or invalid (degraded). Expected ./analyst_digest.json or embedded bootstrap.';",
+            "        mount.appendChild(degraded);",
+            "        return;",
+            "      }",
+            "",
+            "      const overallBox = document.createElement('div');",
+            "      mount.appendChild(overallBox);",
+            "      const overallTitle = document.createElement('h3');",
+            "      overallTitle.textContent = 'Overall Exploitability Verdict';",
+            "      overallBox.appendChild(overallTitle);",
+            "",
+            "      if (!ev) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing exploitability_verdict)';",
+            "        overallBox.appendChild(missing);",
+            "      } else {",
+            "        const state = asText(ev.state);",
+            "        const line = document.createElement('p');",
+            "        const badge = document.createElement('span');",
+            "        badge.className = 'badge ' + badgeClassForVerdictState(state);",
+            "        badge.textContent = state || 'unknown';",
+            "        line.appendChild(badge);",
+            "        overallBox.appendChild(line);",
+            "",
+            "        const rcLine = document.createElement('p');",
+            "        rcLine.className = 'muted';",
+            "        rcLine.textContent = 'reason_codes: ' + formatArrayInline(ev.reason_codes);",
+            "        overallBox.appendChild(rcLine);",
+            "      }",
+            "",
+            "      const listBox = document.createElement('div');",
+            "      mount.appendChild(listBox);",
+            "      const listTitle = document.createElement('h3');",
+            "      listTitle.textContent = 'Finding Verdicts';",
+            "      listBox.appendChild(listTitle);",
+            "",
+            "      if (!Array.isArray(findingVerdicts)) {",
+            "        const missingList = document.createElement('p');",
+            "        missingList.className = 'muted';",
+            "        missingList.textContent = '(missing finding_verdicts)';",
+            "        listBox.appendChild(missingList);",
+            "        return;",
+            "      }",
+            "",
+            "      const items = findingVerdicts;",
+            "      const total = items.length;",
+            "      const maxShow = 100;",
+            "      if (total === 0) {",
+            "        const empty = document.createElement('p');",
+            "        empty.className = 'muted';",
+            "        empty.textContent = '(none)';",
+            "        listBox.appendChild(empty);",
+            "        return;",
+            "      }",
+            "",
+            "      const note = document.createElement('p');",
+            "      note.className = 'muted';",
+            "      note.textContent = (total > maxShow) ? ('Showing first ' + maxShow + ' of ' + total + ' findings (deterministic order).') : ('Showing ' + total + ' findings.');",
+            "      listBox.appendChild(note);",
+            "",
+            "      items.slice(0, maxShow).forEach(function(itemAny) {",
+            "        if (!itemAny || typeof itemAny !== 'object') return;",
+            "        const item = itemAny;",
+            "",
+            "        const box = document.createElement('article');",
+            "        box.className = 'risk';",
+            "",
+            "        const h = document.createElement('h3');",
+            "        h.textContent = asText(item.finding_id) || '(missing finding_id)';",
+            "        box.appendChild(h);",
+            "",
+            "        const verdictLine = document.createElement('p');",
+            "        const verdictKey = document.createElement('span');",
+            "        verdictKey.className = 'muted';",
+            "        verdictKey.textContent = 'verdict: ';",
+            "        verdictLine.appendChild(verdictKey);",
+            "        const st = asText(item.verdict);",
+            "        const badge = document.createElement('span');",
+            "        badge.className = 'badge ' + badgeClassForVerdictState(st);",
+            "        badge.textContent = st || 'unknown';",
+            "        verdictLine.appendChild(badge);",
+            "        box.appendChild(verdictLine);",
+            "",
+            "        const rc = document.createElement('p');",
+            "        rc.className = 'muted';",
+            "        rc.textContent = 'reason_codes: ' + formatArrayInline(item.reason_codes);",
+            "        box.appendChild(rc);",
+            "",
+            "        const evrefs = document.createElement('p');",
+            "        evrefs.className = 'muted';",
+            "        evrefs.textContent = 'evidence_refs: ' + formatArrayInline(item.evidence_refs);",
+            "        box.appendChild(evrefs);",
+            "",
+            "        const vrefs = document.createElement('p');",
+            "        vrefs.className = 'muted';",
+            "        vrefs.textContent = 'verifier_refs: ' + formatArrayInline(item.verifier_refs);",
+            "        box.appendChild(vrefs);",
+            "",
+            "        listBox.appendChild(box);",
+            "      });",
+            "    }",
+            "",
+            "    function renderStructure(overview) {",
+            "      const mount = document.getElementById('structure-binaries');",
+            "      if (!mount) return;",
+            "      clearNode(mount);",
+            "",
+            "      const summary = (overview && typeof overview.summary === 'object' && overview.summary) ? overview.summary : {};",
+            "      const exAny = summary.extraction_summary;",
+            "      const invAny = summary.inventory_summary;",
+            "      const ex = (exAny && typeof exAny === 'object') ? exAny : null;",
+            "      const inv = (invAny && typeof invAny === 'object') ? invAny : null;",
+            "",
+            "      const exBox = document.createElement('div');",
+            "      mount.appendChild(exBox);",
+            "      const exTitle = document.createElement('h3');",
+            "      exTitle.textContent = 'Extraction';",
+            "      exBox.appendChild(exTitle);",
+            "      if (!ex) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing extraction summary)';",
+            "        exBox.appendChild(missing);",
+            "      } else {",
+            "        const exSummaryAny = ex.summary;",
+            "        const exSummary = (exSummaryAny && typeof exSummaryAny === 'object') ? exSummaryAny : {};",
+            "        const list = document.createElement('ul');",
+            "        addListItem(list, 'status: ' + asTextOr(ex.status, '(missing)'));",
+            "        addListItem(list, 'confidence: ' + asTextOr(ex.confidence, '(missing)'));",
+            "        addListItem(list, 'tool: ' + asTextOr(exSummary.tool, '(missing)'));",
+            "        addListItem(list, 'extracted_dir: ' + asTextOr(exSummary.extracted_dir, '(missing)'));",
+            "        addListItem(list, 'extracted_file_count: ' + asTextOr(exSummary.extracted_file_count, '(missing)'));",
+            "        exBox.appendChild(list);",
+            "      }",
+            "",
+            "      const invBox = document.createElement('div');",
+            "      mount.appendChild(invBox);",
+            "      const invTitle = document.createElement('h3');",
+            "      invTitle.textContent = 'Inventory';",
+            "      invBox.appendChild(invTitle);",
+            "      if (!inv) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing inventory summary)';",
+            "        invBox.appendChild(missing);",
+            "      } else {",
+            "        const invSummaryAny = inv.summary;",
+            "        const invSummary = (invSummaryAny && typeof invSummaryAny === 'object') ? invSummaryAny : {};",
+            "        const list = document.createElement('ul');",
+            "        addListItem(list, 'status: ' + asTextOr(inv.status, '(missing)'));",
+            "        addListItem(list, 'roots_scanned: ' + asTextOr(invSummary.roots_scanned, '(missing)'));",
+            "        addListItem(list, 'files: ' + asTextOr(invSummary.files, '(missing)'));",
+            "        addListItem(list, 'binaries: ' + asTextOr(invSummary.binaries, '(missing)'));",
+            "        addListItem(list, 'configs: ' + asTextOr(invSummary.configs, '(missing)'));",
+            "        addListItem(list, 'string_hits: ' + asTextOr(invSummary.string_hits, '(missing)'));",
+            "        invBox.appendChild(list);",
+            "      }",
+            "    }",
+            "",
+            "    function renderProtocols(overview) {",
+            "      const mount = document.getElementById('protocols-attack-surface');",
+            "      if (!mount) return;",
+            "      clearNode(mount);",
+            "",
+            "      const summary = (overview && typeof overview.summary === 'object' && overview.summary) ? overview.summary : {};",
+            "      const links = (overview && typeof overview.links === 'object' && overview.links) ? overview.links : {};",
+            "",
+            "      const epAny = summary.endpoints_summary;",
+            "      const sfAny = summary.surfaces_summary;",
+            "      const grAny = summary.graph_summary;",
+            "      const asAny = summary.attack_surface_summary;",
+            "      const ep = (epAny && typeof epAny === 'object') ? epAny : null;",
+            "      const sf = (sfAny && typeof sfAny === 'object') ? sfAny : null;",
+            "      const gr = (grAny && typeof grAny === 'object') ? grAny : null;",
+            "      const asf = (asAny && typeof asAny === 'object') ? asAny : null;",
+            "",
+            "      const epBox = document.createElement('div');",
+            "      mount.appendChild(epBox);",
+            "      const epTitle = document.createElement('h3');",
+            "      epTitle.textContent = 'Endpoints';",
+            "      epBox.appendChild(epTitle);",
+            "      if (!ep) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing endpoints summary)';",
+            "        epBox.appendChild(missing);",
+            "      } else {",
+            "        const epSummaryAny = ep.summary;",
+            "        const epSummary = (epSummaryAny && typeof epSummaryAny === 'object') ? epSummaryAny : {};",
+            "        const list = document.createElement('ul');",
+            "        addListItem(list, 'status: ' + asTextOr(ep.status, '(missing)'));",
+            "        addListItem(list, 'endpoints: ' + asTextOr(epSummary.endpoints, '(missing)'));",
+            "        addListItem(list, 'roots_scanned: ' + asTextOr(epSummary.roots_scanned, '(missing)'));",
+            "        addListItem(list, 'files_scanned: ' + asTextOr(epSummary.files_scanned, '(missing)'));",
+            "        const cls = asText(epSummary.classification);",
+            "        if (cls) addListItem(list, 'classification: ' + cls);",
+            "        const obs = asText(epSummary.observation);",
+            "        if (obs) addListItem(list, 'observation: ' + obs);",
+            "        epBox.appendChild(list);",
+            "      }",
+            "",
+            "      const sfBox = document.createElement('div');",
+            "      mount.appendChild(sfBox);",
+            "      const sfTitle = document.createElement('h3');",
+            "      sfTitle.textContent = 'Surfaces';",
+            "      sfBox.appendChild(sfTitle);",
+            "      if (!sf) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing surfaces summary)';",
+            "        sfBox.appendChild(missing);",
+            "      } else {",
+            "        const sfSummaryAny = sf.summary;",
+            "        const sfSummary = (sfSummaryAny && typeof sfSummaryAny === 'object') ? sfSummaryAny : {};",
+            "        const list = document.createElement('ul');",
+            "        addListItem(list, 'status: ' + asTextOr(sf.status, '(missing)'));",
+            "        addListItem(list, 'surfaces: ' + asTextOr(sfSummary.surfaces, '(missing)'));",
+            "        addListItem(list, 'unknowns: ' + asTextOr(sfSummary.unknowns, '(missing)'));",
+            "        const cls = asText(sfSummary.classification);",
+            "        if (cls) addListItem(list, 'classification: ' + cls);",
+            "        const obs = asText(sfSummary.observation);",
+            "        if (obs) addListItem(list, 'observation: ' + obs);",
+            "        sfBox.appendChild(list);",
+            "      }",
+            "",
+            "      const grBox = document.createElement('div');",
+            "      mount.appendChild(grBox);",
+            "      const grTitle = document.createElement('h3');",
+            "      grTitle.textContent = 'Source/Sink Graph';",
+            "      grBox.appendChild(grTitle);",
+            "      if (!gr) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing graph summary)';",
+            "        grBox.appendChild(missing);",
+            "      } else {",
+            "        const grSummaryAny = gr.summary;",
+            "        const grSummary = (grSummaryAny && typeof grSummaryAny === 'object') ? grSummaryAny : {};",
+            "        const list = document.createElement('ul');",
+            "        addListItem(list, 'status: ' + asTextOr(gr.status, '(missing)'));",
+            "        const nodes = asText(grSummary.nodes);",
+            "        if (nodes) addListItem(list, 'nodes: ' + nodes);",
+            "        const edges = asText(grSummary.edges);",
+            "        if (edges) addListItem(list, 'edges: ' + edges);",
+            "        const comps = asText(grSummary.components);",
+            "        if (comps) addListItem(list, 'components: ' + comps);",
+            "        const epc = asText(grSummary.endpoints);",
+            "        if (epc) addListItem(list, 'endpoints: ' + epc);",
+            "        const sfc = asText(grSummary.surfaces);",
+            "        if (sfc) addListItem(list, 'surfaces: ' + sfc);",
+            "        const vendors = asText(grSummary.vendors);",
+            "        if (vendors) addListItem(list, 'vendors: ' + vendors);",
+            "        grBox.appendChild(list);",
+            "      }",
+            "",
+            "      const asBox = document.createElement('div');",
+            "      mount.appendChild(asBox);",
+            "      const asTitle = document.createElement('h3');",
+            "      asTitle.textContent = 'Attack Surface';",
+            "      asBox.appendChild(asTitle);",
+            "      if (!asf) {",
+            "        const missing = document.createElement('p');",
+            "        missing.className = 'muted';",
+            "        missing.textContent = '(missing attack_surface summary)';",
+            "        asBox.appendChild(missing);",
+            "      } else {",
+            "        const asSummaryAny = asf.summary;",
+            "        const asSummary = (asSummaryAny && typeof asSummaryAny === 'object') ? asSummaryAny : {};",
+            "        const list = document.createElement('ul');",
+            "        addListItem(list, 'status: ' + asTextOr(asf.status, '(missing)'));",
+            "        const surfaces = asText(asSummary.surfaces);",
+            "        if (surfaces) addListItem(list, 'surfaces: ' + surfaces);",
+            "        const endpoints = asText(asSummary.endpoints);",
+            "        if (endpoints) addListItem(list, 'endpoints: ' + endpoints);",
+            "        const graphNodes = asText(asSummary.graph_nodes);",
+            "        if (graphNodes) addListItem(list, 'graph_nodes: ' + graphNodes);",
+            "        const graphEdges = asText(asSummary.graph_edges);",
+            "        if (graphEdges) addListItem(list, 'graph_edges: ' + graphEdges);",
+            "        const items = asText(asSummary.attack_surface_items);",
+            "        if (items) addListItem(list, 'attack_surface_items: ' + items);",
+            "        const unknowns = asText(asSummary.unknowns);",
+            "        if (unknowns) addListItem(list, 'unknowns: ' + unknowns);",
+            "        asBox.appendChild(list);",
+            "      }",
+            "",
+            "      const artifactBox = document.createElement('div');",
+            "      mount.appendChild(artifactBox);",
+            "      const artifactTitle = document.createElement('h3');",
+            "      artifactTitle.textContent = 'Artifacts (run-relative paths)';",
+            "      artifactBox.appendChild(artifactTitle);",
+            "      const list = document.createElement('ul');",
+            "      addListItem(list, 'surfaces_json: ' + asTextOr(links.surfaces_json, '(missing)'));",
+            "      addListItem(list, 'endpoints_json: ' + asTextOr(links.endpoints_json, '(missing)'));",
+            "      addListItem(list, 'source_sink_graph_json: ' + asTextOr(links.source_sink_graph_json, '(missing)'));",
+            "      artifactBox.appendChild(list);",
+            "    }",
+            "",
+            "    function renderEvidenceNextActions(digest) {",
+            "      const mount = document.getElementById('evidence-next-actions');",
+            "      if (!mount) return;",
+            "      clearNode(mount);",
+            "",
+            "      const digestObj = (digest && typeof digest === 'object') ? digest : null;",
+            "      const nextActions = digestObj && Array.isArray(digestObj.next_actions) ? digestObj.next_actions : null;",
+            "      const evidenceIndex = digestObj && Array.isArray(digestObj.evidence_index) ? digestObj.evidence_index : null;",
+            "",
+            "      if (!nextActions && !evidenceIndex) {",
+            "        const degraded = document.createElement('p');",
+            "        degraded.className = 'muted';",
+            "        degraded.textContent = 'Digest unavailable or invalid (degraded). Expected ./analyst_digest.json or embedded bootstrap.';",
+            "        mount.appendChild(degraded);",
+            "        return;",
+            "      }",
+            "",
+            "      const actionsTitle = document.createElement('h3');",
+            "      actionsTitle.textContent = 'Next Actions';",
+            "      mount.appendChild(actionsTitle);",
+            "",
+            "      const actionsList = document.createElement('ul');",
+            "      mount.appendChild(actionsList);",
+            "      if (!nextActions || nextActions.length === 0) {",
+            "        addListItem(actionsList, '(none)');",
+            "      } else {",
+            "        nextActions.forEach(function(action) {",
+            "          addListItem(actionsList, asText(action));",
+            "        });",
+            "      }",
+            "",
+            "      if (evidenceIndex) {",
+            "        const evidenceTitle = document.createElement('h3');",
+            "        evidenceTitle.textContent = 'Evidence Index';",
+            "        mount.appendChild(evidenceTitle);",
+            "",
+            "        const evidenceList = document.createElement('ul');",
+            "        mount.appendChild(evidenceList);",
+            "        if (evidenceIndex.length === 0) {",
+            "          addListItem(evidenceList, '(none)');",
+            "        } else {",
+            "          evidenceIndex.forEach(function(ref) {",
+            "            addListItem(evidenceList, asText(ref));",
+            "          });",
+            "        }",
+            "      }",
+            "    }",
+            "",
+            "    function renderOverview(overview) {",
+            "      const mount = document.getElementById('overview-gates');",
+            "      if (!mount) return;",
+            "      clearNode(mount);",
+            "",
+            "      const grid = document.createElement('div');",
+            "      grid.className = 'overview-grid';",
+            "      mount.appendChild(grid);",
+            "",
+            "      const summary = (overview && typeof overview.summary === 'object' && overview.summary) ? overview.summary : {};",
+            "      const rc = (summary && typeof summary.report_completeness === 'object' && summary.report_completeness) ? summary.report_completeness : null;",
+            "",
+            "      const completenessBox = document.createElement('div');",
+            "      grid.appendChild(completenessBox);",
+            "      const completenessTitle = document.createElement('h3');",
+            "      completenessTitle.textContent = 'Report Completeness';",
+            "      completenessBox.appendChild(completenessTitle);",
+            "",
+            "      let completenessState = 'UNKNOWN';",
+            "      let completenessBadgeClass = 'unknown';",
+            "      if (rc && typeof rc.gate_passed === 'boolean') {",
+            "        if (rc.gate_passed) {",
+            "          completenessState = 'COMPLETE';",
+            "          completenessBadgeClass = 'pass';",
+            "        } else {",
+            "          completenessState = 'INCOMPLETE';",
+            "          completenessBadgeClass = 'fail';",
+            "        }",
+            "      }",
+            "",
+            "      const completenessLine = document.createElement('p');",
+            "      const b = document.createElement('span');",
+            "      b.className = 'badge ' + completenessBadgeClass;",
+            "      b.textContent = completenessState;",
+            "      completenessLine.appendChild(b);",
+            "      completenessBox.appendChild(completenessLine);",
+            "",
+            "      if (rc) {",
+            "        const details = document.createElement('ul');",
+            "        addListItem(details, 'gate_passed: ' + (typeof rc.gate_passed === 'boolean' ? String(rc.gate_passed) : 'unknown'));",
+            "        addListItem(details, 'status: ' + asText(rc.status));",
+            "        const reasonsAny = rc.reasons;",
+            "        const reasons = Array.isArray(reasonsAny) ? reasonsAny.map(asText).filter(Boolean) : [];",
+            "        completenessBox.appendChild(details);",
+            "        if (reasons.length > 0) {",
+            "          const reasonsTitle = document.createElement('p');",
+            "          reasonsTitle.className = 'muted';",
+            "          reasonsTitle.textContent = 'reasons:';",
+            "          completenessBox.appendChild(reasonsTitle);",
+            "          const reasonsList = document.createElement('ul');",
+            "          reasons.forEach(function(r) { addListItem(reasonsList, r); });",
+            "          completenessBox.appendChild(reasonsList);",
+            "        }",
+            "      }",
+            "",
+            "      const gatesBox = document.createElement('div');",
+            "      grid.appendChild(gatesBox);",
+            "      const gatesTitle = document.createElement('h3');",
+            "      gatesTitle.textContent = 'Gate Matrix';",
+            "      gatesBox.appendChild(gatesTitle);",
+            "",
+            "      const gates = Array.isArray(overview && overview.gates) ? overview.gates : [];",
+            "      if (gates.length === 0) {",
+            "        const empty = document.createElement('p');",
+            "        empty.className = 'muted';",
+            "        empty.textContent = '(none)';",
+            "        gatesBox.appendChild(empty);",
+            "        return;",
+            "      }",
+            "",
+            "      const matrix = document.createElement('div');",
+            "      matrix.className = 'gate-matrix';",
+            "      gatesBox.appendChild(matrix);",
+            "",
+            "      gates.forEach(function(itemAny) {",
+            "        if (!itemAny || typeof itemAny !== 'object') return;",
+            "        const item = itemAny;",
+            "        const gateId = asText(item.id);",
+            "        const gateStatus = asText(item.status);",
+            "        const reasonsAny = item.reasons;",
+            "        const reasons = Array.isArray(reasonsAny) ? reasonsAny.map(asText).filter(Boolean) : [];",
+            "",
+            "        const row = document.createElement('div');",
+            "        row.className = 'gate-row';",
+            "",
+            "        const left = document.createElement('div');",
+            "        const idNode = document.createElement('div');",
+            "        idNode.className = 'gate-id';",
+            "        idNode.textContent = gateId || '(missing id)';",
+            "        left.appendChild(idNode);",
+            "",
+            "        const reasonsList = document.createElement('ul');",
+            "        reasonsList.className = 'gate-reasons';",
+            "        if (reasons.length === 0) {",
+            "          addListItem(reasonsList, '(none)');",
+            "        } else {",
+            "          reasons.forEach(function(r) { addListItem(reasonsList, r); });",
+            "        }",
+            "        left.appendChild(reasonsList);",
+            "",
+            "        const badge = document.createElement('span');",
+            "        badge.className = 'badge ' + badgeClassForStatus(gateStatus);",
+            "        badge.textContent = gateStatus || 'unknown';",
+            "",
+            "        row.appendChild(left);",
+            "        row.appendChild(badge);",
+            "        matrix.appendChild(row);",
+            "      });",
             "    }",
             "",
             "    function render(data) {",
@@ -1195,7 +2248,68 @@ def write_analyst_report_v2_viewer(
             "      }",
             "    }",
             "",
-            "    loadData().then(render).catch(function() { render({}); });",
+            "    async function loadOverview() {",
+            "      try {",
+            "        const res = await fetch('./analyst_overview.json', { cache: 'no-store' });",
+            "        if (res.ok) {",
+            "          try {",
+            "            const data = await res.json();",
+            "            if (data && typeof data === 'object') return data;",
+            "          } catch (_) {}",
+            "        }",
+            "      } catch (_) {}",
+            "",
+            "      const bootstrapNode = document.getElementById('bootstrap-overview-data');",
+            "      if (!bootstrapNode) return {};",
+            "      try {",
+            "        const data = JSON.parse(bootstrapNode.textContent || '{}');",
+            "        return (data && typeof data === 'object') ? data : {};",
+            "      } catch (_) {",
+            "        return {};",
+            "      }",
+            "    }",
+            "",
+            "    async function loadDigest() {",
+            "      try {",
+            "        const res = await fetch('./analyst_digest.json', { cache: 'no-store' });",
+            "        if (res.ok) {",
+            "          try {",
+            "            const data = await res.json();",
+            "            return (data && typeof data === 'object') ? data : {};",
+            "          } catch (_) {}",
+            "        }",
+            "      } catch (_) {}",
+            "",
+            "      const bootstrapNode = document.getElementById('bootstrap-digest-data');",
+            "      if (!bootstrapNode) return {};",
+            "      try {",
+            "        const data = JSON.parse(bootstrapNode.textContent || '{}');",
+            "        return (data && typeof data === 'object') ? data : {};",
+            "      } catch (_) {",
+            "        return {};",
+            "      }",
+            "    }",
+            "",
+            "    // legacy: loadData().then(render)",
+            "    Promise.all([loadData(), loadOverview(), loadDigest()]).then(([data, overview, digest]) => {",
+            "      window.__aiedge_overview = overview;",
+            "      window.__aiedge_digest = digest;",
+            "      renderOverview(window.__aiedge_overview);",
+            "      renderVulnerabilities(window.__aiedge_digest);",
+            "      renderStructure(window.__aiedge_overview);",
+            "      renderProtocols(window.__aiedge_overview);",
+            "      renderEvidenceNextActions(window.__aiedge_digest);",
+            "      render(data);",
+            "    }).catch(() => {",
+            "      window.__aiedge_overview = {};",
+            "      window.__aiedge_digest = {};",
+            "      renderOverview(window.__aiedge_overview);",
+            "      renderVulnerabilities(window.__aiedge_digest);",
+            "      renderStructure(window.__aiedge_overview);",
+            "      renderProtocols(window.__aiedge_overview);",
+            "      renderEvidenceNextActions(window.__aiedge_digest);",
+            "      render({});",
+            "    });",
             "  </script>",
             "</body>",
             "</html>",
