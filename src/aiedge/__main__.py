@@ -182,6 +182,21 @@ def _short_path(value: object, *, max_len: int = 120) -> str:
     return text[:head] + "..." + text[-tail:]
 
 
+def _path_tail(value: object, *, max_segments: int = 4, max_len: int = 84) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if not text:
+        return ""
+    parts = [p for p in text.split("/") if p]
+    if not parts:
+        return _short_path(text, max_len=max_len)
+    tail = "/".join(parts[-max_segments:])
+    if len(parts) > max_segments:
+        tail = ".../" + tail
+    return _short_path(tail, max_len=max_len)
+
+
 def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> str:
     if width <= 0:
         width = 24
@@ -271,14 +286,18 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
         return lines
 
     lines.append("")
-    lines.append(f"Top {min(limit, len(candidates))} candidate(s)")
+    lines.append(f"Top {min(limit, len(candidates))} candidate(s) [compact]")
     lines.append("-" * 88)
-    last_context: tuple[str, str, str] | None = None
+    hypothesis_groups: dict[
+        tuple[str, str, str, str],
+        dict[str, object],
+    ] = {}
     for idx, item in enumerate(candidates[:limit], start=1):
         pr = _short_text(item.get("priority"), max_len=16) or "unknown"
+        pr_tag = pr[:1].upper() if pr else "?"
         source = _short_text(item.get("source"), max_len=16) or "unknown"
         score = _as_float(item.get("score"))
-        path = _short_path(item.get("path"), max_len=120) or "(none)"
+        path = _path_tail(item.get("path"), max_segments=5, max_len=72) or "(none)"
         families_any = item.get("families")
         families = (
             [x for x in cast(list[object], families_any) if isinstance(x, str)]
@@ -307,21 +326,67 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
         next_step = _short_text(plans[0], max_len=140) if plans else ""
 
         lines.append(
-            f"{idx:02d}. [{pr}] score={score:.3f} source={source} family={family_text}"
+            f"{idx:02d} [{pr_tag}] {score:.3f} {family_text} | {path}"
         )
-        lines.append(f"    path: {path}")
 
-        context = (hypothesis, impact, next_step)
-        if context != last_context:
-            if hypothesis:
-                lines.append(f"    attack: {hypothesis}")
-            if impact:
-                lines.append(f"    impact: {impact}")
-            if next_step:
-                lines.append(f"    next: {next_step}")
-            last_context = context
-        else:
-            lines.append("    note: same attack/impact/next as previous candidate")
+        group_key = (pr, family_text, hypothesis, impact)
+        group = hypothesis_groups.get(group_key)
+        if group is None:
+            group = {
+                "priority": pr,
+                "family": family_text,
+                "hypothesis": hypothesis,
+                "impact": impact,
+                "next_step": next_step,
+                "source": source,
+                "count": 0,
+                "sample_paths": [],
+                "max_score": score,
+            }
+            hypothesis_groups[group_key] = group
+
+        group["count"] = _as_int(group.get("count")) + 1
+        sample_paths = cast(list[str], group.get("sample_paths"))
+        if len(sample_paths) < 3:
+            sample_paths.append(path)
+        current_max_score = _as_float(group.get("max_score"))
+        if score > current_max_score:
+            group["max_score"] = score
+        if next_step and not _short_text(group.get("next_step")):
+            group["next_step"] = next_step
+
+    grouped_items = sorted(
+        cast(list[dict[str, object]], list(hypothesis_groups.values())),
+        key=lambda g: (-_as_int(g.get("count")), -_as_float(g.get("max_score"))),
+    )
+
+    lines.append("")
+    lines.append(f"Hypothesis groups: {len(grouped_items)} unique")
+    lines.append("-" * 88)
+    for idx, group in enumerate(grouped_items[: min(limit, len(grouped_items))], start=1):
+        priority = _short_text(group.get("priority"), max_len=12) or "unknown"
+        priority_tag = priority[:1].upper() if priority else "?"
+        family = _short_text(group.get("family"), max_len=28) or "unknown"
+        count = _as_int(group.get("count"))
+        max_score = _as_float(group.get("max_score"))
+        source = _short_text(group.get("source"), max_len=16) or "unknown"
+        lines.append(
+            f"G{idx:02d} [{priority_tag}] family={family} source={source} count={count} max_score={max_score:.3f}"
+        )
+        hypothesis = _short_text(group.get("hypothesis"), max_len=140)
+        impact = _short_text(group.get("impact"), max_len=140)
+        next_step = _short_text(group.get("next_step"), max_len=140)
+        if hypothesis:
+            lines.append(f"    attack: {hypothesis}")
+        if impact:
+            lines.append(f"    impact: {impact}")
+        if next_step:
+            lines.append(f"    next: {next_step}")
+        sample_paths = cast(list[str], group.get("sample_paths"))
+        if sample_paths:
+            lines.append("    sample_paths:")
+            for sample in sample_paths:
+                lines.append(f"      - {sample}")
 
     return lines
 

@@ -100,7 +100,10 @@ def test_tui_cli_renders_candidate_dashboard(
     assert "AIEdge TUI ::" in out
     assert "Exploit Candidate Map" in out
     assert "candidate_count=1" in out
-    assert "[medium] score=0.760" in out
+    assert "Top 1 candidate(s) [compact]" in out
+    assert "[M] 0.760 cmd_exec_injection_risk" in out
+    assert "Hypothesis groups: 1 unique" in out
+    assert "G01 [M] family=cmd_exec_injection_risk" in out
     assert "attack: Potential command injection" in out
     assert "next: Trace sink arguments" in out
 
