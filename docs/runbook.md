@@ -118,7 +118,11 @@ PYTHONPATH=src python3 -m aiedge serve <run_dir>
 PYTHONPATH=src python3 -m aiedge tui <run_dir>
 # optional live refresh
 PYTHONPATH=src python3 -m aiedge tui <run_dir> --watch --interval-s 2
+# optional interactive mode (q to quit)
+PYTHONPATH=src python3 -m aiedge tui <run_dir> --interactive --limit 30
 ```
+
+Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `r` to refresh, `q` to quit.
 
 - Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
 - The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.

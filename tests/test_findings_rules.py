@@ -137,6 +137,20 @@ def test_run_findings_emits_v2_provenance_first_rules(tmp_path: Path) -> None:
     assert "aiedge.findings.debug.android_manifest_debuggable" in ids
     assert "aiedge.findings.update.metadata_present" in ids
 
+    exploit_candidates = _read_json(
+        ctx.run_dir / "stages" / "findings" / "exploit_candidates.json"
+    )
+    candidates = cast(list[dict[str, object]], exploit_candidates.get("candidates", []))
+    families = {
+        fam
+        for item in candidates
+        for fam in cast(list[object], item.get("families", []))
+        if isinstance(fam, str)
+    }
+    assert "weak_ssh_password_auth" in families
+    assert "weak_ssh_root_login" in families
+    assert "weak_ssh_empty_passwords" in families
+
     by_id = {
         cast(str, f.get("id")): f
         for f in result.findings

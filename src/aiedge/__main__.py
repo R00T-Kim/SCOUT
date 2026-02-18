@@ -207,7 +207,7 @@ def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> st
     return f"{label:<6} |{bar}| {count}"
 
 
-def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
+def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     manifest = _safe_load_json_object(run_dir / "manifest.json")
     report = _safe_load_json_object(run_dir / "report" / "report.json")
     digest = _safe_load_json_object(run_dir / "report" / "analyst_digest.json")
@@ -255,6 +255,49 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     candidate_count = _as_int(summary.get("candidate_count"))
     max_bucket = max(high, medium, low, 1)
 
+    candidates_any = candidates_payload.get("candidates")
+    candidates = (
+        cast(list[dict[str, object]], candidates_any)
+        if isinstance(candidates_any, list)
+        else []
+    )
+
+    return {
+        "profile": profile,
+        "report_status": report_status,
+        "gate_passed_text": gate_passed_text,
+        "llm_status": llm_status,
+        "verdict_state": verdict_state,
+        "reason_codes": reason_codes,
+        "schema_version": _short_text(candidates_payload.get("schema_version")) or "unknown",
+        "high": high,
+        "medium": medium,
+        "low": low,
+        "chain_backed": chain_backed,
+        "candidate_count": candidate_count,
+        "max_bucket": max_bucket,
+        "candidates": candidates,
+    }
+
+
+def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
+    snapshot = _build_tui_snapshot(run_dir=run_dir)
+    profile = _short_text(snapshot.get("profile"), max_len=40) or "unknown"
+    report_status = _short_text(snapshot.get("report_status"), max_len=40) or "unknown"
+    gate_passed_text = (
+        _short_text(snapshot.get("gate_passed_text"), max_len=16) or "unknown"
+    )
+    llm_status = _short_text(snapshot.get("llm_status"), max_len=40) or "unknown"
+    verdict_state = _short_text(snapshot.get("verdict_state"), max_len=48) or "unknown"
+    reason_codes = cast(list[str], snapshot.get("reason_codes", []))
+    candidate_count = _as_int(snapshot.get("candidate_count"))
+    chain_backed = _as_int(snapshot.get("chain_backed"))
+    high = _as_int(snapshot.get("high"))
+    medium = _as_int(snapshot.get("medium"))
+    low = _as_int(snapshot.get("low"))
+    max_bucket = _as_int(snapshot.get("max_bucket"), default=1)
+    schema_version = _short_text(snapshot.get("schema_version"), max_len=48) or "unknown"
+
     lines: list[str] = []
     lines.append(f"AIEdge TUI :: {run_dir}")
     lines.append("=" * 88)
@@ -268,18 +311,13 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     lines.append("Exploit Candidate Map")
     lines.append("-" * 88)
     lines.append(
-        f"candidate_count={candidate_count} | chain_backed={chain_backed} | schema={_short_text(candidates_payload.get('schema_version')) or 'unknown'}"
+        f"candidate_count={candidate_count} | chain_backed={chain_backed} | schema={schema_version}"
     )
     lines.append(_count_bar("HIGH", count=high, max_count=max_bucket))
     lines.append(_count_bar("MEDIUM", count=medium, max_count=max_bucket))
     lines.append(_count_bar("LOW", count=low, max_count=max_bucket))
 
-    candidates_any = candidates_payload.get("candidates")
-    candidates = (
-        cast(list[dict[str, object]], candidates_any)
-        if isinstance(candidates_any, list)
-        else []
-    )
+    candidates = cast(list[dict[str, object]], snapshot.get("candidates", []))
     if not candidates:
         lines.append("")
         lines.append("(no candidates)")
@@ -391,12 +429,305 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     return lines
 
 
+def _candidate_family_text(item: dict[str, object]) -> str:
+    families_any = item.get("families")
+    if isinstance(families_any, list):
+        families = [x for x in cast(list[object], families_any) if isinstance(x, str)]
+    else:
+        families = []
+    return ",".join(families[:3]) if families else "unknown"
+
+
+def _candidate_next_step_text(item: dict[str, object]) -> str:
+    plan_any = item.get("validation_plan")
+    plans = (
+        [x for x in cast(list[object], plan_any) if isinstance(x, str)]
+        if isinstance(plan_any, list)
+        else []
+    )
+    if not plans:
+        fallback_any = item.get("analyst_next_steps")
+        plans = (
+            [x for x in cast(list[object], fallback_any) if isinstance(x, str)]
+            if isinstance(fallback_any, list)
+            else []
+        )
+    return _short_text(plans[0], max_len=220) if plans else ""
+
+
+def _safe_curses_addstr(
+    window: object,
+    *,
+    y: int,
+    x: int,
+    text: str,
+    attr: int = 0,
+) -> None:
+    win = cast("curses._CursesWindow", window)
+    max_y, max_x = win.getmaxyx()
+    if y < 0 or y >= max_y or x >= max_x:
+        return
+    allowed = max(0, max_x - x - 1)
+    if allowed <= 0:
+        return
+    snippet = text[:allowed]
+    try:
+        if attr:
+            win.addstr(y, x, snippet, attr)
+        else:
+            win.addstr(y, x, snippet)
+    except Exception:
+        return
+
+
+def _draw_interactive_tui_frame(
+    *,
+    stdscr: object,
+    run_dir: Path,
+    snapshot: dict[str, object],
+    candidates: list[dict[str, object]],
+    selected_index: int,
+    list_limit: int,
+) -> None:
+    import curses
+
+    win = cast("curses._CursesWindow", stdscr)
+    win.erase()
+    max_y, max_x = win.getmaxyx()
+    if max_y < 12 or max_x < 72:
+        _safe_curses_addstr(
+            win,
+            y=0,
+            x=0,
+            text="Terminal too small (need >=72x12). Resize and retry.",
+        )
+        win.refresh()
+        return
+
+    profile = _short_text(snapshot.get("profile"), max_len=24) or "unknown"
+    report_status = _short_text(snapshot.get("report_status"), max_len=20) or "unknown"
+    gate_passed_text = (
+        _short_text(snapshot.get("gate_passed_text"), max_len=16) or "unknown"
+    )
+    llm_status = _short_text(snapshot.get("llm_status"), max_len=20) or "unknown"
+    verdict_state = _short_text(snapshot.get("verdict_state"), max_len=40) or "unknown"
+    reason_codes = cast(list[str], snapshot.get("reason_codes", []))
+    high = _as_int(snapshot.get("high"))
+    medium = _as_int(snapshot.get("medium"))
+    low = _as_int(snapshot.get("low"))
+    chain_backed = _as_int(snapshot.get("chain_backed"))
+    candidate_count = _as_int(snapshot.get("candidate_count"))
+
+    _safe_curses_addstr(win, y=0, x=0, text=f"AIEdge Interactive TUI :: {run_dir.name}")
+    _safe_curses_addstr(
+        win,
+        y=1,
+        x=0,
+        text=(
+            f"profile={profile} | report={report_status}(gate={gate_passed_text}) | "
+            f"llm={llm_status}"
+        ),
+    )
+    _safe_curses_addstr(win, y=2, x=0, text=f"verdict={verdict_state}")
+    if reason_codes:
+        _safe_curses_addstr(
+            win,
+            y=3,
+            x=0,
+            text="reason_codes=" + ", ".join(reason_codes[:3]),
+        )
+    _safe_curses_addstr(
+        win,
+        y=4,
+        x=0,
+        text=(
+            f"candidates={candidate_count} (H={high}, M={medium}, L={low}, "
+            f"chain_backed={chain_backed})"
+        ),
+    )
+
+    list_top = 6
+    status_row = max_y - 1
+    list_height = max(3, status_row - list_top)
+    left_width = max(42, int(max_x * 0.52))
+    left_width = min(left_width, max_x - 24)
+    right_x = left_width + 2
+
+    _safe_curses_addstr(
+        win,
+        y=list_top - 1,
+        x=0,
+        text=f"[Candidates] showing {min(list_limit, len(candidates))}/{len(candidates)}",
+    )
+    _safe_curses_addstr(win, y=list_top - 1, x=right_x, text="[Details]")
+
+    shown_candidates = candidates[:list_limit]
+    if not shown_candidates:
+        _safe_curses_addstr(win, y=list_top, x=0, text="(no candidates)")
+    else:
+        selected_index = max(0, min(selected_index, len(shown_candidates) - 1))
+        if selected_index < list_height // 2:
+            start = 0
+        else:
+            start = selected_index - (list_height // 2)
+        max_start = max(0, len(shown_candidates) - list_height)
+        start = min(start, max_start)
+        stop = min(len(shown_candidates), start + list_height)
+
+        for row, idx in enumerate(range(start, stop)):
+            item = shown_candidates[idx]
+            pr = _short_text(item.get("priority"), max_len=12) or "unknown"
+            pr_tag = pr[:1].upper() if pr else "?"
+            score = _as_float(item.get("score"))
+            family = _short_text(_candidate_family_text(item), max_len=24) or "unknown"
+            path = _path_tail(item.get("path"), max_segments=4, max_len=max(22, left_width - 30))
+            line = f"{idx + 1:02d} [{pr_tag}] {score:.3f} {family} | {path or '(none)'}"
+            attr = curses.A_REVERSE if idx == selected_index else 0
+            _safe_curses_addstr(win, y=list_top + row, x=0, text=line, attr=attr)
+
+        selected = shown_candidates[selected_index]
+        details: list[str] = []
+        details.append(
+            f"id: {_short_text(selected.get('candidate_id'), max_len=max(20, max_x - right_x - 4))}"
+        )
+        details.append(
+            f"priority/source: {_short_text(selected.get('priority'), max_len=10)} / "
+            f"{_short_text(selected.get('source'), max_len=16)}"
+        )
+        details.append(f"score: {_as_float(selected.get('score')):.3f}")
+        details.append(
+            f"family: {_short_text(_candidate_family_text(selected), max_len=max(20, max_x - right_x - 4))}"
+        )
+        details.append(
+            f"path: {_path_tail(selected.get('path'), max_segments=6, max_len=max(24, max_x - right_x - 4)) or '(none)'}"
+        )
+        details.append(
+            f"attack: {_short_text(selected.get('attack_hypothesis'), max_len=max(24, max_x - right_x - 10)) or '(none)'}"
+        )
+        impacts_any = selected.get("expected_impact")
+        if isinstance(impacts_any, list):
+            impacts = [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+        else:
+            impacts = []
+        details.append(
+            f"impact: {_short_text(impacts[0], max_len=max(24, max_x - right_x - 10)) if impacts else '(none)'}"
+        )
+        details.append(
+            f"next: {_candidate_next_step_text(selected) or '(none)'}"
+        )
+
+        refs_any = selected.get("evidence_refs")
+        refs = (
+            [x for x in cast(list[object], refs_any) if isinstance(x, str)]
+            if isinstance(refs_any, list)
+            else []
+        )
+        details.append("evidence_refs:")
+        for ref in refs[:3]:
+            details.append("  - " + _short_text(ref, max_len=max(16, max_x - right_x - 4)))
+
+        for i, line in enumerate(details[:list_height]):
+            _safe_curses_addstr(win, y=list_top + i, x=right_x, text=line)
+
+    _safe_curses_addstr(
+        win,
+        y=status_row,
+        x=0,
+        text="j/k or ↑/↓ move | g/G top/bottom | r refresh | q quit",
+    )
+    win.refresh()
+
+
+def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("Interactive mode requires a TTY (stdin/stdout).", file=sys.stderr)
+        return 20
+
+    try:
+        import curses
+    except Exception as e:
+        print(f"Interactive mode unavailable: {e}", file=sys.stderr)
+        return 20
+
+    refresh_interval = max(0.3, float(interval_s))
+
+    def _curses_main(stdscr: object) -> int:
+        win = cast("curses._CursesWindow", stdscr)
+        win.nodelay(True)
+        win.keypad(True)
+        try:
+            curses.curs_set(0)
+        except Exception:
+            pass
+
+        selected_index = 0
+        snapshot = _build_tui_snapshot(run_dir=run_dir)
+        last_refresh = time.monotonic()
+        force_refresh = False
+
+        while True:
+            now = time.monotonic()
+            if force_refresh or (now - last_refresh) >= refresh_interval:
+                snapshot = _build_tui_snapshot(run_dir=run_dir)
+                candidates_now = cast(
+                    list[dict[str, object]], snapshot.get("candidates", [])
+                )[:limit]
+                if candidates_now:
+                    selected_index = min(selected_index, len(candidates_now) - 1)
+                else:
+                    selected_index = 0
+                last_refresh = now
+                force_refresh = False
+
+            candidates = cast(list[dict[str, object]], snapshot.get("candidates", []))
+            _draw_interactive_tui_frame(
+                stdscr=win,
+                run_dir=run_dir,
+                snapshot=snapshot,
+                candidates=candidates,
+                selected_index=selected_index,
+                list_limit=limit,
+            )
+
+            key = win.getch()
+            if key == -1:
+                time.sleep(0.05)
+                continue
+            if key in (ord("q"), ord("Q")):
+                return 0
+            if key in (ord("j"), curses.KEY_DOWN):
+                if candidates:
+                    selected_index = min(selected_index + 1, min(limit, len(candidates)) - 1)
+                continue
+            if key in (ord("k"), curses.KEY_UP):
+                if candidates:
+                    selected_index = max(0, selected_index - 1)
+                continue
+            if key in (ord("g"),):
+                selected_index = 0
+                continue
+            if key in (ord("G"),):
+                if candidates:
+                    selected_index = min(limit, len(candidates)) - 1
+                continue
+            if key in (ord("r"), ord("R")):
+                force_refresh = True
+                continue
+
+    try:
+        return int(curses.wrapper(_curses_main))
+    except KeyboardInterrupt:
+        print("")
+        return 0
+
+
 def _run_tui(
     *,
     run_dir_path: str,
     limit: int,
     watch: bool,
     interval_s: float,
+    interactive: bool,
 ) -> int:
     run_dir = Path(run_dir_path).expanduser().resolve()
     if not run_dir.is_dir():
@@ -408,6 +739,12 @@ def _run_tui(
     if interval_s <= 0:
         print("Invalid --interval-s value: must be > 0", file=sys.stderr)
         return 20
+    if interactive and watch:
+        print("Invalid flags: --interactive and --watch cannot be combined", file=sys.stderr)
+        return 20
+
+    if interactive:
+        return _run_tui_interactive(run_dir=run_dir, limit=limit, interval_s=interval_s)
 
     def render_once() -> int:
         lines = _build_tui_snapshot_lines(run_dir=run_dir, limit=limit)
@@ -900,6 +1237,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Refresh dashboard continuously until Ctrl+C.",
     )
     _ = tui.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Launch interactive terminal UI (keyboard navigation).",
+    )
+    _ = tui.add_argument(
         "--interval-s",
         type=float,
         default=2.0,
@@ -1170,6 +1512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_dir = cast(str, getattr(args, "run_dir"))
         limit = cast(int, getattr(args, "limit"))
         watch = bool(getattr(args, "watch", False))
+        interactive = bool(getattr(args, "interactive", False))
         interval_s = cast(float, getattr(args, "interval_s"))
 
         try:
@@ -1178,6 +1521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 limit=limit,
                 watch=watch,
                 interval_s=interval_s,
+                interactive=interactive,
             )
         except Exception as e:
             print(f"Fatal error: {e}", file=sys.stderr)

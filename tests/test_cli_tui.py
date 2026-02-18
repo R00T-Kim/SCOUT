@@ -158,3 +158,27 @@ def test_tui_cli_watch_renders_only_when_snapshot_changes(
     assert rc == 0
     assert captured.out.count("candidate_count=1") == 1
     assert captured.out.count("candidate_count=2") == 1
+
+
+def test_tui_cli_interactive_requires_tty(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+    rc = main(["tui", str(run_dir), "--interactive"])
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert "Interactive mode requires a TTY" in captured.err
+
+
+def test_tui_cli_rejects_watch_and_interactive_together(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+    rc = main(["tui", str(run_dir), "--interactive", "--watch"])
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert "--interactive and --watch cannot be combined" in captured.err

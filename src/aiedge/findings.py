@@ -1800,6 +1800,27 @@ def _candidate_priority_from_score(score: float) -> str:
     return "low"
 
 
+def _evidence_paths_from_rule_evidence(
+    evidence: list[dict[str, JsonValue]],
+) -> list[str]:
+    refs: set[str] = set()
+    for item in evidence:
+        path_any = item.get("path")
+        if not isinstance(path_any, str) or not path_any:
+            continue
+        path_s = path_any.replace("\\", "/")
+        if _is_run_relative_ref(path_s):
+            refs.add(path_s)
+    return sorted(refs)
+
+
+def _first_rule_evidence_path(
+    evidence: list[dict[str, JsonValue]],
+) -> str | None:
+    refs = _evidence_paths_from_rule_evidence(evidence)
+    return refs[0] if refs else None
+
+
 def _candidate_next_steps(
     *,
     families: list[str],
@@ -1825,6 +1846,18 @@ def _candidate_next_steps(
         add("Prove invocation edge from uploaded artifact to executable sink.")
     if "auth_decorator_gaps" in families:
         add("Verify route exposure and compensating auth middleware behavior.")
+    if "weak_ssh_password_auth" in families:
+        add("Validate whether SSH service is reachable on exposed interfaces.")
+        add("Attempt non-destructive auth policy verification in emulated target.")
+    if "weak_ssh_root_login" in families:
+        add("Confirm whether root SSH login is reachable from untrusted zones.")
+        add("Check for compensating controls (key-only auth, ACL, management VLAN).")
+    if "weak_ssh_empty_passwords" in families:
+        add("Test empty-password acceptance in controlled environment.")
+        add("Confirm PAM/SSHD stack does not silently override insecure setting.")
+    if "credential_material_exposure" in families:
+        add("Triage credential-like strings and map to reachable auth surfaces.")
+        add("Prioritize leaked secrets tied to management, update, and VPN paths.")
 
     if source == "chain":
         add("Reproduce chain in emulation with non-destructive PoC assertions.")
@@ -1889,6 +1922,22 @@ def _candidate_attack_context(
         add_h("Missing auth guard could expose privileged functionality.")
         add_p("Route must be externally reachable without compensating middleware.")
         add_i("Unauthorized access to sensitive operation or data.")
+    if "weak_ssh_password_auth" in family_set:
+        add_h("SSH password authentication may allow brute-force or credential-stuffing.")
+        add_p("SSH daemon must be reachable from attacker-controlled network segment.")
+        add_i("Compromise of administrative shell access via weak/reused credentials.")
+    if "weak_ssh_root_login" in family_set:
+        add_h("PermitRootLogin may expose direct privileged remote access.")
+        add_p("Root account authentication pathway must be reachable and valid.")
+        add_i("Direct privileged remote shell access.")
+    if "weak_ssh_empty_passwords" in family_set:
+        add_h("PermitEmptyPasswords could allow unauthenticated SSH login.")
+        add_p("At least one account with empty password must exist or be creatable.")
+        add_i("Unauthenticated or near-unauthenticated remote shell access.")
+    if "credential_material_exposure" in family_set:
+        add_h("Credential-like strings suggest potential secret disclosure in firmware.")
+        add_p("At least one discovered credential must map to a reachable service.")
+        add_i("Credential reuse or secret leakage enabling lateral movement.")
 
     if source == "chain":
         add_p("Static chain links must be validated end-to-end in dynamic context.")
@@ -1961,6 +2010,10 @@ def _build_exploit_candidates_payload(
     firmware_id: str,
     pattern_scan_findings: list[dict[str, JsonValue]],
     chains: list[dict[str, JsonValue]],
+    string_hit_counts: dict[str, int],
+    ssh_password_auth_evidence: list[dict[str, JsonValue]],
+    ssh_root_login_evidence: list[dict[str, JsonValue]],
+    ssh_empty_passwords_evidence: list[dict[str, JsonValue]],
 ) -> dict[str, JsonValue]:
     finding_by_source_id: dict[str, dict[str, JsonValue]] = {}
     for finding in pattern_scan_findings:
@@ -2139,6 +2192,159 @@ def _build_exploit_candidates_payload(
             list[JsonValue], cast(list[object], steps)
         )
         candidate.update(attack_ctx)
+        candidates.append(candidate)
+
+    if ssh_password_auth_evidence:
+        family = "weak_ssh_password_auth"
+        evidence_refs = _evidence_paths_from_rule_evidence(ssh_password_auth_evidence)
+        path_s = _first_rule_evidence_path(ssh_password_auth_evidence)
+        score = 0.66
+        candidate: dict[str, JsonValue] = {
+            "candidate_id": "candidate:" + _sha256_text("heuristic|ssh_password_auth"),
+            "source": "heuristic",
+            "score": score,
+            "confidence": _confidence_from_score(score),
+            "priority": _candidate_priority_from_score(score),
+            "finding_ids": cast(
+                list[JsonValue],
+                cast(list[object], ["aiedge.findings.config.ssh_password_authentication"]),
+            ),
+            "families": cast(list[JsonValue], cast(list[object], [family])),
+            "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
+            "summary": "SSH password authentication policy signal.",
+            "why_candidate": (
+                "Confirmed sshd_config PasswordAuthentication=yes signal indicates "
+                "credential-based remote access surface."
+            ),
+        }
+        if path_s:
+            candidate["path"] = _safe_ascii_text(path_s, max_len=240)
+        steps = _candidate_next_steps(families=[family], source="heuristic", path=path_s)
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue], cast(list[object], steps)
+        )
+        candidate.update(
+            _candidate_attack_context(
+                families=[family],
+                source="heuristic",
+                path=path_s,
+                validation_plan=steps,
+            )
+        )
+        candidates.append(candidate)
+
+    if ssh_root_login_evidence:
+        family = "weak_ssh_root_login"
+        evidence_refs = _evidence_paths_from_rule_evidence(ssh_root_login_evidence)
+        path_s = _first_rule_evidence_path(ssh_root_login_evidence)
+        score = 0.72
+        candidate: dict[str, JsonValue] = {
+            "candidate_id": "candidate:" + _sha256_text("heuristic|ssh_root_login"),
+            "source": "heuristic",
+            "score": score,
+            "confidence": _confidence_from_score(score),
+            "priority": _candidate_priority_from_score(score),
+            "finding_ids": cast(
+                list[JsonValue],
+                cast(list[object], ["aiedge.findings.config.ssh_permit_root_login"]),
+            ),
+            "families": cast(list[JsonValue], cast(list[object], [family])),
+            "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
+            "summary": "SSH PermitRootLogin policy signal.",
+            "why_candidate": "Confirmed PermitRootLogin=yes expands privileged remote attack surface.",
+        }
+        if path_s:
+            candidate["path"] = _safe_ascii_text(path_s, max_len=240)
+        steps = _candidate_next_steps(families=[family], source="heuristic", path=path_s)
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue], cast(list[object], steps)
+        )
+        candidate.update(
+            _candidate_attack_context(
+                families=[family],
+                source="heuristic",
+                path=path_s,
+                validation_plan=steps,
+            )
+        )
+        candidates.append(candidate)
+
+    if ssh_empty_passwords_evidence:
+        family = "weak_ssh_empty_passwords"
+        evidence_refs = _evidence_paths_from_rule_evidence(ssh_empty_passwords_evidence)
+        path_s = _first_rule_evidence_path(ssh_empty_passwords_evidence)
+        score = 0.84
+        candidate = {
+            "candidate_id": "candidate:" + _sha256_text("heuristic|ssh_empty_passwords"),
+            "source": "heuristic",
+            "score": score,
+            "confidence": _confidence_from_score(score),
+            "priority": _candidate_priority_from_score(score),
+            "finding_ids": cast(
+                list[JsonValue],
+                cast(list[object], ["aiedge.findings.config.ssh_permit_empty_passwords"]),
+            ),
+            "families": cast(list[JsonValue], cast(list[object], [family])),
+            "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
+            "summary": "SSH PermitEmptyPasswords policy signal.",
+            "why_candidate": (
+                "Confirmed PermitEmptyPasswords=yes suggests possible near-unauthenticated access."
+            ),
+        }
+        if path_s:
+            candidate["path"] = _safe_ascii_text(path_s, max_len=240)
+        steps = _candidate_next_steps(families=[family], source="heuristic", path=path_s)
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue], cast(list[object], steps)
+        )
+        candidate.update(
+            _candidate_attack_context(
+                families=[family],
+                source="heuristic",
+                path=path_s,
+                validation_plan=steps,
+            )
+        )
+        candidates.append(candidate)
+
+    credential_words = max(0, int(string_hit_counts.get("credential_words", 0)))
+    if credential_words > 0:
+        score = 0.58
+        if credential_words >= 200:
+            score = 0.69
+        elif credential_words >= 80:
+            score = 0.63
+        family = "credential_material_exposure"
+        inv_ref = "stages/inventory/string_hits.json"
+        candidate = {
+            "candidate_id": "candidate:" + _sha256_text("heuristic|credential_string_hits"),
+            "source": "heuristic",
+            "score": round(score, 4),
+            "confidence": _confidence_from_score(score),
+            "priority": _candidate_priority_from_score(score),
+            "finding_ids": cast(
+                list[JsonValue],
+                cast(list[object], ["aiedge.findings.inventory.string_hits_present"]),
+            ),
+            "families": cast(list[JsonValue], cast(list[object], [family])),
+            "evidence_refs": cast(list[JsonValue], cast(list[object], [inv_ref])),
+            "summary": "Credential-like inventory strings observed.",
+            "why_candidate": (
+                f"credential_words={credential_words} indicates likely secret material requiring triage."
+            ),
+        }
+        steps = _candidate_next_steps(families=[family], source="heuristic", path=None)
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue], cast(list[object], steps)
+        )
+        candidate.update(
+            _candidate_attack_context(
+                families=[family],
+                source="heuristic",
+                path=None,
+                validation_plan=steps,
+            )
+        )
         candidates.append(candidate)
 
     candidates = sorted(
@@ -2379,6 +2585,7 @@ def run_findings(
     extracted_files = _iter_files_count(extracted_dir)
     candidate_roots = _load_inventory_roots(ctx.run_dir, inv_json, extracted_dir)
     candidate_files = _iter_candidate_files(candidate_roots, max_files=3000)
+    max_matches_per_rule = 5
 
     budget_mode, budget_bounds, budget_warnings = _parse_binary_strings_budget_mode(
         os.getenv("AIEDGE_BINARY_STRINGS_BUDGET")
@@ -2537,12 +2744,31 @@ def run_findings(
         "chain_refs": cast(list[JsonValue], ["stages/findings/chains.json"]),
         "review_refs": cast(list[JsonValue], ["stages/findings/review_gates.json"]),
     }
+    ssh_password_auth_evidence_precomputed = _rule_ssh_password_authentication(
+        ctx.run_dir,
+        candidate_files,
+        max_matches=max_matches_per_rule,
+    )
+    ssh_root_login_evidence_precomputed = _rule_ssh_root_login(
+        ctx.run_dir,
+        candidate_files,
+        max_matches=max_matches_per_rule,
+    )
+    ssh_empty_passwords_evidence_precomputed = _rule_ssh_permit_empty_passwords(
+        ctx.run_dir,
+        candidate_files,
+        max_matches=max_matches_per_rule,
+    )
     exploit_candidates_payload = _build_exploit_candidates_payload(
         firmware_id=firmware_id,
         pattern_scan_findings=pattern_scan_findings,
         chains=cast(
             list[dict[str, JsonValue]], cast(list[object], chains_payload["chains"])
         ),
+        string_hit_counts=string_hit_counts,
+        ssh_password_auth_evidence=ssh_password_auth_evidence_precomputed,
+        ssh_root_login_evidence=ssh_root_login_evidence_precomputed,
+        ssh_empty_passwords_evidence=ssh_empty_passwords_evidence_precomputed,
     )
     known_disclosures_payload = _known_disclosures_payload(ctx.run_dir, candidate_files)
 
@@ -2618,8 +2844,6 @@ def run_findings(
             }
         )
     else:
-        max_matches_per_rule = 5
-
         private_key_evidence = _rule_private_key_pem(
             ctx.run_dir,
             candidate_files,
@@ -2691,11 +2915,7 @@ def run_findings(
                 }
             )
 
-        ssh_root_evidence = _rule_ssh_root_login(
-            ctx.run_dir,
-            candidate_files,
-            max_matches=max_matches_per_rule,
-        )
+        ssh_root_evidence = ssh_root_login_evidence_precomputed
         if ssh_root_evidence:
             findings.append(
                 {
@@ -2712,11 +2932,7 @@ def run_findings(
                 }
             )
 
-        ssh_password_auth_evidence = _rule_ssh_password_authentication(
-            ctx.run_dir,
-            candidate_files,
-            max_matches=max_matches_per_rule,
-        )
+        ssh_password_auth_evidence = ssh_password_auth_evidence_precomputed
         if ssh_password_auth_evidence:
             findings.append(
                 {
@@ -2733,11 +2949,7 @@ def run_findings(
                 }
             )
 
-        ssh_empty_password_evidence = _rule_ssh_permit_empty_passwords(
-            ctx.run_dir,
-            candidate_files,
-            max_matches=max_matches_per_rule,
-        )
+        ssh_empty_password_evidence = ssh_empty_passwords_evidence_precomputed
         if ssh_empty_password_evidence:
             findings.append(
                 {

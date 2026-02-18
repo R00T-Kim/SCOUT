@@ -490,7 +490,12 @@ PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id>
 
 # Live-refresh mode (Ctrl+C to exit)
 PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id> --watch --interval-s 2
+
+# Interactive mode (j/k/arrow navigation, q to quit)
+PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id> --interactive --limit 30
 ```
+
+Interactive keys: `j/k` or `↑/↓` move, `g/G` top/bottom, `r` refresh, `q` quit.
 
 Analyst workflow cockpit (additive, offline-safe):
 
