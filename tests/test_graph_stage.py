@@ -100,17 +100,26 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     graph_mmd = graph_dir / "comm_graph.mmd"
     reference_graph_json = graph_dir / "reference_graph.json"
     communication_graph_json = graph_dir / "communication_graph.json"
+    communication_nodes_csv = graph_dir / "communication_graph.nodes.csv"
+    communication_edges_csv = graph_dir / "communication_graph.edges.csv"
+    communication_cypher = graph_dir / "communication_graph.cypher"
     assert graph_json.is_file()
     assert graph_dot.is_file()
     assert graph_mmd.is_file()
     assert reference_graph_json.is_file()
     assert communication_graph_json.is_file()
+    assert communication_nodes_csv.is_file()
+    assert communication_edges_csv.is_file()
+    assert communication_cypher.is_file()
 
     text_json_1 = graph_json.read_text(encoding="utf-8")
     text_dot_1 = graph_dot.read_text(encoding="utf-8")
     text_mmd_1 = graph_mmd.read_text(encoding="utf-8")
     text_ref_json_1 = reference_graph_json.read_text(encoding="utf-8")
     text_comm_json_1 = communication_graph_json.read_text(encoding="utf-8")
+    nodes_csv_text_1 = communication_nodes_csv.read_text(encoding="utf-8")
+    edges_csv_text_1 = communication_edges_csv.read_text(encoding="utf-8")
+    cypher_text_1 = communication_cypher.read_text(encoding="utf-8")
 
     out2 = stage.run(ctx)
     assert out2.status == "ok"
@@ -119,6 +128,9 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     assert text_mmd_1 == graph_mmd.read_text(encoding="utf-8")
     assert text_ref_json_1 == reference_graph_json.read_text(encoding="utf-8")
     assert text_comm_json_1 == communication_graph_json.read_text(encoding="utf-8")
+    assert nodes_csv_text_1 == communication_nodes_csv.read_text(encoding="utf-8")
+    assert edges_csv_text_1 == communication_edges_csv.read_text(encoding="utf-8")
+    assert cypher_text_1 == communication_cypher.read_text(encoding="utf-8")
 
     payload = _read_json_obj(graph_json)
     reference_payload = _read_json_obj(reference_graph_json)
@@ -194,6 +206,11 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     assert comm_summary.get("observation") == "runtime_communication"
     assert comm_summary.get("nodes") == 0
     assert comm_summary.get("edges") == 0
+    assert nodes_csv_text_1.startswith("id,type,label,evidence_refs\n")
+    assert edges_csv_text_1.startswith(
+        "src,dst,edge_type,confidence,confidence_calibrated,evidence_level,observation,evidence_refs\n"
+    )
+    assert "communication" in cypher_text_1.lower()
 
     assert text_dot_1.startswith("digraph comm_graph {")
     assert text_mmd_1.startswith("flowchart TD\n")

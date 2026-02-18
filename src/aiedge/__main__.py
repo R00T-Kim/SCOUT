@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import sys
 import textwrap
 import time
@@ -60,6 +61,21 @@ _CANONICAL_8MB_SHA256 = (
     "387d97fd925125471691d5c565fcc0ff009e111bdbdfd2ddb057f9212a939c8a"
 )
 _CANONICAL_8MB_SIZE_BYTES = 8_388_608
+_TUI_VERIFIED_CHAIN_REF = "verified_chain/verified_chain.json"
+_TUI_DYNAMIC_VALIDATION_REQUIRED_REFS = (
+    "stages/dynamic_validation/dynamic_validation.json",
+    "stages/dynamic_validation/isolation/firewall_snapshot.txt",
+    "stages/dynamic_validation/pcap/dynamic_validation.pcap",
+)
+_TUI_RUNTIME_COMMUNICATION_NODE_TYPE_ORDER = {
+    "service": 0,
+    "host": 1,
+    "endpoint": 2,
+    "component": 3,
+    "surface": 4,
+    "vendor": 5,
+    "unknown": 6,
+}
 
 
 def _serve_report_directory(
@@ -197,6 +213,399 @@ def _path_tail(value: object, *, max_segments: int = 4, max_len: int = 84) -> st
     return _short_path(tail, max_len=max_len)
 
 
+def _safe_node_text(value: object, *, fallback: str = "unknown", max_len: int = 160) -> str:
+    if not isinstance(value, str):
+        return fallback
+    text = " ".join(value.replace("\n", " ").replace("\r", " ").split())
+    text = text.encode("ascii", errors="ignore").decode("ascii")
+    if not text:
+        return fallback
+    return text[:max_len]
+
+
+def _safe_ascii_label_for_comm(value: object, *, max_len: int = 72) -> str:
+    return _safe_node_text(value, max_len=max_len)
+
+
+def _safe_node_value(value: str) -> str:
+    return _safe_node_text(value, max_len=220)
+
+
+def _as_path(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.replace("\\", "/").strip()
+
+
+def _normalize_ref(value: object) -> str | None:
+    text = _as_path(value)
+    if not text:
+        return None
+    if text.startswith("/"):
+        return text.lstrip("/")
+    return text
+
+
+def _collect_tui_chain_bundle_index(*, run_dir: Path) -> dict[str, str]:
+    index: dict[str, str] = {}
+    exploits_dir = run_dir / "exploits"
+    if not exploits_dir.is_dir():
+        return index
+
+    for chain_dir in sorted(
+        [
+            path
+            for path in exploits_dir.iterdir()
+            if path.is_dir() and path.name.startswith("chain_")
+        ],
+        key=lambda path: path.name,
+    ):
+        bundle_path = chain_dir / "evidence_bundle.json"
+        if not bundle_path.is_file():
+            continue
+        rel = bundle_path.resolve().relative_to(run_dir.resolve()).as_posix()
+        chain_name = chain_dir.name
+        chain_id = chain_name.removeprefix("chain_")
+        if chain_id:
+            index[chain_id] = rel
+        index[chain_name] = rel
+
+    return index
+
+
+def _collect_tui_verifier_artifacts(*, run_dir: Path) -> dict[str, object]:
+    dynamic_present: list[str] = []
+    dynamic_missing: list[str] = []
+    for ref in _TUI_DYNAMIC_VALIDATION_REQUIRED_REFS:
+        if (run_dir / ref).is_file():
+            dynamic_present.append(ref)
+        else:
+            dynamic_missing.append(ref)
+
+    exploit_bundle_refs: list[str] = []
+    exploits_dir = run_dir / "exploits"
+    if exploits_dir.is_dir():
+        for chain_dir in sorted(
+            [
+                path
+                for path in exploits_dir.iterdir()
+                if path.is_dir() and path.name.startswith("chain_")
+            ],
+            key=lambda path: path.name,
+        ):
+            bundle_path = chain_dir / "evidence_bundle.json"
+            if bundle_path.is_file():
+                exploit_bundle_refs.append(
+                    bundle_path.resolve().relative_to(run_dir.resolve()).as_posix()
+                )
+
+    verified_chain_present = (run_dir / _TUI_VERIFIED_CHAIN_REF).is_file()
+    refs: list[str] = []
+    if verified_chain_present:
+        refs.append(_TUI_VERIFIED_CHAIN_REF)
+    refs.extend(dynamic_present)
+    refs.extend(exploit_bundle_refs)
+
+    return {
+        "dynamic_required_refs": list(_TUI_DYNAMIC_VALIDATION_REQUIRED_REFS),
+        "dynamic_present_refs": sorted(dynamic_present),
+        "dynamic_missing_refs": sorted(dynamic_missing),
+        "verified_chain_present": bool(verified_chain_present),
+        "exploit_bundle_refs": sorted(exploit_bundle_refs),
+        "all_refs": sorted(set(refs)),
+    }
+
+
+def _candidate_evidence_refs(
+    item: dict[str, object],
+    *,
+    chain_bundle_index: dict[str, str],
+    include_chain_bundles: bool = True,
+) -> list[str]:
+    refs_any = item.get("evidence_refs")
+    refs = (
+        {
+            ref
+            for ref in [_normalize_ref(ref) for ref in cast(list[object], refs_any)]
+            if ref
+        }
+        if isinstance(refs_any, list)
+        else set()
+    )
+
+    if include_chain_bundles:
+        chain_id = _short_text(item.get("chain_id"))
+        if chain_id and chain_id in chain_bundle_index:
+            refs.add(chain_bundle_index[chain_id])
+
+    return sorted(refs)
+
+
+def _candidate_verification_signals(
+    item: dict[str, object],
+    *,
+    chain_bundle_index: dict[str, str],
+    verified_chain_present: bool,
+) -> list[str]:
+    refs = _candidate_evidence_refs(
+        item,
+        chain_bundle_index=chain_bundle_index,
+    )
+    signals: list[str] = []
+    if any(ref.startswith("stages/dynamic_validation/") for ref in refs):
+        signals.append("dynamic_validation")
+    if any(
+        ref.startswith("exploits/") and ref.endswith("/evidence_bundle.json")
+        for ref in refs
+    ):
+        signals.append("exploit_bundle")
+    if any(ref.startswith("verified_chain/") for ref in refs):
+        signals.append("verified_chain")
+    chain_id = _short_text(item.get("chain_id"))
+    if chain_id:
+        signals.append("chain_linked")
+        if verified_chain_present:
+            if "verified_chain" not in signals:
+                signals.append("verified_chain")
+    return signals
+
+
+def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
+    family_text = _candidate_family_text(item)
+    families_any = item.get("families")
+    families = (
+        [x for x in cast(list[object], families_any) if isinstance(x, str)]
+        if isinstance(families_any, list)
+        else []
+    )
+    if families:
+        family_text = ",".join(families[:3])
+    impacts_any = item.get("expected_impact")
+    impacts = (
+        [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+        if isinstance(impacts_any, list)
+        else []
+    )
+    plans = _candidate_next_step_text(item)
+
+    attack = _short_text(item.get("attack_hypothesis"), max_len=240)
+    impact = _short_text(impacts[0], max_len=240) if impacts else "unknown"
+    next_step = _short_text(plans, max_len=240) if plans else ""
+
+    score = _as_float(item.get("score"))
+    priority = _short_text(item.get("priority"), max_len=16) or "unknown"
+    source = _short_text(item.get("source"), max_len=16) or "unknown"
+    path = item.get("path")
+    candidate_id = item.get("candidate_id")
+    return {
+        "family": family_text,
+        "source": source,
+        "path": path,
+        "score": score,
+        "priority": priority,
+        "hypothesis": attack,
+        "impact": impact,
+        "next_step": next_step,
+        "path_count": 1,
+        "candidate_ids": [cast(str, candidate_id)]
+        if isinstance(item.get("candidate_id"), str)
+        else [],
+        "max_score": score,
+        "sample_paths": [_path_tail(path, max_segments=5, max_len=84)],
+        "representative_id": cast(str, candidate_id) if isinstance(candidate_id, str) else "",
+    }
+
+
+def _collect_tui_candidate_groups(
+    candidates: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    groups: dict[tuple[str, str, str, str], dict[str, object]] = {}
+    for item in candidates:
+        payload = _candidate_group_payload(item)
+        group_key = (
+            cast(str, payload["priority"]),
+            cast(str, payload["family"]),
+            cast(str, payload["hypothesis"]),
+            cast(str, payload["impact"]),
+        )
+        group = groups.get(group_key)
+        if group is None:
+            groups[group_key] = payload
+            continue
+        group["path_count"] = _as_int(group.get("path_count")) + 1
+        group_sample_paths = cast(list[str], group.get("sample_paths", []))
+        item_path = _path_tail(item.get("path"), max_segments=5, max_len=84)
+        if item_path and item_path not in group_sample_paths:
+            group_sample_paths.append(item_path)
+            group["sample_paths"] = group_sample_paths[:3]
+        current_max_score = _as_float(group.get("max_score"))
+        candidate_score = _as_float(item.get("score"))
+        if candidate_score > current_max_score:
+            group["max_score"] = candidate_score
+            group["hypothesis"] = _short_text(item.get("attack_hypothesis"), max_len=240)
+            impacts_any = item.get("expected_impact")
+            impacts = (
+                [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+                if isinstance(impacts_any, list)
+                else []
+            )
+            group["impact"] = (
+                _short_text(impacts[0], max_len=240) if impacts else _short_text(group.get("impact"), max_len=240)
+            )
+            next = _candidate_next_step_text(item)
+            if next:
+                group["next_step"] = next
+        group_ids = cast(list[str], group.get("candidate_ids", []))
+        candidate_id = item.get("candidate_id")
+        if isinstance(candidate_id, str) and candidate_id not in group_ids:
+            group_ids.append(candidate_id)
+            group["candidate_ids"] = group_ids
+
+    ordered = sorted(
+        groups.values(),
+        key=lambda g: (
+            -_as_int(g.get("path_count")),
+            -_as_float(g.get("max_score")),
+            _short_text(g.get("priority"), max_len=16) or "unknown",
+            _short_text(g.get("family"), max_len=24) or "",
+            _short_text(g.get("hypothesis"), max_len=240) or "",
+        ),
+    )
+    return ordered
+
+
+def _extract_service_node_value(value: str) -> tuple[str, int, str]:
+    value_text = value.strip()
+    if value_text.startswith("service:"):
+        value_text = value_text[len("service:") :]
+    if "/" in value_text:
+        service_part, protocol = value_text.rsplit("/", 1)
+        proto = protocol.lower().strip() or "tcp"
+    else:
+        service_part = value_text
+        proto = "tcp"
+    if "]:" in service_part and service_part.startswith("["):
+        host, rest = service_part.rsplit("]:", 1)
+        host = host.strip("[]")
+        if rest and rest.isdigit():
+            port = int(rest)
+        else:
+            port = 0
+        return host, port, proto
+    if ":" in service_part:
+        host, port_text = service_part.rsplit(":", 1)
+        if port_text.isdigit():
+            return host, int(port_text), proto
+    return service_part, 0, proto
+
+
+def _collect_runtime_communication_summary(
+    *, run_dir: Path
+) -> dict[str, object]:
+    comm_path = run_dir / "stages" / "graph" / "communication_graph.json"
+    if not comm_path.is_file():
+        return {"available": False, "reason": "missing communication graph"}
+    payload_any = _safe_load_json_object(comm_path)
+    if not payload_any:
+        return {"available": False, "reason": "communication graph invalid"}
+
+    nodes_any = payload_any.get("nodes")
+    edges_any = payload_any.get("edges")
+    if not isinstance(nodes_any, list) or not isinstance(edges_any, list):
+        return {"available": False, "reason": "communication graph incomplete"}
+
+    nodes: dict[str, dict[str, object]] = {}
+    for node_any in nodes_any:
+        if not isinstance(node_any, dict):
+            continue
+        node = cast(dict[str, object], node_any)
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+        nodes[node_id] = node
+
+    host_services: dict[str, list[tuple[str, int, str]]] = {}
+    component_hosts: dict[str, set[str]] = {}
+    host_components: dict[str, set[str]] = {}
+    for edge_any in edges_any:
+        if not isinstance(edge_any, dict):
+            continue
+        edge = cast(dict[str, object], edge_any)
+        edge_type = edge.get("edge_type")
+        src = cast(str | None, edge.get("src") if isinstance(edge.get("src"), str) else None)
+        dst = cast(str | None, edge.get("dst") if isinstance(edge.get("dst"), str) else None)
+        if not src or not dst:
+            continue
+        if edge_type == "runtime_host_flow":
+            src_node = nodes.get(src)
+            dst_node = nodes.get(dst)
+            if (
+                src_node is not None
+                and dst_node is not None
+                and src_node.get("type") == "component"
+                and dst_node.get("type") == "host"
+            ):
+                comp = _safe_node_value(_safe_ascii_label(src))
+                host = _safe_node_value(_safe_ascii_label(cast(str, dst)))
+                component_hosts.setdefault(comp, set()).add(host)
+                host_components.setdefault(host, set()).add(comp)
+            continue
+        if edge_type != "runtime_service_binding":
+            continue
+        src_node = nodes.get(src)
+        dst_node = nodes.get(dst)
+        if src_node is None or dst_node is None:
+            continue
+        if src_node.get("type") != "host" or dst_node.get("type") != "service":
+            continue
+        host_label = _safe_node_value(_short_text(src_node.get("label"), max_len=220))
+        service_label = _short_text(dst_node.get("label"), max_len=220)
+        host = host_label.removeprefix("host:") if host_label.startswith("host:") else host_label
+        service_host, service_port, service_proto = _extract_service_node_value(
+            str(service_label)
+        )
+        if not service_host and host:
+            service_host = host
+        service_key = (service_host, service_port, service_proto)
+        host_services.setdefault(host, []).append(service_key)
+
+    service_rows: list[dict[str, object]] = []
+    for host, services in sorted(
+        host_services.items(), key=lambda item: item[0].lower()
+    ):
+        comp_names = sorted(host_components.get(host, set())) or ["unmapped"]
+        seen: set[tuple[str, int, str]] = set()
+        for service_host, service_port, service_proto in sorted(set(services), key=lambda s: (s[0], s[1], s[2])):
+            if (service_host, service_port, service_proto) in seen:
+                continue
+            seen.add((service_host, service_port, service_proto))
+            if not service_host:
+                service_host = host
+            service_rows.append(
+                {
+                    "host": host,
+                    "service_host": service_host,
+                    "port": service_port,
+                    "protocol": service_proto,
+                    "components": comp_names,
+                }
+            )
+
+    return {
+        "available": True,
+        "status": _short_text(payload_any.get("status"), max_len=16) or "partial",
+        "rows": cast(list[object], service_rows),
+        "summary": {
+            "hosts": len(host_services),
+            "services": len(service_rows),
+            "components": len(component_hosts),
+            "artifacts": [
+                _path_tail(str(comm_path), max_segments=4, max_len=90),
+            ],
+        },
+    }
+
+
 def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> str:
     if width <= 0:
         width = 24
@@ -261,6 +670,10 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         if isinstance(candidates_any, list)
         else []
     )
+    candidate_groups = _collect_tui_candidate_groups(candidates)
+    verifier_artifacts = _collect_tui_verifier_artifacts(run_dir=run_dir)
+    chain_bundle_index = _collect_tui_chain_bundle_index(run_dir=run_dir)
+    runtime_model = _collect_runtime_communication_summary(run_dir=run_dir)
 
     return {
         "profile": profile,
@@ -277,6 +690,10 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         "candidate_count": candidate_count,
         "max_bucket": max_bucket,
         "candidates": candidates,
+        "candidate_groups": candidate_groups,
+        "verifier_artifacts": cast(dict[str, object], verifier_artifacts),
+        "chain_bundle_index": chain_bundle_index,
+        "runtime_model": runtime_model,
     }
 
 
@@ -297,6 +714,19 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     low = _as_int(snapshot.get("low"))
     max_bucket = _as_int(snapshot.get("max_bucket"), default=1)
     schema_version = _short_text(snapshot.get("schema_version"), max_len=48) or "unknown"
+    verifier_artifacts = cast(
+        dict[str, object], snapshot.get("verifier_artifacts", {})
+    )
+    chain_bundle_index = cast(
+        dict[str, str], snapshot.get("chain_bundle_index", {})
+    )
+    dynamic_present = _as_int(
+        len(cast(list[str], verifier_artifacts.get("dynamic_present_refs", [])))
+    )
+    dynamic_missing_refs = cast(list[str], verifier_artifacts.get("dynamic_missing_refs", []))
+    dynamic_total = dynamic_present + _as_int(len(dynamic_missing_refs))
+    exploit_bundle_refs = cast(list[str], verifier_artifacts.get("exploit_bundle_refs", []))
+    verified_chain_present = bool(verifier_artifacts.get("verified_chain_present", False))
 
     lines: list[str] = []
     lines.append(f"AIEdge TUI :: {run_dir}")
@@ -313,6 +743,74 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     lines.append(
         f"candidate_count={candidate_count} | chain_backed={chain_backed} | schema={schema_version}"
     )
+    if dynamic_total == 0 and not exploit_bundle_refs and not verified_chain_present:
+        lines.append(
+            "Verifier artifacts: not_started (dynamic_validation=0/0) | verified_chain=no | exploit_bundles=0"
+        )
+    else:
+        dynamic_status = (
+            "present"
+            if dynamic_missing_refs == []
+            and dynamic_total > 0
+            else "partial"
+            if dynamic_missing_refs
+            else "not_started"
+        )
+        lines.append(
+            "Verifier artifacts: "
+            f"dynamic_validation={dynamic_status} ({dynamic_present}/{dynamic_total}) | "
+            f"verified_chain={'yes' if verified_chain_present else 'no'} | "
+            f"exploit_bundles={len(exploit_bundle_refs)}"
+        )
+    if dynamic_missing_refs:
+        lines.append(
+            "  missing_dynamic="
+            + ", ".join(dynamic_missing_refs[:3])
+            + (" ..." if len(dynamic_missing_refs) > 3 else "")
+        )
+    if exploit_bundle_refs:
+        lines.append(
+            "  exploit_bundles="
+            + ", ".join(
+                _path_tail(x, max_segments=3, max_len=96) for x in exploit_bundle_refs[:2]
+            )
+            + (" ..." if len(exploit_bundle_refs) > 2 else "")
+        )
+    runtime_model = cast(dict[str, object], snapshot.get("runtime_model", {}))
+    runtime_available = bool(runtime_model.get("available", False))
+    if runtime_available:
+        runtime_summary = cast(
+            dict[str, object], runtime_model.get("summary", {})
+        )
+        rows = cast(list[object], runtime_model.get("rows", []))
+        lines.append(
+            f"Runtime exposure model: available | "
+            f"hosts={_as_int(runtime_summary.get('hosts'))} | "
+            f"services={_as_int(runtime_summary.get('services'))} | "
+            f"components={_as_int(runtime_summary.get('components'))} | "
+            f"status={_short_text(runtime_model.get('status'), max_len=16) or 'partial'}"
+        )
+        if rows:
+            lines.append("  service_edges:")
+            for row_any in rows[: min(limit, len(rows))]:
+                row = cast(dict[str, object], row_any)
+                row_host = _short_text(row.get("host"), max_len=42)
+                row_service_host = _short_text(row.get("service_host"), max_len=42)
+                row_port = _as_int(row.get("port"))
+                row_protocol = _short_text(row.get("protocol"), max_len=10)
+                row_components = row.get("components", [])
+                if not isinstance(row_components, list):
+                    row_components = []
+                components = ", ".join(
+                    _short_text(v, max_len=24) for v in cast(list[str], row_components[:2])
+                )
+                lines.append(
+                    f"    {row_host} -> {row_service_host}:{row_port}/{row_protocol} "
+                    f"({components if components else 'components=unmapped'})"
+                )
+    else:
+        lines.append("Runtime exposure model: unavailable")
+
     lines.append(_count_bar("HIGH", count=high, max_count=max_bucket))
     lines.append(_count_bar("MEDIUM", count=medium, max_count=max_bucket))
     lines.append(_count_bar("LOW", count=low, max_count=max_bucket))
@@ -324,90 +822,25 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
         return lines
 
     lines.append("")
-    lines.append(f"Top {min(limit, len(candidates))} candidate(s) [compact]")
-    lines.append("-" * 88)
-    hypothesis_groups: dict[
-        tuple[str, str, str, str],
-        dict[str, object],
-    ] = {}
-    for idx, item in enumerate(candidates[:limit], start=1):
-        pr = _short_text(item.get("priority"), max_len=16) or "unknown"
-        pr_tag = pr[:1].upper() if pr else "?"
-        source = _short_text(item.get("source"), max_len=16) or "unknown"
-        score = _as_float(item.get("score"))
-        path = _path_tail(item.get("path"), max_segments=5, max_len=72) or "(none)"
-        families_any = item.get("families")
-        families = (
-            [x for x in cast(list[object], families_any) if isinstance(x, str)]
-            if isinstance(families_any, list)
-            else []
-        )
-        family_text = ",".join(families[:3]) if families else "unknown"
-        hypothesis = _short_text(item.get("attack_hypothesis"), max_len=140)
-        impacts_any = item.get("expected_impact")
-        impacts = (
-            [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
-            if isinstance(impacts_any, list)
-            else []
-        )
-        impact = _short_text(impacts[0], max_len=140) if impacts else ""
-        plan_any = item.get("validation_plan")
-        if isinstance(plan_any, list):
-            plans = [x for x in cast(list[object], plan_any) if isinstance(x, str)]
-        else:
-            fallback_any = item.get("analyst_next_steps")
-            plans = (
-                [x for x in cast(list[object], fallback_any) if isinstance(x, str)]
-                if isinstance(fallback_any, list)
-                else []
-            )
-        next_step = _short_text(plans[0], max_len=140) if plans else ""
-
-        lines.append(
-            f"{idx:02d} [{pr_tag}] {score:.3f} {family_text} | {path}"
-        )
-
-        group_key = (pr, family_text, hypothesis, impact)
-        group = hypothesis_groups.get(group_key)
-        if group is None:
-            group = {
-                "priority": pr,
-                "family": family_text,
-                "hypothesis": hypothesis,
-                "impact": impact,
-                "next_step": next_step,
-                "source": source,
-                "count": 0,
-                "sample_paths": [],
-                "max_score": score,
-            }
-            hypothesis_groups[group_key] = group
-
-        group["count"] = _as_int(group.get("count")) + 1
-        sample_paths = cast(list[str], group.get("sample_paths"))
-        if len(sample_paths) < 3:
-            sample_paths.append(path)
-        current_max_score = _as_float(group.get("max_score"))
-        if score > current_max_score:
-            group["max_score"] = score
-        if next_step and not _short_text(group.get("next_step")):
-            group["next_step"] = next_step
-
-    grouped_items = sorted(
-        cast(list[dict[str, object]], list(hypothesis_groups.values())),
-        key=lambda g: (-_as_int(g.get("count")), -_as_float(g.get("max_score"))),
+    candidate_groups = cast(
+        list[dict[str, object]], snapshot.get("candidate_groups", [])
     )
+    if not candidate_groups:
+        candidate_groups = _collect_tui_candidate_groups(candidates)
 
-    lines.append("")
-    lines.append(f"Hypothesis groups: {len(grouped_items)} unique")
+    lines.append(
+        f"Top {min(limit, len(candidate_groups))} grouped candidate(s) [compact]"
+    )
     lines.append("-" * 88)
-    for idx, group in enumerate(grouped_items[: min(limit, len(grouped_items))], start=1):
+    lines.append(f"Candidate groups: {len(candidate_groups)} unique")
+    lines.append("-" * 88)
+    for idx, group in enumerate(candidate_groups[: min(limit, len(candidate_groups))], start=1):
         priority = _short_text(group.get("priority"), max_len=12) or "unknown"
         priority_tag = priority[:1].upper() if priority else "?"
         family = _short_text(group.get("family"), max_len=28) or "unknown"
-        count = _as_int(group.get("count"))
+        count = _as_int(group.get("path_count"))
         max_score = _as_float(group.get("max_score"))
-        source = _short_text(group.get("source"), max_len=16) or "unknown"
+        source = _short_text(group.get("source", ""), max_len=16) or "unknown"
         lines.append(
             f"G{idx:02d} [{priority_tag}] family={family} source={source} count={count} max_score={max_score:.3f}"
         )
@@ -420,6 +853,30 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
             lines.append(f"    impact: {impact}")
         if next_step:
             lines.append(f"    next: {next_step}")
+        representative_id = _short_text(group.get("representative_id"), max_len=120)
+        representative = None
+        if representative_id:
+            for candidate in candidates:
+                if (
+                    _short_text(candidate.get("candidate_id"), max_len=120)
+                    == representative_id
+                ):
+                    representative = candidate
+                    break
+        signal_items = ["static"]
+        if representative is not None:
+            signal_text = ",".join(
+                _candidate_verification_signals(
+                    representative,
+                    chain_bundle_index=chain_bundle_index,
+                    verified_chain_present=verified_chain_present,
+                )
+            )
+            if signal_text:
+                signal_items = signal_text.split(",")
+        lines.append(
+            f"    source={source} | evidence={','.join(signal_items)}"
+        )
         sample_paths = cast(list[str], group.get("sample_paths"))
         if sample_paths:
             lines.append("    sample_paths:")
@@ -486,6 +943,7 @@ def _draw_interactive_tui_frame(
     run_dir: Path,
     snapshot: dict[str, object],
     candidates: list[dict[str, object]],
+    candidate_groups: list[dict[str, object]],
     selected_index: int,
     list_limit: int,
 ) -> None:
@@ -504,6 +962,9 @@ def _draw_interactive_tui_frame(
         win.refresh()
         return
 
+    if not candidate_groups:
+        candidate_groups = _collect_tui_candidate_groups(candidates)
+
     profile = _short_text(snapshot.get("profile"), max_len=24) or "unknown"
     report_status = _short_text(snapshot.get("report_status"), max_len=20) or "unknown"
     gate_passed_text = (
@@ -517,6 +978,20 @@ def _draw_interactive_tui_frame(
     low = _as_int(snapshot.get("low"))
     chain_backed = _as_int(snapshot.get("chain_backed"))
     candidate_count = _as_int(snapshot.get("candidate_count"))
+    verifier_artifacts = cast(
+        dict[str, object], snapshot.get("verifier_artifacts", {})
+    )
+    chain_bundle_index = cast(
+        dict[str, str], snapshot.get("chain_bundle_index", {})
+    )
+    dynamic_missing = cast(list[str], verifier_artifacts.get("dynamic_missing_refs", []))
+    dynamic_total = len(cast(list[str], verifier_artifacts.get("dynamic_required_refs", [])))
+    dynamic_present = max(0, dynamic_total - len(dynamic_missing))
+    exploit_bundle_refs = cast(list[str], verifier_artifacts.get("exploit_bundle_refs", []))
+    verified_chain_present = bool(verifier_artifacts.get("verified_chain_present", False))
+    runtime_model = cast(dict[str, object], snapshot.get("runtime_model", {}))
+    runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
+    runtime_available = bool(runtime_model.get("available"))
 
     _safe_curses_addstr(win, y=0, x=0, text=f"AIEdge Interactive TUI :: {run_dir.name}")
     _safe_curses_addstr(
@@ -545,8 +1020,29 @@ def _draw_interactive_tui_frame(
             f"chain_backed={chain_backed})"
         ),
     )
+    _safe_curses_addstr(
+        win,
+        y=5,
+        x=0,
+        text=(
+            f"artifacts: dyn_validation={dynamic_present}/{dynamic_total} | "
+            f"verified_chain={'on' if verified_chain_present else 'off'} | "
+            f"bundles={len(exploit_bundle_refs)}"
+        ),
+    )
+    _safe_curses_addstr(
+        win,
+        y=6,
+        x=0,
+        text=(
+            f"runtime: {'on' if runtime_available else 'off'} | "
+            f"hosts={_as_int(runtime_summary.get('hosts'))} "
+            f"services={_as_int(runtime_summary.get('services'))} "
+            f"components={_as_int(runtime_summary.get('components'))}"
+        ),
+    )
 
-    list_top = 6
+    list_top = 7
     status_row = max_y - 1
     list_height = max(3, status_row - list_top)
     left_width = max(42, int(max_x * 0.52))
@@ -557,75 +1053,142 @@ def _draw_interactive_tui_frame(
         win,
         y=list_top - 1,
         x=0,
-        text=f"[Candidates] showing {min(list_limit, len(candidates))}/{len(candidates)}",
+        text=f"[Candidate Groups] showing {min(list_limit, len(candidate_groups))}/{len(candidate_groups)}",
     )
     _safe_curses_addstr(win, y=list_top - 1, x=right_x, text="[Details]")
 
-    shown_candidates = candidates[:list_limit]
-    if not shown_candidates:
-        _safe_curses_addstr(win, y=list_top, x=0, text="(no candidates)")
+    shown_groups = candidate_groups[:list_limit]
+    if not shown_groups:
+        _safe_curses_addstr(win, y=list_top, x=0, text="(no candidate groups)")
     else:
-        selected_index = max(0, min(selected_index, len(shown_candidates) - 1))
+        selected_index = max(0, min(selected_index, len(shown_groups) - 1))
         if selected_index < list_height // 2:
             start = 0
         else:
             start = selected_index - (list_height // 2)
-        max_start = max(0, len(shown_candidates) - list_height)
+        max_start = max(0, len(shown_groups) - list_height)
         start = min(start, max_start)
-        stop = min(len(shown_candidates), start + list_height)
+        stop = min(len(shown_groups), start + list_height)
 
         for row, idx in enumerate(range(start, stop)):
-            item = shown_candidates[idx]
-            pr = _short_text(item.get("priority"), max_len=12) or "unknown"
+            group = shown_groups[idx]
+            pr = _short_text(group.get("priority"), max_len=12) or "unknown"
             pr_tag = pr[:1].upper() if pr else "?"
-            score = _as_float(item.get("score"))
-            family = _short_text(_candidate_family_text(item), max_len=24) or "unknown"
-            path = _path_tail(item.get("path"), max_segments=4, max_len=max(22, left_width - 30))
-            line = f"{idx + 1:02d} [{pr_tag}] {score:.3f} {family} | {path or '(none)'}"
+            score = _as_float(group.get("max_score"))
+            family = _short_text(group.get("family"), max_len=24) or "unknown"
+            path_count = _as_int(group.get("path_count"))
+            representative_id = _short_text(group.get("representative_id"), max_len=120)
+            representative: dict[str, object] | None = None
+            if representative_id:
+                for item in candidates:
+                    if (
+                        _short_text(item.get("candidate_id"), max_len=120)
+                        == representative_id
+                    ):
+                        representative = item
+                        break
+            signal_items = ["static"]
+            if representative is not None:
+                signal_text = ",".join(
+                    _candidate_verification_signals(
+                        representative,
+                        chain_bundle_index=chain_bundle_index,
+                        verified_chain_present=verified_chain_present,
+                    )
+                )
+                if signal_text:
+                    signal_items = signal_text.split(",")
+            signals = ",".join(signal_items)
+            sample_paths = cast(list[str], group.get("sample_paths"))
+            path = sample_paths[0] if sample_paths else "sample-path-unavailable"
+            line = (
+                f"{idx + 1:02d} [{pr_tag}] {score:.3f} x{path_count} {family} | "
+                f"{path or '(none)'}"
+            )
+            max_line_width = max(18, left_width - 3)
+            suffix = f" [{signals}]"
+            if len(line) + len(suffix) <= max_line_width:
+                line = f"{line}{suffix}"
+            else:
+                line = line[: max_line_width - len(suffix) - 1].rstrip()
+                line = f"{line}{suffix}"
             attr = curses.A_REVERSE if idx == selected_index else 0
             _safe_curses_addstr(win, y=list_top + row, x=0, text=line, attr=attr)
 
-        selected = shown_candidates[selected_index]
+        selected = cast(dict[str, object], shown_groups[selected_index])
+        representative_id = _short_text(selected.get("representative_id"), max_len=120)
+        representative = None
+        if representative_id:
+            for item in candidates:
+                if _short_text(item.get("candidate_id"), max_len=120) == representative_id:
+                    representative = item
+                    break
+
         details: list[str] = []
         details.append(
-            f"id: {_short_text(selected.get('candidate_id'), max_len=max(20, max_x - right_x - 4))}"
+            f"group: G{selected_index + 1:02d} "
+            f"{_short_text(selected.get('priority'), max_len=10)} / "
+            f"{_short_text(selected.get('family'), max_len=28)}"
         )
         details.append(
-            f"priority/source: {_short_text(selected.get('priority'), max_len=10)} / "
-            f"{_short_text(selected.get('source'), max_len=16)}"
+            f"hits: {_as_int(selected.get('path_count'))} | score={_as_float(selected.get('max_score')):.3f}"
         )
-        details.append(f"score: {_as_float(selected.get('score')):.3f}")
-        details.append(
-            f"family: {_short_text(_candidate_family_text(selected), max_len=max(20, max_x - right_x - 4))}"
-        )
-        details.append(
-            f"path: {_path_tail(selected.get('path'), max_segments=6, max_len=max(24, max_x - right_x - 4)) or '(none)'}"
-        )
-        details.append(
-            f"attack: {_short_text(selected.get('attack_hypothesis'), max_len=max(24, max_x - right_x - 10)) or '(none)'}"
-        )
-        impacts_any = selected.get("expected_impact")
-        if isinstance(impacts_any, list):
-            impacts = [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+        if representative is not None:
+            details.append(
+                f"id: {_short_text(representative.get('candidate_id'), max_len=max(20, max_x - right_x - 4))}"
+            )
+            details.append(
+                f"priority/source: {_short_text(representative.get('priority'), max_len=10)} / "
+                f"{_short_text(representative.get('source'), max_len=16)}"
+            )
+            rep_chain_id = _short_text(representative.get("chain_id"), max_len=24)
+            if rep_chain_id:
+                details.append(f"chain_id: {rep_chain_id}")
+            details.append(f"score: {_as_float(representative.get('score')):.3f}")
+            selected_signals = _candidate_verification_signals(
+                representative,
+                chain_bundle_index=chain_bundle_index,
+                verified_chain_present=verified_chain_present,
+            )
+            details.append(
+                f"signals: {','.join(selected_signals) if selected_signals else 'static'}"
+            )
+            details.append(
+                f"family: {_short_text(_candidate_family_text(representative), max_len=max(20, max_x - right_x - 4))}"
+            )
+            details.append(
+                f"path: {_path_tail(representative.get('path'), max_segments=6, max_len=max(24, max_x - right_x - 4)) or '(none)'}"
+            )
+            details.append(
+                f"attack: {_short_text(representative.get('attack_hypothesis'), max_len=max(24, max_x - right_x - 10)) or '(none)'}"
+            )
+            impacts_any = representative.get("expected_impact")
+            if isinstance(impacts_any, list):
+                impacts = [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+            else:
+                impacts = []
+            details.append(
+                f"impact: {_short_text(impacts[0], max_len=max(24, max_x - right_x - 10)) if impacts else '(none)'}"
+            )
+            details.append(
+                f"next: {_candidate_next_step_text(representative) or '(none)'}"
+            )
+
+            refs = _candidate_evidence_refs(
+                representative,
+                chain_bundle_index=chain_bundle_index,
+                include_chain_bundles=True,
+            )
+            details.append("evidence_refs:")
+            if refs:
+                for ref in refs[:4]:
+                    details.append(
+                        "  - " + _short_text(ref, max_len=max(16, max_x - right_x - 4))
+                    )
+            else:
+                details.append("  - (none)")
         else:
-            impacts = []
-        details.append(
-            f"impact: {_short_text(impacts[0], max_len=max(24, max_x - right_x - 10)) if impacts else '(none)'}"
-        )
-        details.append(
-            f"next: {_candidate_next_step_text(selected) or '(none)'}"
-        )
-
-        refs_any = selected.get("evidence_refs")
-        refs = (
-            [x for x in cast(list[object], refs_any) if isinstance(x, str)]
-            if isinstance(refs_any, list)
-            else []
-        )
-        details.append("evidence_refs:")
-        for ref in refs[:3]:
-            details.append("  - " + _short_text(ref, max_len=max(16, max_x - right_x - 4)))
-
+            details.append("No representative candidate available.")
         for i, line in enumerate(details[:list_height]):
             _safe_curses_addstr(win, y=list_top + i, x=right_x, text=line)
 
@@ -669,22 +1232,28 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
             now = time.monotonic()
             if force_refresh or (now - last_refresh) >= refresh_interval:
                 snapshot = _build_tui_snapshot(run_dir=run_dir)
-                candidates_now = cast(
-                    list[dict[str, object]], snapshot.get("candidates", [])
-                )[:limit]
-                if candidates_now:
-                    selected_index = min(selected_index, len(candidates_now) - 1)
+                candidate_groups_now = cast(
+                    list[dict[str, object]], snapshot.get("candidate_groups", [])
+                )
+                if candidate_groups_now:
+                    selected_index = min(
+                        selected_index, min(limit, len(candidate_groups_now)) - 1
+                    )
                 else:
                     selected_index = 0
                 last_refresh = now
                 force_refresh = False
 
             candidates = cast(list[dict[str, object]], snapshot.get("candidates", []))
+            candidate_groups = cast(
+                list[dict[str, object]], snapshot.get("candidate_groups", [])
+            )
             _draw_interactive_tui_frame(
                 stdscr=win,
                 run_dir=run_dir,
                 snapshot=snapshot,
                 candidates=candidates,
+                candidate_groups=candidate_groups,
                 selected_index=selected_index,
                 list_limit=limit,
             )
@@ -695,20 +1264,21 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
                 continue
             if key in (ord("q"), ord("Q")):
                 return 0
+            selectable_count = min(limit, len(candidate_groups))
             if key in (ord("j"), curses.KEY_DOWN):
-                if candidates:
-                    selected_index = min(selected_index + 1, min(limit, len(candidates)) - 1)
+                if candidate_groups and selectable_count > 0:
+                    selected_index = min(selected_index + 1, selectable_count - 1)
                 continue
             if key in (ord("k"), curses.KEY_UP):
-                if candidates:
+                if candidate_groups:
                     selected_index = max(0, selected_index - 1)
                 continue
             if key in (ord("g"),):
                 selected_index = 0
                 continue
             if key in (ord("G"),):
-                if candidates:
-                    selected_index = min(limit, len(candidates)) - 1
+                if candidate_groups:
+                    selected_index = selectable_count - 1
                 continue
             if key in (ord("r"), ord("R")):
                 force_refresh = True
@@ -725,8 +1295,10 @@ def _run_tui(
     *,
     run_dir_path: str,
     limit: int,
-    watch: bool,
+    mode: str,
     interval_s: float,
+    # kept for compatibility with old CLI usage; mode is authoritative.
+    watch: bool,
     interactive: bool,
 ) -> int:
     run_dir = Path(run_dir_path).expanduser().resolve()
@@ -739,11 +1311,26 @@ def _run_tui(
     if interval_s <= 0:
         print("Invalid --interval-s value: must be > 0", file=sys.stderr)
         return 20
+    effective_mode = mode
     if interactive and watch:
         print("Invalid flags: --interactive and --watch cannot be combined", file=sys.stderr)
         return 20
-
     if interactive:
+        effective_mode = "interactive"
+    elif watch:
+        effective_mode = "watch"
+    elif mode not in ("auto", "once", "watch", "interactive"):
+        print("Invalid --mode value", file=sys.stderr)
+        return 20
+
+    if effective_mode == "auto":
+        effective_mode = (
+            "interactive"
+            if sys.stdin.isatty() and sys.stdout.isatty()
+            else "once"
+        )
+
+    if effective_mode == "interactive":
         return _run_tui_interactive(run_dir=run_dir, limit=limit, interval_s=interval_s)
 
     def render_once() -> int:
@@ -751,7 +1338,7 @@ def _run_tui(
         print("\n".join(lines))
         return 0
 
-    if not watch:
+    if effective_mode != "watch":
         return render_once()
 
     supports_ansi = bool(
@@ -1226,6 +1813,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to an existing run directory.",
     )
     _ = tui.add_argument(
+        "--mode",
+        choices=("once", "watch", "interactive", "auto"),
+        default="auto",
+        help=(
+            "Dashboard mode (default: auto). auto selects interactive on TTY, "
+            "otherwise renders once."
+        ),
+    )
+    _ = tui.add_argument(
         "--limit",
         type=int,
         default=12,
@@ -1234,12 +1830,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = tui.add_argument(
         "--watch",
         action="store_true",
-        help="Refresh dashboard continuously until Ctrl+C.",
+        help="Alias for --mode watch. Refresh dashboard continuously until Ctrl+C.",
     )
     _ = tui.add_argument(
         "--interactive",
         action="store_true",
-        help="Launch interactive terminal UI (keyboard navigation).",
+        help="Alias for --mode interactive. Launch interactive terminal UI (keyboard navigation).",
     )
     _ = tui.add_argument(
         "--interval-s",
@@ -1511,6 +2107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if command == "tui":
         run_dir = cast(str, getattr(args, "run_dir"))
         limit = cast(int, getattr(args, "limit"))
+        mode = cast(str, getattr(args, "mode", "auto"))
         watch = bool(getattr(args, "watch", False))
         interactive = bool(getattr(args, "interactive", False))
         interval_s = cast(float, getattr(args, "interval_s"))
@@ -1519,6 +2116,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_tui(
                 run_dir_path=run_dir,
                 limit=limit,
+                mode=mode,
                 watch=watch,
                 interval_s=interval_s,
                 interactive=interactive,

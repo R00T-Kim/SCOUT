@@ -1011,6 +1011,8 @@ def _build_exploit_assessment(
         "poc_validation",
         "exploit_policy",
     )
+    if profile == "exploit":
+        stage_names = ("dynamic_validation",) + stage_names
     stage_statuses: dict[str, JsonValue] = {
         stage_name: _read_report_stage_status(report, stage_name)
         for stage_name in stage_names
@@ -2811,9 +2813,12 @@ def analyze_run(
     ]
     try:
         from .exploit_chain import ExploitChainStage, ExploitGateStage
+        from .dynamic_validation import DynamicValidationStage
         from .poc_validation import PocValidationStage
         from .exploit_policy import ExploitEvidencePolicyStage
 
+        if manifest_profile == "exploit":
+            stages.append(DynamicValidationStage())
         stages.append(ExploitGateStage())
         stages.append(ExploitChainStage())
         stages.append(PocValidationStage())

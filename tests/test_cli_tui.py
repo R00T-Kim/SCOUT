@@ -100,9 +100,8 @@ def test_tui_cli_renders_candidate_dashboard(
     assert "AIEdge TUI ::" in out
     assert "Exploit Candidate Map" in out
     assert "candidate_count=1" in out
-    assert "Top 1 candidate(s) [compact]" in out
-    assert "[M] 0.760 cmd_exec_injection_risk" in out
-    assert "Hypothesis groups: 1 unique" in out
+    assert "Top 1 grouped candidate(s) [compact]" in out
+    assert "Candidate groups: 1 unique" in out
     assert "G01 [M] family=cmd_exec_injection_risk" in out
     assert "attack: Potential command injection" in out
     assert "next: Trace sink arguments" in out
@@ -182,3 +181,93 @@ def test_tui_cli_rejects_watch_and_interactive_together(
     captured = capsys.readouterr()
     assert rc == 20
     assert "--interactive and --watch cannot be combined" in captured.err
+
+
+def test_tui_cli_shows_chain_linked_exploit_bundle_evidence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = tmp_path / "run"
+    report_dir = run_dir / "report"
+    findings_dir = run_dir / "stages" / "findings"
+    exploits_dir = run_dir / "exploits" / "chain_alpha"
+    (exploits_dir).mkdir(parents=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"profile": "exploit"}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    report_dir.mkdir(parents=True)
+    (report_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "llm": {"status": "ok"},
+                "report_completeness": {"status": "complete", "gate_passed": True},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (report_dir / "analyst_digest.json").write_text(
+        json.dumps(
+            {
+                "exploitability_verdict": {
+                    "state": "NOT_ATTEMPTED",
+                    "reason_codes": ["NOT_ATTEMPTED_REQUIRED_VERIFIER_MISSING"],
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (exploits_dir / "evidence_bundle.json").write_text(
+        json.dumps({"chain_id": "alpha"}, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    findings_dir.mkdir(parents=True)
+    (findings_dir / "exploit_candidates.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "exploit-candidates-v1",
+                "summary": {
+                    "candidate_count": 1,
+                    "chain_backed": 1,
+                    "high": 0,
+                    "medium": 1,
+                    "low": 0,
+                },
+                "candidates": [
+                    {
+                        "candidate_id": "candidate:alpha",
+                        "priority": "high",
+                        "score": 0.92,
+                        "source": "pattern",
+                        "chain_id": "alpha",
+                        "families": ["cmd_exec_injection_risk"],
+                        "path": "stages/extraction/rootfs/opt/vyatta/sbin/vyatta-link-detect",
+                        "attack_hypothesis": "Potential command injection if untrusted input reaches shell/eval execution path.",
+                        "expected_impact": ["Arbitrary command execution in service context."],
+                        "validation_plan": [
+                            "Trace sink arguments to identify untrusted input propagation."
+                        ],
+                        "evidence_refs": [],
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rc = main(["tui", str(run_dir)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    out = captured.out
+    assert "Verifier artifacts:" in out
+    assert "exploit_bundles=1" in out
+    assert "exploit_bundle" in out
+    assert "chain_linked" in out

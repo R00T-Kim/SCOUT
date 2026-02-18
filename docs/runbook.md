@@ -112,14 +112,15 @@ PY
 PYTHONPATH=src python3 -m aiedge serve <run_dir>
 ```
 
-- Terminal-only workflow (no browser required):
+Terminal-only workflow (no browser required):
 
 ```bash
+# default best-mode: picks interactive when TTY, static once otherwise
 PYTHONPATH=src python3 -m aiedge tui <run_dir>
-# optional live refresh
-PYTHONPATH=src python3 -m aiedge tui <run_dir> --watch --interval-s 2
-# optional interactive mode (q to quit)
-PYTHONPATH=src python3 -m aiedge tui <run_dir> --interactive --limit 30
+# explicit live refresh
+PYTHONPATH=src python3 -m aiedge tui <run_dir> --mode watch --interval-s 2
+# explicit interactive mode (q to quit)
+PYTHONPATH=src python3 -m aiedge tui <run_dir> --mode interactive --limit 30
 ```
 
 Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `r` to refresh, `q` to quit.
@@ -132,6 +133,12 @@ Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `r` to refresh
   - `manifest.track.track_id=8mb` -> final 8MB report-contract gate is applicable.
 
 ### Cockpit card meanings (operator guidance)
+
+- **Runtime Communication Model**: after `graph` stage, run `stages/graph/communication_graph.json` and `stages/graph/communication_graph.cypher` are produced for runtime/service mapping.
+- **Neo4j import (one-shot)**:
+  1. `cypher-shell -u <user> -p <pass> < run_dir/stages/graph/communication_graph.cypher`
+  2. or use any Cypher runner that loads `comm_node`/`COMM_FLOW` tuples from that file.
+- `CSV` exports (`communication_graph.nodes.csv`, `communication_graph.edges.csv`) can also be imported directly to BI tooling for a lightweight matrix view.
 
 - **Executive Verdict**: current digest verdict (`state`, `reason_codes`, `next_actions`); if digest data is missing/incomplete, treat as blocked/unknown (fail-closed).
 - **Attack Surface Scale**: high-level counts (endpoints/surfaces/unknowns/non-promoted) to estimate analysis scope; these counts are context, not proof.
