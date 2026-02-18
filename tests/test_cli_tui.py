@@ -116,3 +116,42 @@ def test_tui_cli_rejects_invalid_limit(
     assert rc == 20
     assert "Invalid --limit value" in captured.err
 
+
+def test_tui_cli_watch_renders_only_when_snapshot_changes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+
+    snapshots = iter(
+        [
+            ["header", "candidate_count=1"],
+            ["header", "candidate_count=1"],
+            ["header", "candidate_count=2"],
+        ]
+    )
+
+    from aiedge import __main__ as cli
+
+    def fake_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
+        _ = (run_dir, limit)
+        return list(next(snapshots))
+
+    sleep_count = {"value": 0}
+
+    def fake_sleep(seconds: float) -> None:
+        _ = seconds
+        sleep_count["value"] += 1
+        if sleep_count["value"] >= 3:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_build_tui_snapshot_lines", fake_snapshot_lines)
+    monkeypatch.setattr(cli.time, "sleep", fake_sleep)
+
+    rc = main(["tui", str(run_dir), "--watch", "--interval-s", "0.1"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out.count("candidate_count=1") == 1
+    assert captured.out.count("candidate_count=2") == 1

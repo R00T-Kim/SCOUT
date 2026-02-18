@@ -10,6 +10,7 @@ import functools
 import hashlib
 import importlib
 import json
+import os
 import sys
 import textwrap
 import time
@@ -167,6 +168,20 @@ def _short_text(value: object, *, max_len: int = 96) -> str:
     return text[: max_len - 3] + "..."
 
 
+def _short_path(value: object, *, max_len: int = 120) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if len(text) <= max_len:
+        return text
+    if max_len <= 7:
+        return text[:max_len]
+    keep = max_len - 3
+    head = int(keep * 0.55)
+    tail = keep - head
+    return text[:head] + "..." + text[-tail:]
+
+
 def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> str:
     if width <= 0:
         width = 24
@@ -258,11 +273,12 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     lines.append("")
     lines.append(f"Top {min(limit, len(candidates))} candidate(s)")
     lines.append("-" * 88)
+    last_context: tuple[str, str, str] | None = None
     for idx, item in enumerate(candidates[:limit], start=1):
         pr = _short_text(item.get("priority"), max_len=16) or "unknown"
         source = _short_text(item.get("source"), max_len=16) or "unknown"
         score = _as_float(item.get("score"))
-        path = _short_text(item.get("path"), max_len=120) or "(none)"
+        path = _short_path(item.get("path"), max_len=120) or "(none)"
         families_any = item.get("families")
         families = (
             [x for x in cast(list[object], families_any) if isinstance(x, str)]
@@ -294,12 +310,18 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
             f"{idx:02d}. [{pr}] score={score:.3f} source={source} family={family_text}"
         )
         lines.append(f"    path: {path}")
-        if hypothesis:
-            lines.append(f"    attack: {hypothesis}")
-        if impact:
-            lines.append(f"    impact: {impact}")
-        if next_step:
-            lines.append(f"    next: {next_step}")
+
+        context = (hypothesis, impact, next_step)
+        if context != last_context:
+            if hypothesis:
+                lines.append(f"    attack: {hypothesis}")
+            if impact:
+                lines.append(f"    impact: {impact}")
+            if next_step:
+                lines.append(f"    next: {next_step}")
+            last_context = context
+        else:
+            lines.append("    note: same attack/impact/next as previous candidate")
 
     return lines
 
@@ -330,11 +352,24 @@ def _run_tui(
     if not watch:
         return render_once()
 
+    supports_ansi = bool(
+        sys.stdout.isatty() and os.environ.get("TERM", "dumb").lower() != "dumb"
+    )
+    last_snapshot: str | None = None
+
     try:
         while True:
             lines = _build_tui_snapshot_lines(run_dir=run_dir, limit=limit)
-            # ANSI clear+home for lightweight terminal dashboard refresh.
-            print("\x1b[2J\x1b[H" + "\n".join(lines), end="", flush=True)
+            snapshot = "\n".join(lines)
+            if snapshot != last_snapshot:
+                if supports_ansi:
+                    # ANSI clear+home for lightweight terminal dashboard refresh.
+                    print("\x1b[2J\x1b[H" + snapshot, end="", flush=True)
+                else:
+                    if last_snapshot is not None:
+                        print("\n" + ("-" * 88))
+                    print(snapshot, flush=True)
+                last_snapshot = snapshot
             time.sleep(float(interval_s))
     except KeyboardInterrupt:
         print("")
