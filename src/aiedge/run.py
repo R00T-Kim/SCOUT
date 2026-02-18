@@ -992,6 +992,48 @@ def _load_manifest_input_path(path: Path) -> str | None:
     return None
 
 
+def _load_manifest_profile(path: Path) -> str:
+    data = _read_json_object(path)
+    if data is None:
+        return "analysis"
+    profile_any = data.get("profile")
+    if isinstance(profile_any, str) and profile_any:
+        return profile_any
+    return "analysis"
+
+
+def _build_exploit_assessment(
+    *, profile: str, report: dict[str, JsonValue], run_dir: Path
+) -> dict[str, JsonValue]:
+    stage_names = (
+        "exploit_gate",
+        "exploit_chain",
+        "poc_validation",
+        "exploit_policy",
+    )
+    stage_statuses: dict[str, JsonValue] = {
+        stage_name: _read_report_stage_status(report, stage_name)
+        for stage_name in stage_names
+    }
+
+    digest_verdict: dict[str, JsonValue] | None = None
+    if profile == "exploit":
+        try:
+            digest_payload = reporting.build_analyst_digest(report, run_dir=run_dir)
+        except Exception:
+            digest_payload = None
+        if isinstance(digest_payload, dict):
+            verdict_any = digest_payload.get("exploitability_verdict")
+            if isinstance(verdict_any, dict):
+                digest_verdict = cast(dict[str, JsonValue], verdict_any)
+
+    return reporting.build_exploit_assessment_from_digest_verdict(
+        profile=profile,
+        stage_statuses=cast(dict[str, JsonValue], stage_statuses),
+        digest_verdict=digest_verdict,
+    )
+
+
 def _llm_skipped_report(reason: str) -> dict[str, JsonValue]:
     return {
         "driver": "codex",
@@ -1729,6 +1771,25 @@ def _apply_stage_result_to_report(
         }
         return
 
+    if stage in ("exploit_gate", "exploit_chain", "exploit_policy"):
+        exploit_stage_evidence = normalize_evidence_list(
+            details.get("evidence"),
+            fallback=[
+                {
+                    "path": f"stages/{stage}",
+                    "note": "evidence missing",
+                }
+            ],
+        )
+        report[stage] = {
+            "status": stage_result.status,
+            "evidence": cast(
+                list[JsonValue], cast(list[object], exploit_stage_evidence)
+            ),
+            "details": details,
+        }
+        return
+
     if stage == "dynamic_validation":
         dynamic_validation_evidence = normalize_evidence_list(
             details.get("evidence"),
@@ -1865,6 +1926,7 @@ def analyze_run(
 
     report = _load_report_json(info.report_json_path)
     source_input_path = _load_manifest_input_path(info.manifest_path)
+    manifest_profile = _load_manifest_profile(info.manifest_path)
     if no_llm:
         report["llm"] = _llm_skipped_report("disabled by --no-llm")
     else:
@@ -3492,6 +3554,20 @@ def analyze_run(
             "details": emu_details2,
         }
 
+    for exploit_stage_name in (
+        "exploit_gate",
+        "exploit_chain",
+        "poc_validation",
+        "exploit_policy",
+    ):
+        exploit_stage_res = next(
+            (r for r in rep.stage_results if r.stage == exploit_stage_name), None
+        )
+        if exploit_stage_res is not None:
+            _apply_stage_result_to_report(
+                report, exploit_stage_res, budget_s=budget_s
+            )
+
     existing_limits = normalize_limitations_list(report.get("limitations"))
     report["limitations"] = cast(
         list[JsonValue],
@@ -3506,6 +3582,9 @@ def analyze_run(
         force_retriage=force_retriage,
     )
     report["findings"] = cast(list[JsonValue], cast(list[object], deduped_findings))
+    report["exploit_assessment"] = _build_exploit_assessment(
+        profile=manifest_profile, report=report, run_dir=info.run_dir
+    )
     report["llm"] = _apply_llm_exec_step(info=info, report=report, no_llm=no_llm)
     _set_report_completion(
         report,

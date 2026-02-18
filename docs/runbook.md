@@ -81,9 +81,19 @@ All four commands must return `[OK]` for a fully verified run.
 3. Follow `finding_verdicts[].evidence_refs` and `finding_verdicts[].verifier_refs` to inspect exact proof artifacts.
 4. Treat any non-`VERIFIED` state as fail-closed and action on `reason_codes` / `next_actions`.
 
+Operator note: for `profile=exploit`, `report/report.json` `exploit_assessment.decision` and
+`exploit_assessment.reason_codes` now mirror `report/analyst_digest.json`
+`exploitability_verdict.state` / `reason_codes`; `exploit_assessment.stage_statuses` is context only.
+
 `VERIFIED` is only meaningful when digest verification passes and all four verified-chain verifiers pass.
 
 ## 8) Single-pane overview (additive, offline-safe)
+
+- Recommended local serving flow (avoids `file://` fetch limitations):
+
+```bash
+PYTHONPATH=src python3 -m aiedge serve <run_dir>
+```
 
 - Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
 - The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.

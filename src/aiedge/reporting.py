@@ -17,6 +17,7 @@ from .schema import (
     ANALYST_DIGEST_AGGREGATION_RULE,
     ANALYST_DIGEST_REASON_CODES,
     ANALYST_DIGEST_SCHEMA_VERSION,
+    ANALYST_DIGEST_VERDICTS,
     ANALYST_DIGEST_STATE_PRECEDENCE,
     ANALYST_REPORT_SCHEMA_VERSION,
     JsonValue,
@@ -1359,6 +1360,60 @@ def _next_actions_for_state(state: str) -> list[str]:
         "Run required verifier pipeline to produce verified_chain artifacts.",
         "Regenerate analyst digest after verifier artifacts are available.",
     ]
+
+
+def _normalize_digest_reason_codes(reason_codes_any: object) -> list[str]:
+    if not isinstance(reason_codes_any, list):
+        return []
+    out: list[str] = []
+    for item_any in cast(list[object], reason_codes_any):
+        if isinstance(item_any, str) and item_any:
+            out.append(item_any)
+    return out
+
+
+def build_exploit_assessment_from_digest_verdict(
+    *,
+    profile: str,
+    stage_statuses: dict[str, JsonValue],
+    digest_verdict: dict[str, JsonValue] | None,
+) -> dict[str, JsonValue]:
+    if profile != "exploit":
+        return {
+            "profile": profile,
+            "stage_statuses": cast(dict[str, JsonValue], dict(stage_statuses)),
+            "decision": "not_requested",
+            "exploitable": None,
+            "reason_codes": cast(
+                list[JsonValue], cast(list[object], ["PROFILE_NOT_EXPLOIT"])
+            ),
+        }
+
+    verdict_state = "NOT_ATTEMPTED"
+    reason_codes = ["NOT_ATTEMPTED_REQUIRED_VERIFIER_MISSING"]
+    if isinstance(digest_verdict, dict):
+        state_any = digest_verdict.get("state")
+        if isinstance(state_any, str) and state_any in ANALYST_DIGEST_VERDICTS:
+            verdict_state = state_any
+        normalized_reason_codes = _normalize_digest_reason_codes(
+            digest_verdict.get("reason_codes")
+        )
+        if normalized_reason_codes:
+            reason_codes = normalized_reason_codes
+
+    exploitable: bool | None = None
+    if verdict_state == "VERIFIED":
+        exploitable = True
+    elif verdict_state == "NOT_APPLICABLE":
+        exploitable = False
+
+    return {
+        "profile": profile,
+        "stage_statuses": cast(dict[str, JsonValue], dict(stage_statuses)),
+        "decision": verdict_state,
+        "exploitable": exploitable,
+        "reason_codes": cast(list[JsonValue], cast(list[object], reason_codes)),
+    }
 
 
 def build_analyst_digest(
