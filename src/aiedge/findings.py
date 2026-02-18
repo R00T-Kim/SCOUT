@@ -1838,6 +1838,10 @@ def _candidate_next_steps(
     if "archive_extraction" in families:
         add("Trace archive input origin and confirm attacker-controllable source.")
         add("Verify extraction path normalization and archive traversal protections.")
+    if "authenticated_mgmt_cmd_path" in families:
+        add("Validate SSH-reachable identities can invoke management command wrappers.")
+        add("Trace authenticated input from SSH/CLI surfaces into command sink arguments.")
+        add("Reproduce authenticated command path in emulation with safe canary inputs.")
     if "cmd_exec_injection_risk" in families:
         add("Trace sink arguments to identify untrusted input propagation.")
         add("Confirm shell execution context and quoting/sanitization boundaries.")
@@ -1904,6 +1908,13 @@ def _candidate_attack_context(
             impacts.append(item)
 
     family_set = set(families)
+    if "authenticated_mgmt_cmd_path" in family_set:
+        add_h(
+            "Authenticated management access may expose command-injection-relevant command wrappers."
+        )
+        add_p("Attacker must obtain valid credentials and reach management-plane service.")
+        add_p("Authenticated parameters must flow into shell/eval sinks without robust sanitization.")
+        add_i("Post-authenticated remote command execution in management context.")
     if "cmd_exec_injection_risk" in family_set:
         add_h(
             "Potential command injection if untrusted input reaches shell/eval execution path."
@@ -2002,6 +2013,30 @@ def _is_operator_priority_candidate_path(path_s: str) -> bool:
             "/htdocs/",
             "/cgi-bin/",
         )
+    )
+
+
+def _priority_cmd_exec_findings(
+    pattern_scan_findings: list[dict[str, JsonValue]],
+) -> list[tuple[dict[str, JsonValue], str]]:
+    out: list[tuple[dict[str, JsonValue], str]] = []
+    for finding in pattern_scan_findings:
+        family = str(finding.get("family", ""))
+        if family != "cmd_exec_injection_risk":
+            continue
+        path_s = _first_static_evidence_path(finding)
+        if not path_s:
+            continue
+        if not _is_operator_priority_candidate_path(path_s):
+            continue
+        out.append((finding, path_s))
+    return sorted(
+        out,
+        key=lambda item: (
+            -_as_float(item[0].get("score")),
+            str(item[0].get("finding_id", "")),
+            item[1],
+        ),
     )
 
 
@@ -2120,6 +2155,92 @@ def _build_exploit_candidates_payload(
         candidates.append(candidate)
         chain_backed_finding_ids.update(finding_ids)
 
+    priority_cmd_exec = _priority_cmd_exec_findings(pattern_scan_findings)
+    if ssh_password_auth_evidence and priority_cmd_exec:
+        top_cmd_exec = priority_cmd_exec[:4]
+        cmd_finding_ids = sorted(
+            {
+                str(finding.get("finding_id", ""))
+                for finding, _path in top_cmd_exec
+                if isinstance(finding.get("finding_id"), str)
+                and str(finding.get("finding_id", ""))
+            }
+        )
+        if cmd_finding_ids:
+            cmd_max_score = max(
+                (_as_float(finding.get("score")) for finding, _path in top_cmd_exec),
+                default=0.0,
+            )
+            combined_score = round(
+                min(0.95, max(0.6, 0.58 + (0.25 * cmd_max_score))),
+                4,
+            )
+            ssh_refs = _evidence_paths_from_rule_evidence(ssh_password_auth_evidence)
+            cmd_refs: set[str] = set()
+            for finding, _path in top_cmd_exec:
+                cmd_refs.update(_as_run_relative_refs(finding.get("evidence_refs")))
+            evidence_refs = sorted(set(ssh_refs).union(cmd_refs))
+            candidate_path = top_cmd_exec[0][1]
+            families = [
+                "authenticated_mgmt_cmd_path",
+                "weak_ssh_password_auth",
+                "cmd_exec_injection_risk",
+            ]
+            chain_id = "heuristic_chain:ssh_auth_to_mgmt_cmd_exec"
+            candidate: dict[str, JsonValue] = {
+                "candidate_id": "candidate:"
+                + _sha256_text(
+                    "heuristic_chain|ssh_auth_to_mgmt_cmd_exec|"
+                    + ",".join(cmd_finding_ids)
+                ),
+                "source": "chain",
+                "chain_id": chain_id,
+                "score": combined_score,
+                "confidence": _confidence_from_score(combined_score),
+                "priority": _candidate_priority_from_score(combined_score),
+                "finding_ids": cast(
+                    list[JsonValue],
+                    cast(
+                        list[object],
+                        cmd_finding_ids
+                        + ["aiedge.findings.config.ssh_password_authentication"],
+                    ),
+                ),
+                "source_finding_ids": cast(list[JsonValue], cast(list[object], [])),
+                "families": cast(list[JsonValue], cast(list[object], families)),
+                "evidence_refs": cast(
+                    list[JsonValue], cast(list[object], evidence_refs)
+                ),
+                "summary": (
+                    "Heuristic chain candidate linking authenticated SSH surface "
+                    "to management command-exec-risk sinks."
+                ),
+                "why_candidate": (
+                    f"PasswordAuthentication=yes plus {len(cmd_finding_ids)} "
+                    "priority management command sink finding(s) indicates plausible "
+                    "post-authenticated command execution path."
+                ),
+                "path": _safe_ascii_text(candidate_path, max_len=240),
+            }
+            steps = _candidate_next_steps(
+                families=families,
+                source="chain",
+                path=candidate_path,
+            )
+            candidate["analyst_next_steps"] = cast(
+                list[JsonValue], cast(list[object], steps)
+            )
+            candidate.update(
+                _candidate_attack_context(
+                    families=families,
+                    source="chain",
+                    path=candidate_path,
+                    validation_plan=steps,
+                )
+            )
+            candidates.append(candidate)
+            chain_backed_finding_ids.update(cmd_finding_ids)
+
     promote_families = {
         "cmd_exec_injection_risk",
         "upload_exec_chain",
@@ -2139,6 +2260,12 @@ def _build_exploit_candidates_payload(
         if prev is None or _as_float(finding.get("score")) > _as_float(prev.get("score")):
             best_standalone[key] = finding
 
+    family_emitted: dict[str, int] = {}
+    family_caps = {
+        "cmd_exec_injection_risk": 4,
+        "upload_exec_chain": 8,
+        "archive_extraction": 8,
+    }
     for (_, path_s), finding in sorted(
         best_standalone.items(),
         key=lambda item: (
@@ -2150,6 +2277,10 @@ def _build_exploit_candidates_payload(
         if not isinstance(fid_any, str) or not fid_any:
             continue
         family = str(finding.get("family", ""))
+        emitted = family_emitted.get(family, 0)
+        family_cap = family_caps.get(family, 6)
+        if emitted >= family_cap:
+            continue
         score = round(_as_float(finding.get("score")), 4)
         priority_path = bool(path_s) and _is_operator_priority_candidate_path(path_s)
         if score < 0.74 and not (priority_path and score >= 0.48):
@@ -2193,6 +2324,7 @@ def _build_exploit_candidates_payload(
         )
         candidate.update(attack_ctx)
         candidates.append(candidate)
+        family_emitted[family] = emitted + 1
 
     if ssh_password_auth_evidence:
         family = "weak_ssh_password_auth"

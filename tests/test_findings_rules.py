@@ -856,6 +856,43 @@ def test_run_findings_promotes_priority_path_low_medium_score_candidate(
     assert all(float(cast(float, c.get("score", 0.0))) >= 0.48 for c in ubnt_candidates)
 
 
+def test_run_findings_adds_authenticated_mgmt_chain_candidate_from_ssh_and_cmd_exec(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "opt" / "vyatta" / "etc" / "ssh").mkdir(parents=True)
+    (extracted / "opt" / "vyatta" / "scripts").mkdir(parents=True)
+    _ = (extracted / "opt" / "vyatta" / "etc" / "ssh" / "sshd_config").write_text(
+        "PasswordAuthentication yes\n",
+        encoding="utf-8",
+    )
+    _ = (extracted / "opt" / "vyatta" / "scripts" / "peer.sh").write_text(
+        '#!/bin/sh\neval "cfg_$1 ${2:-}"\n',
+        encoding="utf-8",
+    )
+
+    _ = run_findings(ctx)
+    exploit_candidates = _read_json(
+        ctx.run_dir / "stages" / "findings" / "exploit_candidates.json"
+    )
+    summary = cast(dict[str, object], exploit_candidates.get("summary", {}))
+    candidates = cast(list[dict[str, object]], exploit_candidates.get("candidates", []))
+    auth_chain = [
+        c
+        for c in candidates
+        if c.get("source") == "chain"
+        and "authenticated_mgmt_cmd_path"
+        in cast(list[object], c.get("families", []))
+    ]
+    assert auth_chain
+    assert cast(int, summary.get("chain_backed", 0)) >= 1
+
+
 def test_run_findings_binary_budget_aggressive_mode(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
