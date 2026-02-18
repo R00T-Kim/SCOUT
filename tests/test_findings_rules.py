@@ -719,6 +719,36 @@ def test_run_findings_promotes_priority_path_medium_score_candidate(
     assert any(float(cast(float, c.get("score", 0.0))) >= 0.56 for c in ubnt_candidates)
 
 
+def test_run_findings_promotes_priority_path_low_medium_score_candidate(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "usr" / "bin").mkdir(parents=True)
+    _ = (extracted / "usr" / "bin" / "ubnt-upgrade").write_text(
+        "#!/bin/sh\ntar -xvf \"$1\" -C /tmp/fw\n",
+        encoding="utf-8",
+    )
+
+    _ = run_findings(ctx)
+    exploit_candidates = _read_json(
+        ctx.run_dir / "stages" / "findings" / "exploit_candidates.json"
+    )
+    candidates = cast(list[dict[str, object]], exploit_candidates.get("candidates", []))
+    ubnt_candidates = [
+        c
+        for c in candidates
+        if isinstance(c.get("path"), str)
+        and cast(str, c.get("path")).endswith("/usr/bin/ubnt-upgrade")
+    ]
+    assert ubnt_candidates
+    assert all(float(cast(float, c.get("score", 0.0))) >= 0.48 for c in ubnt_candidates)
+
+
 def test_run_findings_binary_budget_aggressive_mode(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

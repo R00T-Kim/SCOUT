@@ -1913,7 +1913,7 @@ def _build_exploit_candidates_payload(
         family = str(finding.get("family", ""))
         score = round(_as_float(finding.get("score")), 4)
         priority_path = bool(path_s) and _is_operator_priority_candidate_path(path_s)
-        if score < 0.74 and not (priority_path and score >= 0.56):
+        if score < 0.74 and not (priority_path and score >= 0.48):
             continue
         evidence_refs = _as_run_relative_refs(finding.get("evidence_refs"))
         summary_text = (
