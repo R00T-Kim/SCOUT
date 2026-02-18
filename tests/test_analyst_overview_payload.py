@@ -75,7 +75,7 @@ def test_resolve_overview_gate_applicability_malformed_profile_blocks_verified_c
     assert reason0.startswith("manifest.profile")
 
 
-def test_collect_overview_artifact_statuses_present_missing_and_invalid(
+def test_collect_overview_artifact_statuses_normalizes_and_rejects_unsafe_refs(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path
@@ -90,14 +90,23 @@ def test_collect_overview_artifact_statuses_present_missing_and_invalid(
     statuses = collect_overview_artifact_statuses(
         run_dir,
         refs=[
+            ("./report/report.json", True),
+            (r"report\\report.json", True),
             ("report/report.json", True),
             ("report/missing.json", True),
             ("../escape.txt", True),
             ("/abs/path.txt", True),
             ("C:/abs.txt", True),
+            ("file:///abs/path.txt", True),
+            ("javascript:alert(1)", True),
+            ("data:text/html,hi", True),
         ],
     )
     by_ref = {item.get("ref"): item for item in statuses}
+    normalized_report_entries = [
+        item for item in statuses if item.get("ref") == "report/report.json"
+    ]
+    assert len(normalized_report_entries) == 3
 
     assert by_ref["report/report.json"]["status"] == "present"
     assert by_ref["report/report.json"]["sha256"] == expected_sha256
@@ -112,6 +121,15 @@ def test_collect_overview_artifact_statuses_present_missing_and_invalid(
 
     assert by_ref["C:/abs.txt"]["status"] == "invalid"
     assert "drive" in str(by_ref["C:/abs.txt"].get("reason", "")).lower()
+
+    assert by_ref["file:///abs/path.txt"]["status"] == "invalid"
+    assert "scheme" in str(by_ref["file:///abs/path.txt"].get("reason", "")).lower()
+
+    assert by_ref["javascript:alert(1)"]["status"] == "invalid"
+    assert "scheme" in str(by_ref["javascript:alert(1)"].get("reason", "")).lower()
+
+    assert by_ref["data:text/html,hi"]["status"] == "invalid"
+    assert "scheme" in str(by_ref["data:text/html,hi"].get("reason", "")).lower()
 
 
 def test_build_analyst_overview_manifest_missing_blocks_all_gates_and_has_panes_order(
@@ -235,3 +253,163 @@ def test_build_analyst_overview_redacts_absolute_paths_in_copied_summaries(
     assert isinstance(endpoints_summary_any, dict)
     assert endpoints_summary_any.get("source") == "report/endpoints.json"
     assert endpoints_summary_any.get("abs") == "(redacted: absolute path)"
+
+
+def test_build_analyst_overview_cockpit_blocks_have_expected_shape(
+    tmp_path: Path,
+) -> None:
+    report: dict[str, JsonValue] = {
+        "attack_surface": {
+            "summary": {
+                "endpoints": 3,
+                "surfaces": 2,
+                "unknowns": 1,
+                "non_promoted": 4,
+            }
+        }
+    }
+    digest: dict[str, JsonValue] = {
+        "exploitability_verdict": {
+            "state": "ATTEMPTED_INCONCLUSIVE",
+            "reason_codes": ["ATTEMPTED_VERIFIER_FAILED"],
+        },
+        "next_actions": ["rerun verifier"],
+    }
+
+    payload = build_analyst_overview(
+        report,
+        run_dir=tmp_path,
+        manifest={"profile": "analysis"},
+        digest=digest,
+    )
+
+    cockpit_any = payload.get("cockpit")
+    assert isinstance(cockpit_any, dict)
+
+    executive_any = cockpit_any.get("executive_verdict")
+    assert isinstance(executive_any, dict)
+    assert isinstance(executive_any.get("status"), str)
+    assert isinstance(executive_any.get("sources"), list)
+    executive_data_any = executive_any.get("data")
+    assert isinstance(executive_data_any, dict)
+    assert isinstance(executive_data_any.get("verdict_state"), str)
+    assert isinstance(executive_data_any.get("reason_codes"), list)
+    assert isinstance(executive_data_any.get("next_actions"), list)
+
+    attack_surface_any = cockpit_any.get("attack_surface_scale")
+    assert isinstance(attack_surface_any, dict)
+    assert isinstance(attack_surface_any.get("status"), str)
+    assert isinstance(attack_surface_any.get("sources"), list)
+    attack_surface_data_any = attack_surface_any.get("data")
+    assert isinstance(attack_surface_data_any, dict)
+    assert "endpoints" in attack_surface_data_any
+    assert "surfaces" in attack_surface_data_any
+    assert "unknowns" in attack_surface_data_any
+    assert "non_promoted" in attack_surface_data_any
+
+    verification_any = cockpit_any.get("verification_status")
+    assert isinstance(verification_any, dict)
+    assert isinstance(verification_any.get("status"), str)
+    assert isinstance(verification_any.get("sources"), list)
+    verification_data_any = verification_any.get("data")
+    assert isinstance(verification_data_any, dict)
+    assert isinstance(verification_data_any.get("gates"), list)
+    assert isinstance(verification_data_any.get("artifacts"), list)
+    assert isinstance(verification_data_any.get("artifact_counts"), dict)
+    assert isinstance(verification_data_any.get("blockers"), list)
+
+    evidence_nav_any = cockpit_any.get("evidence_navigator")
+    assert isinstance(evidence_nav_any, dict)
+    assert isinstance(evidence_nav_any.get("status"), str)
+    assert isinstance(evidence_nav_any.get("sources"), list)
+    evidence_nav_data_any = evidence_nav_any.get("data")
+    assert isinstance(evidence_nav_data_any, dict)
+    assert isinstance(evidence_nav_data_any.get("evidence_links"), list)
+
+
+def test_build_analyst_overview_cockpit_executive_verdict_fails_closed_without_digest(
+    tmp_path: Path,
+) -> None:
+    payload = build_analyst_overview(
+        {},
+        run_dir=tmp_path,
+        manifest={"profile": "analysis"},
+        digest={},
+    )
+
+    cockpit_any = payload.get("cockpit")
+    assert isinstance(cockpit_any, dict)
+    executive_any = cockpit_any.get("executive_verdict")
+    assert isinstance(executive_any, dict)
+    status_any = executive_any.get("status")
+    assert isinstance(status_any, str)
+    assert status_any in {"blocked", "partial"}
+
+    executive_data_any = executive_any.get("data")
+    assert isinstance(executive_data_any, dict)
+    assert executive_data_any.get("verdict_state") == "unknown"
+
+
+def test_build_analyst_overview_cockpit_evidence_links_are_run_relative_only(
+    tmp_path: Path,
+) -> None:
+    digest: dict[str, JsonValue] = {
+        "evidence_index": [
+            {"ref": "report/report.json"},
+            {"ref": "https://attacker.invalid/a"},
+            {"ref": "file:///etc/passwd"},
+            {"ref": "../escape.txt"},
+            {"ref": "/etc/shadow"},
+            {"ref": "javascript:alert(1)"},
+            {"ref": "data:text/plain,hello"},
+        ],
+        "finding_verdicts": [
+            {
+                "evidence_refs": [
+                    "stages/findings/pattern_scan.json",
+                    "http://attacker.invalid/b",
+                    "../outside",
+                ],
+                "verifier_refs": ["/abs/verifier.json", "data:text/plain,bad"],
+            }
+        ],
+    }
+    payload = build_analyst_overview(
+        {},
+        run_dir=tmp_path,
+        manifest={"profile": "analysis"},
+        digest=digest,
+    )
+
+    cockpit_any = payload.get("cockpit")
+    assert isinstance(cockpit_any, dict)
+    evidence_nav_any = cockpit_any.get("evidence_navigator")
+    assert isinstance(evidence_nav_any, dict)
+    evidence_nav_data_any = evidence_nav_any.get("data")
+    assert isinstance(evidence_nav_data_any, dict)
+    evidence_links_any = evidence_nav_data_any.get("evidence_links")
+    assert isinstance(evidence_links_any, list)
+
+    disallowed_prefixes = (
+        "http://",
+        "https://",
+        "/",
+        "file:",
+        "javascript:",
+        "data:",
+    )
+    for link_any in evidence_links_any:
+        assert isinstance(link_any, str)
+        link = link_any
+        assert not link.startswith(disallowed_prefixes)
+        assert ".." not in link
+
+    evidence_links = set(cast(list[str], evidence_links_any))
+    assert "report/report.json" in evidence_links
+    assert "stages/findings/pattern_scan.json" in evidence_links
+    assert "https://attacker.invalid/a" not in evidence_links
+    assert "file:///etc/passwd" not in evidence_links
+    assert "../escape.txt" not in evidence_links
+    assert "/etc/shadow" not in evidence_links
+    assert "javascript:alert(1)" not in evidence_links
+    assert "data:text/plain,hello" not in evidence_links

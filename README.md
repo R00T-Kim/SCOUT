@@ -472,17 +472,18 @@ python3 bridge/validate_tribunal_artifacts.py --report-dir reports/<report_id>
 python3 bridge/validate_confirmed_policy.py --report-dir reports/<report_id>
 ```
 
-Single-pane operator overview (additive, offline-safe):
+Analyst workflow cockpit (additive, offline-safe):
 
-- Open `aiedge-runs/<run_id>/report/viewer.html`.
-- Derived payload is `aiedge-runs/<run_id>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`).
-- `viewer.html` embeds bootstrap JSON and shows `#file-warning` for `file://` fetch limitations.
-- Caveats:
-  - `manifest.profile=analysis` means verified-chain gate is not applicable.
-  - `manifest.track.track_id=8mb` means final 8MB report-contract gate is applicable.
-- Trust boundary: viewer output is not a verifier; authoritative checks remain:
-  - `python3 scripts/verify_analyst_digest.py --run-dir aiedge-runs/<run_id>`
-  - `python3 scripts/verify_aiedge_analyst_report.py --run-dir aiedge-runs/<run_id>`
+- Open `<run_dir>/report/viewer.html`.
+- Offline-safe behavior: `viewer.html` embeds bootstrap JSON and falls back when `file://` fetch is restricted (`#file-warning`).
+- Cockpit answers at a glance:
+  - Executive verdict (state/reason_codes/next_actions)
+  - Attack surface scale (scope/context counts)
+  - Verification status (gate applicability/presence)
+  - Evidence shortcuts (digest/overview/report navigation)
+- Trust boundary: cockpit output is convenience only; verifiers remain authoritative:
+  - `python3 scripts/verify_analyst_digest.py --run-dir <run_dir>`
+  - `python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>`
 
 ---
 

@@ -52,6 +52,10 @@ def test_viewer_html_contains_required_single_pane_section_anchors(
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES}"',
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE}"',
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS}"',
+        'id="pane-executive-verdict"',
+        'id="pane-attack-surface-scale"',
+        'id="pane-verification-status"',
+        'id="pane-evidence-navigator"',
     )
 
     for pane_id in required_pane_ids:
@@ -63,6 +67,10 @@ def test_viewer_html_contains_required_single_pane_section_anchors(
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES}"',
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE}"',
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS}"',
+        'id="executive-verdict"',
+        'id="attack-surface-scale"',
+        'id="verification-status"',
+        'id="evidence-navigator"',
     )
 
     for mount_id in required_mount_ids:
@@ -99,3 +107,17 @@ def test_viewer_html_has_offline_warning_and_bootstrap_fallback_hooks(
     assert "renderOverview(window.__aiedge_overview);" in html
     assert "renderVulnerabilities(window.__aiedge_digest);" in html
     assert "render({});" in html
+
+
+def test_viewer_html_contains_evidence_navigator_safety_helpers(
+    tmp_path: Path,
+) -> None:
+    html = _build_viewer_html(tmp_path)
+
+    assert "function isSafeRunRelativeRef" in html
+    assert "function hrefForEvidenceRef" in html
+    assert "function copyText" in html
+
+    assert "evidence-link" in html
+    assert "unsafe-ref" in html
+    assert "copy-ref" in html

@@ -87,16 +87,29 @@ All four commands must return `[OK]` for a fully verified run.
 
 - Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
 - The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.
-- Offline behavior is supported via embedded bootstrap JSON in `viewer.html`; when opened via `file://`, browser fetch restrictions are surfaced in the in-page warning anchor `#file-warning`.
+- Offline behavior is supported via embedded bootstrap JSON in `viewer.html`; when opened via `file://`, browser fetch restrictions are surfaced in the in-page warning anchor `#file-warning` and the viewer falls back to embedded bootstrap data.
 - Gate applicability caveats:
   - `manifest.profile=analysis` -> verified-chain gate is `not_applicable`.
   - `manifest.track.track_id=8mb` -> final 8MB report-contract gate is applicable.
-- Trust boundary: `viewer.html` is an operator aid, not a verifier. Verifier scripts remain authoritative:
+
+### Cockpit card meanings (operator guidance)
+
+- **Executive Verdict**: current digest verdict (`state`, `reason_codes`, `next_actions`); if digest data is missing/incomplete, treat as blocked/unknown (fail-closed).
+- **Attack Surface Scale**: high-level counts (endpoints/surfaces/unknowns/non-promoted) to estimate analysis scope; these counts are context, not proof.
+- **Verification Status**: gate applicability/presence indicators from overview payload; this card does not report authoritative verifier pass/fail.
+- **Evidence Navigator**: run-relative shortcuts to digest/overview/report artifacts; use links to inspect evidence and verifier references quickly.
+
+### Trust boundary and authoritative checks
+
+- `viewer.html` is non-authoritative convenience UI only.
+- Verifier scripts are authoritative for release/operator gates:
 
 ```bash
 python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
 python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 ```
+
+- Fail-closed rule: if cockpit cards disagree with verifier output, or required artifacts/verifier results are missing, treat the run as non-verified.
 
 ## 9) Notes for operators
 

@@ -64,16 +64,31 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 
 - Viewer artifact: `report/viewer.html` (operator-facing single-pane overview).
 - Overview payload: `report/analyst_overview.json` with `schema_version="analyst_overview-v1"`; this is a derived additive payload and does not replace existing report/digest contracts.
-- Offline behavior: `viewer.html` embeds bootstrap JSON for local rendering and includes `#file-warning` when `file://` fetch limitations apply.
+- Offline behavior: `viewer.html` embeds bootstrap JSON for local rendering and includes `#file-warning` when `file://` fetch limitations apply; under `file://`, relative fetches can fail and viewer rendering may rely on bootstrap fallback.
 - Gate applicability caveats in overview payload:
   - `manifest.profile=analysis` => `verified_chain` gate is `not_applicable`.
   - `manifest.track.track_id=8mb` => `final_report_contract_8mb` gate is applicable.
-- Trust boundary: viewer output is convenience UI only. Contract authority remains with verifier scripts:
+
+Cockpit card intent (non-authoritative guidance only):
+
+- Executive Verdict: summarizes digest verdict state/reason codes/next actions.
+- Attack Surface Scale: summary counts for scope triage (not proof of exploitability).
+- Verification Status: gate applicability/presence indicators only.
+- Evidence Navigator: run-relative links to contract artifacts and verifier refs.
+
+Gate vs verifier distinction:
+
+- Gate applicability/presence shown in cockpit is a viewer-side interpretation aid.
+- Authoritative pass/fail is produced only by verifier scripts.
+
+Trust boundary: viewer output is convenience UI only. Contract authority remains with verifier scripts:
 
 ```bash
 python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
 python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 ```
+
+- Fail-closed semantics: any missing artifacts, unavailable verifier results, or viewer/verifier mismatch must be treated as non-verified.
 
 ## Analyst Digest Verifier (Digest-First Entry)
 
