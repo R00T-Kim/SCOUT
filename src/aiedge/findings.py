@@ -1098,8 +1098,32 @@ _LOW_SIGNAL_PATH_SEGMENTS = {
     "mocks",
     "benchmark",
     "benchmarks",
+    "dist-packages",
+    "site-packages",
+    "vendor-packages",
 }
 _LOW_SIGNAL_BASENAME_PREFIXES = ("readme", "changelog", "license", "notice")
+_LOW_SIGNAL_BASENAMES = {
+    "pyversions.py",
+    "zgrep",
+    "zdiff",
+    "zmore",
+    "gzexe",
+    "lesspipe",
+    "blkdeactivate",
+}
+_LOW_SIGNAL_REL_SUBSTRINGS = (
+    "/usr/lib/python",
+    "/usr/share/python/",
+    "/usr/share/perl",
+    "/usr/lib/perl",
+    "/usr/share/doc/",
+    "/usr/share/man/",
+    "/var/lib/dpkg/",
+    "/usr/include/",
+    "/usr/lib/locale/",
+    "/usr/lib/ruby/",
+)
 _HIGH_SIGNAL_PATH_SEGMENTS = {
     "app",
     "apps",
@@ -1113,6 +1137,10 @@ _HIGH_SIGNAL_PATH_SEGMENTS = {
     "system",
     "vendor",
     "product",
+    "opt",
+    "vyatta",
+    "ubnt",
+    "edgeos",
 }
 
 
@@ -1131,6 +1159,10 @@ def _path_signal_weight_for_static_hit(
 
     leaf = parts[-1]
     stem = leaf.rsplit(".", 1)[0]
+    if leaf in _LOW_SIGNAL_BASENAMES:
+        return 0.0, True
+    if any(token in rel for token in _LOW_SIGNAL_REL_SUBSTRINGS):
+        return 0.0, True
     if any(part in _LOW_SIGNAL_PATH_SEGMENTS for part in parts) or any(
         stem.startswith(prefix) for prefix in _LOW_SIGNAL_BASENAME_PREFIXES
     ):
@@ -1144,6 +1176,17 @@ def _path_signal_weight_for_static_hit(
         for token in ("/cgi-bin/", "/www/", "/htdocs/", "/api/", "/routes/", "/handlers/")
     ):
         weight += 0.08
+    if any(
+        token in rel
+        for token in (
+            "/opt/vyatta/",
+            "/opt/ubnt/",
+            "/usr/libexec/vyatta/",
+            "/usr/libexec/ubnt/",
+            "/usr/sbin/",
+        )
+    ):
+        weight += 0.2
     if rule_family == "command_execution_injection_risk" and any(
         token in rel
         for token in ("/cgi", "/web", "/handler", "/route", "/service", "/daemon")
@@ -1224,7 +1267,10 @@ def _iter_text_rule_hits(
             "command_execution_injection_risk",
             "shell_eval_injection",
             "shell",
-            re.compile(r"\beval\s+\"?\$|\bsh\s+-c\s+\$", re.IGNORECASE),
+            re.compile(
+                r"\beval\s+(?:\"[^\n]*\$|[^\n]*\$)|\bsh\s+-c\s+(?:\"[^\n]*\$|[^\n]*\$)",
+                re.IGNORECASE,
+            ),
             0.6,
         ),
     ]
@@ -1725,6 +1771,25 @@ def _first_static_evidence_path(finding: dict[str, JsonValue]) -> str | None:
     return None
 
 
+def _is_operator_priority_candidate_path(path_s: str) -> bool:
+    rel = path_s.replace("\\", "/").lower()
+    return any(
+        token in rel
+        for token in (
+            "/opt/vyatta/",
+            "/opt/ubnt/",
+            "/opt/wireguard/",
+            "/usr/sbin/ubnt-",
+            "/usr/bin/ubnt-",
+            "/usr/libexec/vyatta/",
+            "/usr/libexec/ubnt/",
+            "/www/",
+            "/htdocs/",
+            "/cgi-bin/",
+        )
+    )
+
+
 def _build_exploit_candidates_payload(
     *,
     firmware_id: str,
@@ -1821,23 +1886,42 @@ def _build_exploit_candidates_payload(
         "upload_exec_chain",
         "archive_extraction",
     }
-    for finding in sorted(
-        pattern_scan_findings,
-        key=lambda item: str(item.get("finding_id", "")),
-    ):
+    best_standalone: dict[tuple[str, str], dict[str, JsonValue]] = {}
+    for finding in pattern_scan_findings:
         fid_any = finding.get("finding_id")
-        if not isinstance(fid_any, str) or not fid_any:
-            continue
-        if fid_any in chain_backed_finding_ids:
+        if not isinstance(fid_any, str) or not fid_any or fid_any in chain_backed_finding_ids:
             continue
         family = str(finding.get("family", ""))
         if family not in promote_families:
             continue
+        path_s = _first_static_evidence_path(finding) or ""
+        key = (family, path_s)
+        prev = best_standalone.get(key)
+        if prev is None or _as_float(finding.get("score")) > _as_float(prev.get("score")):
+            best_standalone[key] = finding
+
+    for (_, path_s), finding in sorted(
+        best_standalone.items(),
+        key=lambda item: (
+            -_as_float(item[1].get("score")),
+            str(item[1].get("finding_id", "")),
+        ),
+    ):
+        fid_any = finding.get("finding_id")
+        if not isinstance(fid_any, str) or not fid_any:
+            continue
+        family = str(finding.get("family", ""))
         score = round(_as_float(finding.get("score")), 4)
-        if score < 0.74:
+        priority_path = bool(path_s) and _is_operator_priority_candidate_path(path_s)
+        if score < 0.74 and not (priority_path and score >= 0.56):
             continue
         evidence_refs = _as_run_relative_refs(finding.get("evidence_refs"))
-        candidate = {
+        summary_text = (
+            "Priority-path standalone static finding candidate."
+            if priority_path and score < 0.74
+            else "High-confidence standalone static finding candidate."
+        )
+        candidate: dict[str, JsonValue] = {
             "candidate_id": "candidate:" + _sha256_text(f"pattern|{fid_any}"),
             "source": "pattern",
             "score": score,
@@ -1846,12 +1930,11 @@ def _build_exploit_candidates_payload(
             "finding_ids": cast(list[JsonValue], cast(list[object], [fid_any])),
             "families": cast(list[JsonValue], cast(list[object], [family])),
             "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
-            "summary": "High-confidence standalone static finding candidate.",
+            "summary": summary_text,
         }
-        path_s = _first_static_evidence_path(finding)
-        if path_s is not None:
+        if path_s:
             candidate["path"] = _safe_ascii_text(path_s, max_len=240)
-        candidates.append(cast(dict[str, JsonValue], candidate))
+        candidates.append(candidate)
 
     candidates = sorted(
         candidates,

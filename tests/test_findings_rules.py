@@ -634,6 +634,91 @@ def test_run_findings_static_pattern_path_weighting_and_noise_suppression(
     assert docs_path not in by_path
 
 
+def test_run_findings_suppresses_stdlib_exec_noise_and_promotes_opt_shell_signal(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "usr" / "lib" / "python2.7").mkdir(parents=True)
+    (extracted / "opt" / "vyatta" / "scripts").mkdir(parents=True)
+
+    _ = (extracted / "usr" / "lib" / "python2.7" / "pipes.py").write_text(
+        "import os\nos.system('echo test')\n",
+        encoding="utf-8",
+    )
+    _ = (extracted / "opt" / "vyatta" / "scripts" / "peer.sh").write_text(
+        '#!/bin/sh\neval "cfg_$1 ${2:-}"\n',
+        encoding="utf-8",
+    )
+
+    _ = run_findings(ctx)
+    pattern_scan = _read_json(ctx.run_dir / "stages" / "findings" / "pattern_scan.json")
+    hits = cast(list[dict[str, object]], pattern_scan.get("findings", []))
+
+    paths = []
+    vyatta_scores: list[float] = []
+    for hit in hits:
+        ev = cast(list[dict[str, object]], hit.get("evidence", []))
+        if not ev:
+            continue
+        path_any = ev[0].get("path")
+        if not isinstance(path_any, str):
+            continue
+        paths.append(path_any)
+        if path_any.endswith("/opt/vyatta/scripts/peer.sh"):
+            score_any = hit.get("score")
+            if isinstance(score_any, (int, float)):
+                vyatta_scores.append(float(score_any))
+
+    assert (
+        "stages/extraction/_firmware.bin.extracted/rootfs/usr/lib/python2.7/pipes.py"
+        not in paths
+    )
+    assert vyatta_scores and max(vyatta_scores) >= 0.74
+
+    exploit_candidates = _read_json(
+        ctx.run_dir / "stages" / "findings" / "exploit_candidates.json"
+    )
+    summary_any = exploit_candidates.get("summary")
+    assert isinstance(summary_any, dict)
+    assert cast(dict[str, object], summary_any).get("candidate_count", 0) >= 1
+
+
+def test_run_findings_promotes_priority_path_medium_score_candidate(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "usr" / "sbin").mkdir(parents=True)
+    _ = (extracted / "usr" / "sbin" / "ubnt-update-dpi").write_text(
+        "#!/bin/sh\ntar -xvf \"$1\" -C /tmp/dpi\n",
+        encoding="utf-8",
+    )
+
+    _ = run_findings(ctx)
+    exploit_candidates = _read_json(
+        ctx.run_dir / "stages" / "findings" / "exploit_candidates.json"
+    )
+    candidates = cast(list[dict[str, object]], exploit_candidates.get("candidates", []))
+    assert candidates
+    ubnt_candidates = [
+        c
+        for c in candidates
+        if isinstance(c.get("path"), str)
+        and cast(str, c.get("path")).endswith("/usr/sbin/ubnt-update-dpi")
+    ]
+    assert ubnt_candidates
+    assert any(float(cast(float, c.get("score", 0.0))) >= 0.56 for c in ubnt_candidates)
+
+
 def test_run_findings_binary_budget_aggressive_mode(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
