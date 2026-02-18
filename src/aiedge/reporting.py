@@ -366,6 +366,38 @@ def _load_verified_chain_state(run_dir: Path) -> tuple[str, set[str]]:
     return state, reason_codes
 
 
+def _has_static_chain_attempt_signal(run_dir: Path) -> bool:
+    candidates_path = run_dir / "stages" / "findings" / "exploit_candidates.json"
+    if not candidates_path.is_file():
+        return False
+    try:
+        obj_any = cast(object, json.loads(candidates_path.read_text(encoding="utf-8")))
+    except Exception:
+        return False
+    if not isinstance(obj_any, dict):
+        return False
+    obj = cast(dict[str, object], obj_any)
+
+    summary_any = obj.get("summary")
+    if isinstance(summary_any, dict):
+        summary = cast(dict[str, object], summary_any)
+        chain_backed_any = summary.get("chain_backed")
+        if isinstance(chain_backed_any, int) and not isinstance(chain_backed_any, bool):
+            if chain_backed_any > 0:
+                return True
+
+    candidates_any = obj.get("candidates")
+    if not isinstance(candidates_any, list):
+        return False
+    for item_any in cast(list[object], candidates_any):
+        if not isinstance(item_any, dict):
+            continue
+        source_any = cast(dict[str, object], item_any).get("source")
+        if isinstance(source_any, str) and source_any == "chain":
+            return True
+    return False
+
+
 def _compute_run_verdict(run_dir: Path) -> tuple[str, list[str], list[str]]:
     scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
     evidence_mod = _load_script_module(
@@ -397,12 +429,19 @@ def _compute_run_verdict(run_dir: Path) -> tuple[str, list[str], list[str]]:
     )
 
     verifier_refs = _collect_verifier_refs(run_dir)
+    has_chain_signal = _has_static_chain_attempt_signal(run_dir)
 
     try:
         evidence_fn(run_dir)
     except Exception as exc:
         reason = _extract_reason_code(exc)
         if reason == "missing_required_artifact":
+            if has_chain_signal:
+                return (
+                    "ATTEMPTED_INCONCLUSIVE",
+                    ["ATTEMPTED_EVIDENCE_INCOMPLETE"],
+                    verifier_refs,
+                )
             return (
                 "NOT_ATTEMPTED",
                 ["NOT_ATTEMPTED_REQUIRED_VERIFIER_MISSING"],
@@ -419,6 +458,12 @@ def _compute_run_verdict(run_dir: Path) -> tuple[str, list[str], list[str]]:
 
     missing_refs, missing_dynamic = _missing_required_verifier_artifacts(run_dir)
     if missing_refs:
+        if missing_dynamic and has_chain_signal:
+            return (
+                "ATTEMPTED_INCONCLUSIVE",
+                ["ATTEMPTED_EVIDENCE_INCOMPLETE"],
+                verifier_refs,
+            )
         reason = (
             "NOT_ATTEMPTED_DYNAMIC_VALIDATION_MISSING"
             if missing_dynamic

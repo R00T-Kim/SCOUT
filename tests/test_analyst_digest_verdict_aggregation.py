@@ -306,6 +306,43 @@ def test_digest_verdict_not_attempted_when_required_artifacts_missing(
     assert verdict["state"] != "VERIFIED"
 
 
+def test_digest_verdict_attempted_inconclusive_when_dynamic_missing_but_chain_signal(
+    tmp_path: Path,
+) -> None:
+    run_dir = _prepare_run_dir(
+        tmp_path,
+        pcap_destinations=None,
+        with_bundle=False,
+    )
+    _write_json(
+        run_dir / "stages" / "findings" / "exploit_candidates.json",
+        {
+            "schema_version": "exploit-candidates-v1",
+            "summary": {
+                "candidate_count": 1,
+                "high": 0,
+                "medium": 1,
+                "low": 0,
+                "chain_backed": 1,
+            },
+            "candidates": [
+                {
+                    "candidate_id": "candidate:demo-chain",
+                    "source": "chain",
+                    "score": 0.8,
+                    "priority": "medium",
+                    "families": ["authenticated_mgmt_cmd_path"],
+                }
+            ],
+        },
+    )
+
+    digest = build_analyst_digest(_report_with_single_finding(), run_dir=run_dir)
+    verdict = cast(dict[str, object], digest["exploitability_verdict"])
+    assert verdict["state"] == "ATTEMPTED_INCONCLUSIVE"
+    assert verdict["reason_codes"] == ["ATTEMPTED_EVIDENCE_INCOMPLETE"]
+
+
 def test_digest_verdict_not_attempted_when_verifier_dirs_missing(tmp_path: Path) -> None:
     run_dir = _prepare_run_dir(
         tmp_path,
@@ -322,6 +359,44 @@ def test_digest_verdict_not_attempted_when_verifier_dirs_missing(tmp_path: Path)
     finding_verdicts = cast(list[object], digest["finding_verdicts"])
     finding = cast(dict[str, object], finding_verdicts[0])
     assert finding["verifier_refs"] == []
+
+
+def test_digest_verdict_attempted_inconclusive_when_verifier_dirs_missing_but_chain_signal(
+    tmp_path: Path,
+) -> None:
+    run_dir = _prepare_run_dir(
+        tmp_path,
+        pcap_destinations=None,
+        with_bundle=False,
+        with_evidence_dirs=False,
+    )
+    _write_json(
+        run_dir / "stages" / "findings" / "exploit_candidates.json",
+        {
+            "schema_version": "exploit-candidates-v1",
+            "summary": {
+                "candidate_count": 1,
+                "high": 0,
+                "medium": 1,
+                "low": 0,
+                "chain_backed": 1,
+            },
+            "candidates": [
+                {
+                    "candidate_id": "candidate:demo-chain",
+                    "source": "chain",
+                    "score": 0.8,
+                    "priority": "medium",
+                    "families": ["authenticated_mgmt_cmd_path"],
+                }
+            ],
+        },
+    )
+
+    digest = build_analyst_digest(_report_with_single_finding(), run_dir=run_dir)
+    verdict = cast(dict[str, object], digest["exploitability_verdict"])
+    assert verdict["state"] == "ATTEMPTED_INCONCLUSIVE"
+    assert verdict["reason_codes"] == ["ATTEMPTED_EVIDENCE_INCOMPLETE"]
 
 
 def test_digest_verdict_not_applicable_for_zero_findings(tmp_path: Path) -> None:
