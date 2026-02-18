@@ -123,7 +123,7 @@ PYTHONPATH=src python3 -m aiedge serve <run_dir>
 
 - **Executive Verdict**: current digest verdict (`state`, `reason_codes`, `next_actions`); if digest data is missing/incomplete, treat as blocked/unknown (fail-closed).
 - **Attack Surface Scale**: high-level counts (endpoints/surfaces/unknowns/non-promoted) to estimate analysis scope; these counts are context, not proof.
-- **Exploit Candidate Map**: visual distribution of `high/medium/low` candidates from `stages/findings/exploit_candidates.json` plus top candidate paths and `next_step` guidance; use this to prioritize manual chain validation.
+- **Exploit Candidate Map**: visual distribution of `high/medium/low` candidates from `stages/findings/exploit_candidates.json` plus top candidate paths, `attack_hypothesis`, `expected_impact`, and `next_step` guidance; use this to prioritize manual chain validation.
 - **Verification Status**: gate applicability/presence indicators from overview payload; this card does not report authoritative verifier pass/fail.
 - **Evidence Navigator**: run-relative shortcuts to digest/overview/report artifacts; use links to inspect evidence and verifier references quickly.
 

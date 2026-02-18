@@ -570,6 +570,26 @@ def test_run_findings_writes_pattern_scan_chain_and_gate_artifacts(
         for c in candidates
         if isinstance(c, dict)
     )
+    assert all(
+        isinstance(c.get("attack_hypothesis"), str) and bool(c.get("attack_hypothesis"))
+        for c in candidates
+        if isinstance(c, dict)
+    )
+    assert all(
+        isinstance(c.get("preconditions"), list) and bool(c.get("preconditions"))
+        for c in candidates
+        if isinstance(c, dict)
+    )
+    assert all(
+        isinstance(c.get("expected_impact"), list) and bool(c.get("expected_impact"))
+        for c in candidates
+        if isinstance(c, dict)
+    )
+    assert all(
+        isinstance(c.get("validation_plan"), list) and bool(c.get("validation_plan"))
+        for c in candidates
+        if isinstance(c, dict)
+    )
     summary_any = exploit_candidates.get("summary")
     assert isinstance(summary_any, dict)
     assert cast(dict[str, object], summary_any).get("chain_backed", 0) >= 1

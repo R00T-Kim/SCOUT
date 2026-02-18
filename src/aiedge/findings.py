@@ -1841,6 +1841,85 @@ def _candidate_next_steps(
     return steps[:5]
 
 
+def _candidate_attack_context(
+    *,
+    families: list[str],
+    source: str,
+    path: str | None,
+    validation_plan: list[str],
+) -> dict[str, JsonValue]:
+    hypotheses: list[str] = []
+    preconditions: list[str] = []
+    impacts: list[str] = []
+    seen_h: set[str] = set()
+    seen_p: set[str] = set()
+    seen_i: set[str] = set()
+
+    def add_h(item: str) -> None:
+        if item not in seen_h:
+            seen_h.add(item)
+            hypotheses.append(item)
+
+    def add_p(item: str) -> None:
+        if item not in seen_p:
+            seen_p.add(item)
+            preconditions.append(item)
+
+    def add_i(item: str) -> None:
+        if item not in seen_i:
+            seen_i.add(item)
+            impacts.append(item)
+
+    family_set = set(families)
+    if "cmd_exec_injection_risk" in family_set:
+        add_h(
+            "Potential command injection if untrusted input reaches shell/eval execution path."
+        )
+        add_p("Attacker-controllable data must flow into command construction.")
+        add_i("Arbitrary command execution in service context.")
+    if "archive_extraction" in family_set:
+        add_h("Archive extraction path may allow traversal/overwrite in unsafe flows.")
+        add_p("Attacker must influence archive content or extraction source.")
+        add_i("File overwrite leading to persistence, config tampering, or code execution.")
+    if "upload_exec_chain" in family_set:
+        add_h("Upload-to-execution chain may allow hostile artifact execution.")
+        add_p("Upload endpoint must permit attacker-controlled file write.")
+        add_i("Remote code execution through uploaded artifact invocation.")
+    if "auth_decorator_gaps" in family_set:
+        add_h("Missing auth guard could expose privileged functionality.")
+        add_p("Route must be externally reachable without compensating middleware.")
+        add_i("Unauthorized access to sensitive operation or data.")
+
+    if source == "chain":
+        add_p("Static chain links must be validated end-to-end in dynamic context.")
+    else:
+        add_p("Standalone static signal requires chain construction to confirm exploitability.")
+
+    if isinstance(path, str):
+        path_l = path.lower().replace("\\", "/")
+        if "/ubnt-" in path_l or "/vyatta/" in path_l:
+            add_i("Management-plane helper compromise may provide high-leverage foothold.")
+        if "/wireguard/" in path_l:
+            add_i("VPN-related path abuse may impact secure channel integrity.")
+
+    attack_hypothesis = (
+        hypotheses[0]
+        if hypotheses
+        else "Static signal indicates potentially exploitable behavior; dynamic confirmation required."
+    )
+    if not impacts:
+        impacts.append("Security impact unknown until dynamic verification completes.")
+    if not preconditions:
+        preconditions.append("Exploit preconditions unknown; perform data-flow validation.")
+
+    return {
+        "attack_hypothesis": _safe_ascii_text(attack_hypothesis, max_len=220),
+        "preconditions": cast(list[JsonValue], cast(list[object], preconditions[:4])),
+        "expected_impact": cast(list[JsonValue], cast(list[object], impacts[:4])),
+        "validation_plan": cast(list[JsonValue], cast(list[object], validation_plan)),
+    }
+
+
 def _first_static_evidence_path(finding: dict[str, JsonValue]) -> str | None:
     evidence_any = finding.get("evidence")
     if not isinstance(evidence_any, list):
@@ -1959,6 +2038,9 @@ def _build_exploit_candidates_payload(
                 list[JsonValue], cast(list[object], sorted(evidence_refs))
             ),
             "summary": f"Chain-backed candidate from {len(finding_ids)} linked finding(s).",
+            "why_candidate": (
+                f"Combined chain score={combined_score:.3f} from {len(finding_ids)} linked findings."
+            ),
         }
         candidate_path: str | None = None
         chain_path_any = chain.get("path")
@@ -1967,17 +2049,21 @@ def _build_exploit_candidates_payload(
             if _is_run_relative_ref(chain_path):
                 candidate["path"] = _safe_ascii_text(chain_path, max_len=240)
                 candidate_path = chain_path
-        candidate["analyst_next_steps"] = cast(
-            list[JsonValue],
-            cast(
-                list[object],
-                _candidate_next_steps(
-                    families=families,
-                    source="chain",
-                    path=candidate_path,
-                ),
-            ),
+        steps = _candidate_next_steps(
+            families=families,
+            source="chain",
+            path=candidate_path,
         )
+        attack_ctx = _candidate_attack_context(
+            families=families,
+            source="chain",
+            path=candidate_path,
+            validation_plan=steps,
+        )
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue], cast(list[object], steps)
+        )
+        candidate.update(attack_ctx)
         candidates.append(candidate)
         chain_backed_finding_ids.update(finding_ids)
 
@@ -2031,20 +2117,28 @@ def _build_exploit_candidates_payload(
             "families": cast(list[JsonValue], cast(list[object], [family])),
             "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
             "summary": summary_text,
+            "why_candidate": (
+                f"Promoted by family={family}, score={score:.3f}, "
+                f"{'priority-path override' if priority_path and score < 0.74 else 'high-score threshold'}."
+            ),
         }
         if path_s:
             candidate["path"] = _safe_ascii_text(path_s, max_len=240)
-        candidate["analyst_next_steps"] = cast(
-            list[JsonValue],
-            cast(
-                list[object],
-                _candidate_next_steps(
-                    families=[family],
-                    source="pattern",
-                    path=path_s if path_s else None,
-                ),
-            ),
+        steps = _candidate_next_steps(
+            families=[family],
+            source="pattern",
+            path=path_s if path_s else None,
         )
+        attack_ctx = _candidate_attack_context(
+            families=[family],
+            source="pattern",
+            path=path_s if path_s else None,
+            validation_plan=steps,
+        )
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue], cast(list[object], steps)
+        )
+        candidate.update(attack_ctx)
         candidates.append(candidate)
 
     candidates = sorted(
