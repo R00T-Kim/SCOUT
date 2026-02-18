@@ -51,6 +51,7 @@ def test_viewer_html_contains_required_single_pane_section_anchors(
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_VULNERABILITIES_VERDICTS}"',
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES}"',
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE}"',
+        f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_EXPLOIT_CANDIDATE_MAP}"',
         f'id="pane-{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS}"',
         'id="pane-executive-verdict"',
         'id="pane-attack-surface-scale"',
@@ -66,6 +67,7 @@ def test_viewer_html_contains_required_single_pane_section_anchors(
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_VULNERABILITIES_VERDICTS}"',
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_STRUCTURE_BINARIES}"',
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_PROTOCOLS_ATTACK_SURFACE}"',
+        f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_EXPLOIT_CANDIDATE_MAP}"',
         f'id="{reporting.ANALYST_OVERVIEW_PANE_ANCHOR_EVIDENCE_NEXT_ACTIONS}"',
         'id="executive-verdict"',
         'id="attack-surface-scale"',
@@ -94,18 +96,22 @@ def test_viewer_html_has_offline_warning_and_bootstrap_fallback_hooks(
     assert 'id="bootstrap-data"' in html
     assert 'id="bootstrap-overview-data"' in html
     assert 'id="bootstrap-digest-data"' in html
+    assert 'id="bootstrap-exploit-candidates-data"' in html
 
     assert "fetch('./analyst_report_v2.json'" in html
     assert "fetch('./analyst_overview.json'" in html
     assert "fetch('./analyst_digest.json'" in html
+    assert "fetch('../stages/findings/exploit_candidates.json'" in html
 
     assert "document.getElementById('bootstrap-data')" in html
     assert "document.getElementById('bootstrap-overview-data')" in html
     assert "document.getElementById('bootstrap-digest-data')" in html
+    assert "document.getElementById('bootstrap-exploit-candidates-data')" in html
 
     assert ").catch(() => {" in html
     assert "renderOverview(window.__aiedge_overview);" in html
     assert "renderVulnerabilities(window.__aiedge_digest);" in html
+    assert "renderExploitCandidateMap(safeExploitCandidates);" in html
     assert "render({});" in html
 
 
