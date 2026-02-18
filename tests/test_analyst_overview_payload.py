@@ -413,3 +413,29 @@ def test_build_analyst_overview_cockpit_evidence_links_are_run_relative_only(
     assert "/etc/shadow" not in evidence_links
     assert "javascript:alert(1)" not in evidence_links
     assert "data:text/plain,hello" not in evidence_links
+
+
+def test_build_analyst_overview_links_include_exploit_candidates_reference(
+    tmp_path: Path,
+) -> None:
+    payload = build_analyst_overview(
+        {},
+        run_dir=tmp_path,
+        manifest={"profile": "analysis"},
+        digest={},
+    )
+    links_any = payload.get("links")
+    assert isinstance(links_any, dict)
+    assert (
+        links_any.get("exploit_candidates_json")
+        == "stages/findings/exploit_candidates.json"
+    )
+
+    artifacts_any = payload.get("artifacts")
+    assert isinstance(artifacts_any, list)
+    by_ref = {
+        item.get("ref"): item for item in artifacts_any if isinstance(item, dict)
+    }
+    exploit_item = by_ref.get("stages/findings/exploit_candidates.json")
+    assert isinstance(exploit_item, dict)
+    assert exploit_item.get("status") in {"missing", "present", "invalid"}

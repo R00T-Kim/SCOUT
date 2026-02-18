@@ -763,6 +763,7 @@ def _overview_artifact_refs() -> list[tuple[str, bool]]:
         ("stages/surfaces/source_sink_graph.json", False),
         ("stages/findings/pattern_scan.json", False),
         ("stages/findings/binary_strings_hits.json", False),
+        ("stages/findings/exploit_candidates.json", False),
     ]
 
 
@@ -779,6 +780,7 @@ def _overview_links() -> dict[str, JsonValue]:
         "source_sink_graph_json": "stages/surfaces/source_sink_graph.json",
         "pattern_scan_json": "stages/findings/pattern_scan.json",
         "binary_strings_hits_json": "stages/findings/binary_strings_hits.json",
+        "exploit_candidates_json": "stages/findings/exploit_candidates.json",
     }
 
 

@@ -87,6 +87,23 @@ Operator note: for `profile=exploit`, `report/report.json` `exploit_assessment.d
 
 `VERIFIED` is only meaningful when digest verification passes and all four verified-chain verifiers pass.
 
+### Exploit candidate planning artifact (deterministic)
+
+- Findings stage now writes `<run_dir>/stages/findings/exploit_candidates.json`
+  (`schema_version: exploit-candidates-v1`).
+- This is a planning/triage aid derived from deterministic pattern + chain findings; it is **not** verifier proof.
+- Use `summary` (`candidate_count`, `high|medium|low`, `chain_backed`) first, then inspect each candidate `evidence_refs`.
+
+Quick check:
+
+```bash
+python3 - <run_dir>/stages/findings/exploit_candidates.json <<'PY'
+import json,sys
+p=json.load(open(sys.argv[1], encoding="utf-8"))
+print(p["schema_version"], p.get("summary", {}))
+PY
+```
+
 ## 8) Single-pane overview (additive, offline-safe)
 
 - Recommended local serving flow (avoids `file://` fetch limitations):

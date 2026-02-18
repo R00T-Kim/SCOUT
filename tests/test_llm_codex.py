@@ -100,6 +100,15 @@ def test_analyze_run_executes_codex_and_writes_llm_log(
     )
     llm = cast(dict[str, object], report["llm"])
     assert llm["status"] == "ok"
+    summary_any = llm.get("summary")
+    assert isinstance(summary_any, dict)
+    summary = cast(dict[str, object], summary_any)
+    assert summary.get("path") == "stages/llm/summary.md"
+    assert summary.get("chars") == len("SUMMARY_OK\n")
+
+    llm_summary_path = info.run_dir / "stages" / "llm" / "summary.md"
+    assert llm_summary_path.is_file()
+    assert llm_summary_path.read_text(encoding="utf-8") == "SUMMARY_OK\n"
 
     llm_log_path = info.run_dir / "stages" / "llm" / "llm.log"
     assert llm_log_path.is_file()
@@ -173,6 +182,46 @@ def test_analyze_run_codex_exec_login_failure_is_logged_and_nonfatal(
     )
     assert llm_log["exit_code"] == 7
     assert "login" in cast(str, llm_log["stderr"])
+
+
+def test_analyze_run_codex_exec_success_without_stdout_is_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True)
+    _write_fake_codex(
+        fake_bin / "codex",
+        exec_exit=0,
+        exec_stdout="",
+        exec_stderr="",
+    )
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir(parents=True)
+    _ = (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("PATH", str(fake_bin) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    fw = tmp_path / "fw.bin"
+    _ = fw.write_bytes(b"firmware")
+    info = create_run(
+        str(fw),
+        case_id="case-llm-empty-stdout",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+
+    _ = analyze_run(info, time_budget_s=0)
+
+    report = cast(
+        dict[str, object],
+        json.loads(info.report_json_path.read_text(encoding="utf-8")),
+    )
+    llm = cast(dict[str, object], report["llm"])
+    assert llm["status"] == "ok"
+    assert "summary" not in llm
+    assert not (info.run_dir / "stages" / "llm" / "summary.md").exists()
 
 
 def test_analyze_run_retries_codex_exec_with_skip_git_repo_check_when_untrusted_dir(

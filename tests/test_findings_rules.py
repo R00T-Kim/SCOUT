@@ -170,6 +170,52 @@ def test_run_findings_keeps_no_signals_when_extracted_has_no_matches(
     assert "aiedge.findings.no_signals" in ids
 
 
+def test_run_findings_uses_inventory_roots_when_extraction_is_empty(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+
+    alt_root = ctx.run_dir / "stages" / "ota" / "carved" / "rootfs"
+    (alt_root / "etc" / "xinetd.d").mkdir(parents=True)
+    _ = (alt_root / "etc" / "xinetd.d" / "telnet").write_text(
+        "service telnet\n{\n disable = no\n}\n",
+        encoding="utf-8",
+    )
+
+    inv_dir = ctx.run_dir / "stages" / "inventory"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+    _ = (inv_dir / "inventory.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "roots": [alt_root.relative_to(ctx.run_dir).as_posix()],
+                "summary": {
+                    "roots_scanned": 1,
+                    "files": 1,
+                    "binaries": 0,
+                    "configs": 1,
+                    "string_hits": 0,
+                },
+                "service_candidates": [],
+                "services": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _ = (inv_dir / "string_hits.json").write_text(
+        json.dumps({"counts": {}, "samples": []}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_findings(ctx)
+    ids = {cast(str, finding.get("id")) for finding in result.findings}
+    assert "aiedge.findings.debug.telnet_enablement" in ids
+    assert "aiedge.findings.analysis_incomplete" not in ids
+
+
 def test_run_findings_writes_known_disclosures_with_citations(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _write_inventory_baseline(ctx)
@@ -410,18 +456,26 @@ def test_run_findings_writes_pattern_scan_chain_and_gate_artifacts(
 
     first = run_findings(ctx)
     second = run_findings(ctx)
+    first_ids_set = {
+        cast(str, finding.get("id"))
+        for finding in first.findings
+        if isinstance(finding.get("id"), str)
+    }
+    assert "aiedge.findings.exploit.candidate_plan" in first_ids_set
 
     findings_dir = ctx.run_dir / "stages" / "findings"
     pattern_scan_path = findings_dir / "pattern_scan.json"
     binary_hits_path = findings_dir / "binary_strings_hits.json"
     chains_path = findings_dir / "chains.json"
     review_path = findings_dir / "review_gates.json"
+    exploit_candidates_path = findings_dir / "exploit_candidates.json"
     skeleton_dir = findings_dir / "poc_skeletons"
 
     assert pattern_scan_path.is_file()
     assert binary_hits_path.is_file()
     assert chains_path.is_file()
     assert review_path.is_file()
+    assert exploit_candidates_path.is_file()
     assert skeleton_dir.is_dir()
     assert (skeleton_dir / "README.txt").is_file()
 
@@ -429,11 +483,13 @@ def test_run_findings_writes_pattern_scan_chain_and_gate_artifacts(
     binary_hits = _read_json(binary_hits_path)
     chains_obj = _read_json(chains_path)
     review_obj = _read_json(review_path)
+    exploit_candidates = _read_json(exploit_candidates_path)
 
     assert "generated_at" not in pattern_scan
     assert "generated_at" not in binary_hits
     assert pattern_scan.get("schema_version") == "pattern-scan-v1"
     assert binary_hits.get("schema_version") == "binary-strings-hits-v1"
+    assert exploit_candidates.get("schema_version") == "exploit-candidates-v1"
     ruleset = cast(dict[str, object], pattern_scan.get("ruleset", {}))
     assert ruleset.get("budget_mode") == "normal"
     assert ruleset.get("proximity") == {"W_near": 4096, "W_mid": 16384}
@@ -479,6 +535,35 @@ def test_run_findings_writes_pattern_scan_chain_and_gate_artifacts(
 
     assert isinstance(chains_obj.get("chains"), list)
     assert isinstance(review_obj.get("items"), list)
+    assert _all_paths_are_run_relative(exploit_candidates)
+    candidates = cast(list[dict[str, object]], exploit_candidates.get("candidates", []))
+    assert candidates
+    assert any(item.get("source") == "chain" for item in candidates)
+    assert all(isinstance(c.get("candidate_id"), str) for c in candidates)
+    assert all(
+        c.get("priority") in {"high", "medium", "low"}
+        for c in candidates
+        if isinstance(c, dict)
+    )
+    summary_any = exploit_candidates.get("summary")
+    assert isinstance(summary_any, dict)
+    assert cast(dict[str, object], summary_any).get("chain_backed", 0) >= 1
+
+    second_exploit_candidates = _read_json(exploit_candidates_path)
+    second_candidates = cast(
+        list[dict[str, object]], second_exploit_candidates.get("candidates", [])
+    )
+    first_candidate_ids = sorted(
+        cast(str, item.get("candidate_id"))
+        for item in candidates
+        if isinstance(item.get("candidate_id"), str)
+    )
+    second_candidate_ids = sorted(
+        cast(str, item.get("candidate_id"))
+        for item in second_candidates
+        if isinstance(item.get("candidate_id"), str)
+    )
+    assert first_candidate_ids == second_candidate_ids
     assert first.limitations == second.limitations
 
 
@@ -500,6 +585,53 @@ def test_run_findings_cpp_sink_only_stays_low_confidence(tmp_path: Path) -> None
     assert all(float(cast(float, h.get("score", 0.0))) <= 0.35 for h in cpp_hits)
     assert all(cast(str, h.get("confidence", "")) == "low" for h in cpp_hits)
     assert all(h.get("needs_manual") is True for h in cpp_hits)
+
+
+def test_run_findings_static_pattern_path_weighting_and_noise_suppression(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "app").mkdir(parents=True)
+    (extracted / "docs").mkdir(parents=True)
+
+    src = (
+        "def handle(request):\n"
+        "    subprocess.run(request.args['cmd'], shell=True)\n"
+    )
+    _ = (extracted / "app" / "handler.py").write_text(src, encoding="utf-8")
+    _ = (extracted / "docs" / "sample.py").write_text(src, encoding="utf-8")
+
+    _ = run_findings(ctx)
+    pattern_scan = _read_json(ctx.run_dir / "stages" / "findings" / "pattern_scan.json")
+    hits = cast(list[dict[str, object]], pattern_scan.get("findings", []))
+    python_exec_hits = [
+        h
+        for h in hits
+        if h.get("family") == "cmd_exec_injection_risk"
+        and h.get("language_layer") == "python"
+    ]
+    assert python_exec_hits
+
+    by_path: dict[str, float] = {}
+    for hit in python_exec_hits:
+        evidence = cast(list[dict[str, object]], hit.get("evidence", []))
+        if not evidence:
+            continue
+        path_any = evidence[0].get("path")
+        score_any = hit.get("score")
+        if isinstance(path_any, str) and isinstance(score_any, (int, float)):
+            by_path[path_any] = float(score_any)
+
+    app_path = "stages/extraction/_firmware.bin.extracted/rootfs/app/handler.py"
+    docs_path = "stages/extraction/_firmware.bin.extracted/rootfs/docs/sample.py"
+    assert app_path in by_path
+    assert by_path[app_path] > 0.66
+    assert docs_path not in by_path
 
 
 def test_run_findings_binary_budget_aggressive_mode(

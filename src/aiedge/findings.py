@@ -1083,6 +1083,79 @@ def _detect_php_present(
     return php_present, sorted(set(evidence_tokens))
 
 
+_LOW_SIGNAL_PATH_SEGMENTS = {
+    "doc",
+    "docs",
+    "test",
+    "tests",
+    "example",
+    "examples",
+    "sample",
+    "samples",
+    "fixture",
+    "fixtures",
+    "mock",
+    "mocks",
+    "benchmark",
+    "benchmarks",
+}
+_LOW_SIGNAL_BASENAME_PREFIXES = ("readme", "changelog", "license", "notice")
+_HIGH_SIGNAL_PATH_SEGMENTS = {
+    "app",
+    "apps",
+    "bin",
+    "sbin",
+    "etc",
+    "init",
+    "cgi-bin",
+    "www",
+    "htdocs",
+    "system",
+    "vendor",
+    "product",
+}
+
+
+def _path_signal_weight_for_static_hit(
+    *,
+    rel_path: str,
+    rule_family: str,
+    rule_id: str,
+) -> tuple[float, bool]:
+    rel = rel_path.replace("\\", "/").strip("/").lower()
+    if not rel:
+        return 1.0, False
+    parts = [part for part in rel.split("/") if part]
+    if not parts:
+        return 1.0, False
+
+    leaf = parts[-1]
+    stem = leaf.rsplit(".", 1)[0]
+    if any(part in _LOW_SIGNAL_PATH_SEGMENTS for part in parts) or any(
+        stem.startswith(prefix) for prefix in _LOW_SIGNAL_BASENAME_PREFIXES
+    ):
+        return 0.0, True
+
+    weight = 1.0
+    if any(part in _HIGH_SIGNAL_PATH_SEGMENTS for part in parts):
+        weight += 0.08
+    if any(
+        token in rel
+        for token in ("/cgi-bin/", "/www/", "/htdocs/", "/api/", "/routes/", "/handlers/")
+    ):
+        weight += 0.08
+    if rule_family == "command_execution_injection_risk" and any(
+        token in rel
+        for token in ("/cgi", "/web", "/handler", "/route", "/service", "/daemon")
+    ):
+        weight += 0.06
+    if rule_id in {"python_route_without_auth", "upload_source_signal", "php_upload_source"} and any(
+        token in rel for token in ("/app/", "/api/", "/route", "/handler", "/controller")
+    ):
+        weight += 0.05
+    return min(1.35, weight), False
+
+
 def _iter_text_rule_hits(
     *,
     run_dir: Path,
@@ -1209,7 +1282,7 @@ def _iter_text_rule_hits(
         if not text:
             continue
         lang = infer_lang(p, text)
-        rel = _rel_to_run_dir(run_dir, p)
+        rel = _rel_to_run_dir(run_dir, p).replace("\\", "/")
         lines = text.splitlines()
         for line_idx, raw_line in enumerate(lines, start=1):
             line = _safe_ascii_text(raw_line, max_len=220)
@@ -1217,6 +1290,13 @@ def _iter_text_rule_hits(
                 continue
             for family, rule_id, rule_lang, pattern, base_score in rule_specs:
                 if lang != rule_lang:
+                    continue
+                path_weight, suppressed = _path_signal_weight_for_static_hit(
+                    rel_path=rel,
+                    rule_family=family,
+                    rule_id=rule_id,
+                )
+                if suppressed:
                     continue
                 key = f"{family}:{rule_id}"
                 current = rule_counts.get(key, 0)
@@ -1238,6 +1318,10 @@ def _iter_text_rule_hits(
                     ):
                         continue
 
+                weighted_score = min(0.95, max(0.05, float(base_score) * path_weight))
+                if weighted_score < 0.4 and family != "command_execution_injection_risk":
+                    continue
+
                 fid = _stable_finding_id(
                     "pattern", family, rule_id, rel, str(line_idx), _sha256_text(line)
                 )
@@ -1253,8 +1337,11 @@ def _iter_text_rule_hits(
                         "rule_family": family,
                         "rule_id": rule_id,
                         "language": lang,
-                        "score": float(base_score),
-                        "rationale": f"{rule_id} matched static pattern in {lang} source.",
+                        "score": weighted_score,
+                        "rationale": (
+                            f"{rule_id} matched static pattern in {lang} source "
+                            f"(path_weight={path_weight:.2f})."
+                        ),
                         "evidence": cast(
                             list[JsonValue], cast(list[object], [evidence])
                         ),
@@ -1512,6 +1599,7 @@ def _build_pattern_scan_findings(
         findings.append(
             {
                 "finding_id": finding_id,
+                "source_finding_id": base_fid,
                 "family": family,
                 "language_layer": language,
                 "score": score,
@@ -1593,6 +1681,219 @@ def _build_chain_hypotheses(
         )
 
     return sorted(chains, key=lambda item: str(item.get("chain_id", "")))
+
+
+def _as_float(value: object, *, default: float = 0.0) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return default
+
+
+def _as_run_relative_refs(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    refs = [
+        ref.replace("\\", "/")
+        for ref in cast(list[object], value)
+        if isinstance(ref, str) and _is_run_relative_ref(ref.replace("\\", "/"))
+    ]
+    return sorted(set(refs))
+
+
+def _candidate_priority_from_score(score: float) -> str:
+    if score >= 0.78:
+        return "high"
+    if score >= 0.56:
+        return "medium"
+    return "low"
+
+
+def _first_static_evidence_path(finding: dict[str, JsonValue]) -> str | None:
+    evidence_any = finding.get("evidence")
+    if not isinstance(evidence_any, list):
+        return None
+    for item_any in cast(list[object], evidence_any):
+        if not isinstance(item_any, dict):
+            continue
+        item = cast(dict[str, object], item_any)
+        path_any = item.get("path")
+        if not isinstance(path_any, str) or not path_any:
+            continue
+        path_s = path_any.replace("\\", "/")
+        if _is_run_relative_ref(path_s):
+            return path_s
+    return None
+
+
+def _build_exploit_candidates_payload(
+    *,
+    firmware_id: str,
+    pattern_scan_findings: list[dict[str, JsonValue]],
+    chains: list[dict[str, JsonValue]],
+) -> dict[str, JsonValue]:
+    finding_by_source_id: dict[str, dict[str, JsonValue]] = {}
+    for finding in pattern_scan_findings:
+        source_any = finding.get("source_finding_id")
+        if isinstance(source_any, str) and source_any:
+            finding_by_source_id[source_any] = finding
+
+    candidates: list[dict[str, JsonValue]] = []
+    chain_backed_finding_ids: set[str] = set()
+
+    for chain in sorted(chains, key=lambda item: str(item.get("chain_id", ""))):
+        chain_id_any = chain.get("chain_id")
+        if not isinstance(chain_id_any, str) or not chain_id_any:
+            continue
+        source_finding_ids = sorted(
+            {
+                fid
+                for fid in cast(list[object], chain.get("finding_ids", []))
+                if isinstance(fid, str) and fid in finding_by_source_id
+            }
+        )
+        if not source_finding_ids:
+            continue
+        finding_ids = sorted(
+            {
+                str(finding_by_source_id[source_id].get("finding_id", ""))
+                for source_id in source_finding_ids
+                if isinstance(finding_by_source_id[source_id].get("finding_id"), str)
+            }
+        )
+        if not finding_ids:
+            continue
+
+        chain_score = _as_float(chain.get("score"))
+        strongest_score = max(
+            (
+                _as_float(finding_by_source_id[source_id].get("score"))
+                for source_id in source_finding_ids
+            ),
+            default=0.0,
+        )
+        combined_score = round(
+            min(0.97, max(0.2, (chain_score * 0.6) + (strongest_score * 0.4))), 4
+        )
+
+        families = sorted(
+            {
+                str(finding_by_source_id[source_id].get("family", ""))
+                for source_id in source_finding_ids
+                if str(finding_by_source_id[source_id].get("family", ""))
+            }
+        )
+        evidence_refs: set[str] = set(_as_run_relative_refs(chain.get("evidence_refs")))
+        for source_id in source_finding_ids:
+            evidence_refs.update(
+                _as_run_relative_refs(
+                    finding_by_source_id[source_id].get("evidence_refs")
+                )
+            )
+
+        candidate: dict[str, JsonValue] = {
+            "candidate_id": "candidate:"
+            + _sha256_text(f"chain|{chain_id_any}|{','.join(finding_ids)}"),
+            "source": "chain",
+            "chain_id": chain_id_any,
+            "score": combined_score,
+            "confidence": _confidence_from_score(combined_score),
+            "priority": _candidate_priority_from_score(combined_score),
+            "finding_ids": cast(list[JsonValue], cast(list[object], finding_ids)),
+            "source_finding_ids": cast(
+                list[JsonValue], cast(list[object], source_finding_ids)
+            ),
+            "families": cast(list[JsonValue], cast(list[object], families)),
+            "evidence_refs": cast(
+                list[JsonValue], cast(list[object], sorted(evidence_refs))
+            ),
+            "summary": f"Chain-backed candidate from {len(finding_ids)} linked finding(s).",
+        }
+        chain_path_any = chain.get("path")
+        if isinstance(chain_path_any, str):
+            chain_path = chain_path_any.replace("\\", "/")
+            if _is_run_relative_ref(chain_path):
+                candidate["path"] = _safe_ascii_text(chain_path, max_len=240)
+        candidates.append(candidate)
+        chain_backed_finding_ids.update(finding_ids)
+
+    promote_families = {
+        "cmd_exec_injection_risk",
+        "upload_exec_chain",
+        "archive_extraction",
+    }
+    for finding in sorted(
+        pattern_scan_findings,
+        key=lambda item: str(item.get("finding_id", "")),
+    ):
+        fid_any = finding.get("finding_id")
+        if not isinstance(fid_any, str) or not fid_any:
+            continue
+        if fid_any in chain_backed_finding_ids:
+            continue
+        family = str(finding.get("family", ""))
+        if family not in promote_families:
+            continue
+        score = round(_as_float(finding.get("score")), 4)
+        if score < 0.74:
+            continue
+        evidence_refs = _as_run_relative_refs(finding.get("evidence_refs"))
+        candidate = {
+            "candidate_id": "candidate:" + _sha256_text(f"pattern|{fid_any}"),
+            "source": "pattern",
+            "score": score,
+            "confidence": _confidence_from_score(score),
+            "priority": _candidate_priority_from_score(score),
+            "finding_ids": cast(list[JsonValue], cast(list[object], [fid_any])),
+            "families": cast(list[JsonValue], cast(list[object], [family])),
+            "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
+            "summary": "High-confidence standalone static finding candidate.",
+        }
+        path_s = _first_static_evidence_path(finding)
+        if path_s is not None:
+            candidate["path"] = _safe_ascii_text(path_s, max_len=240)
+        candidates.append(cast(dict[str, JsonValue], candidate))
+
+    candidates = sorted(
+        candidates,
+        key=lambda item: (
+            -_as_float(item.get("score")),
+            str(item.get("candidate_id", "")),
+        ),
+    )
+    priority_counts = {"high": 0, "medium": 0, "low": 0}
+    chain_backed = 0
+    for candidate in candidates:
+        priority = candidate.get("priority")
+        if isinstance(priority, str) and priority in priority_counts:
+            priority_counts[priority] += 1
+        if candidate.get("source") == "chain":
+            chain_backed += 1
+
+    notes: list[str] = []
+    if not candidates:
+        notes.append(
+            "No exploit candidates met deterministic promotion thresholds from current chain/pattern findings."
+        )
+
+    return {
+        "schema_version": "exploit-candidates-v1",
+        "scanner_version": AIEDGE_VERSION,
+        "firmware_id": firmware_id,
+        "generated_from": {
+            "pattern_scan_ref": "stages/findings/pattern_scan.json",
+            "chains_ref": "stages/findings/chains.json",
+        },
+        "summary": {
+            "candidate_count": len(candidates),
+            "high": priority_counts["high"],
+            "medium": priority_counts["medium"],
+            "low": priority_counts["low"],
+            "chain_backed": chain_backed,
+        },
+        "candidates": cast(list[JsonValue], cast(list[object], candidates)),
+        "limitations": cast(list[JsonValue], cast(list[object], [])),
+        "notes": cast(list[JsonValue], cast(list[object], notes)),
+    }
 
 
 def _build_review_gates(
@@ -1788,11 +2089,7 @@ def run_findings(
     string_hit_counts = _load_nonzero_string_hit_counts(inv_strings)
 
     extracted_files = _iter_files_count(extracted_dir)
-    candidate_roots = (
-        _load_inventory_roots(ctx.run_dir, inv_json, extracted_dir)
-        if extracted_files > 0
-        else []
-    )
+    candidate_roots = _load_inventory_roots(ctx.run_dir, inv_json, extracted_dir)
     candidate_files = _iter_candidate_files(candidate_roots, max_files=3000)
 
     budget_mode, budget_bounds, budget_warnings = _parse_binary_strings_budget_mode(
@@ -1952,18 +2249,27 @@ def run_findings(
         "chain_refs": cast(list[JsonValue], ["stages/findings/chains.json"]),
         "review_refs": cast(list[JsonValue], ["stages/findings/review_gates.json"]),
     }
+    exploit_candidates_payload = _build_exploit_candidates_payload(
+        firmware_id=firmware_id,
+        pattern_scan_findings=pattern_scan_findings,
+        chains=cast(
+            list[dict[str, JsonValue]], cast(list[object], chains_payload["chains"])
+        ),
+    )
     known_disclosures_payload = _known_disclosures_payload(ctx.run_dir, candidate_files)
 
     pattern_scan_path = stage_dir / "pattern_scan.json"
     binary_hits_path = stage_dir / "binary_strings_hits.json"
     chains_path = stage_dir / "chains.json"
     review_gates_path = stage_dir / "review_gates.json"
+    exploit_candidates_path = stage_dir / "exploit_candidates.json"
     known_disclosures_path = stage_dir / "known_disclosures.json"
     skeleton_dir = stage_dir / "poc_skeletons"
     _assert_under_dir(stage_dir, pattern_scan_path)
     _assert_under_dir(stage_dir, binary_hits_path)
     _assert_under_dir(stage_dir, chains_path)
     _assert_under_dir(stage_dir, review_gates_path)
+    _assert_under_dir(stage_dir, exploit_candidates_path)
     _assert_under_dir(stage_dir, known_disclosures_path)
     _assert_under_dir(stage_dir, skeleton_dir)
 
@@ -1975,6 +2281,10 @@ def run_findings(
         raise AIEdgePolicyViolation(
             "binary_strings_hits.json payload contains absolute-path value"
         )
+    if _contains_absolute_path_value(exploit_candidates_payload):
+        raise AIEdgePolicyViolation(
+            "exploit_candidates.json payload contains absolute-path value"
+        )
     if _contains_absolute_path_value(known_disclosures_payload):
         raise AIEdgePolicyViolation(
             "known_disclosures.json payload contains absolute-path value"
@@ -1984,6 +2294,7 @@ def run_findings(
     _stable_dump_json(binary_hits_path, binary_hits_payload)
     _stable_dump_json(chains_path, chains_payload)
     _stable_dump_json(review_gates_path, review_gates_payload)
+    _stable_dump_json(exploit_candidates_path, exploit_candidates_payload)
     _stable_dump_json(known_disclosures_path, known_disclosures_payload)
     skeleton_written = _write_safe_poc_skeletons(
         skeleton_dir=skeleton_dir,
@@ -1996,6 +2307,7 @@ def run_findings(
     stage_evidence.append(_evidence_path(ctx.run_dir, binary_hits_path))
     stage_evidence.append(_evidence_path(ctx.run_dir, chains_path))
     stage_evidence.append(_evidence_path(ctx.run_dir, review_gates_path))
+    stage_evidence.append(_evidence_path(ctx.run_dir, exploit_candidates_path))
     stage_evidence.append(_evidence_path(ctx.run_dir, known_disclosures_path))
     stage_evidence.append(
         _evidence_path(
@@ -2005,7 +2317,7 @@ def run_findings(
         )
     )
 
-    if extracted_files <= 0:
+    if extracted_files <= 0 and not candidate_files:
         findings.append(
             {
                 "id": "aiedge.findings.analysis_incomplete",
@@ -2236,6 +2548,45 @@ def run_findings(
                             ctx.run_dir,
                             inv_strings,
                             note="nonzero_counts:" + counts_summary,
+                        )
+                    ],
+                ),
+            }
+        )
+
+    exploit_summary_any = exploit_candidates_payload.get("summary")
+    exploit_summary = (
+        cast(dict[str, object], exploit_summary_any)
+        if isinstance(exploit_summary_any, dict)
+        else {}
+    )
+    candidate_count = _as_int(exploit_summary.get("candidate_count"))
+    if candidate_count > 0:
+        high_count = _as_int(exploit_summary.get("high"))
+        medium_count = _as_int(exploit_summary.get("medium"))
+        low_count = _as_int(exploit_summary.get("low"))
+        findings.append(
+            {
+                "id": "aiedge.findings.exploit.candidate_plan",
+                "title": "Exploit candidate plan generated",
+                "severity": "info",
+                "confidence": 0.85,
+                "disposition": "suspected",
+                "description": (
+                    "Deterministic exploit candidate artifact generated from "
+                    f"pattern/chain findings: {candidate_count} candidates "
+                    f"(high={high_count}, medium={medium_count}, low={low_count})."
+                ),
+                "evidence": cast(
+                    list[JsonValue],
+                    [
+                        _evidence_path(
+                            ctx.run_dir,
+                            exploit_candidates_path,
+                            note=(
+                                f"candidate_counts:high={high_count},"
+                                f"medium={medium_count},low={low_count}"
+                            ),
                         )
                     ],
                 ),

@@ -472,6 +472,16 @@ python3 bridge/validate_tribunal_artifacts.py --report-dir reports/<report_id>
 python3 bridge/validate_confirmed_policy.py --report-dir reports/<report_id>
 ```
 
+### Local Viewer Service (Analyst UX)
+
+```bash
+# Serve a run report directory and print viewer URL
+PYTHONPATH=src python3 -m aiedge serve aiedge-runs/<run_id>
+
+# Example (automation): bind ephemeral port, serve one request, then exit
+PYTHONPATH=src python3 -m aiedge serve aiedge-runs/<run_id> --port 0 --once
+```
+
 Analyst workflow cockpit (additive, offline-safe):
 
 - Open `<run_dir>/report/viewer.html`.

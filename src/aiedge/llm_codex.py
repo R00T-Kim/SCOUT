@@ -336,11 +336,19 @@ def run_codex_exec_summary(
     _ = log_path.write_text(json.dumps(log_obj, indent=2, sort_keys=True) + "\n")
 
     if proc.returncode == 0:
-        return {
+        out: dict[str, JsonValue] = {
             "status": "ok",
             "reason": "Codex summary completed",
             "log": {"path": "stages/llm/llm.log"},
         }
+        if stdout_s2:
+            summary_path = stage_dir / "summary.md"
+            _ = summary_path.write_text(stdout_s2, encoding="utf-8")
+            out["summary"] = {
+                "path": "stages/llm/summary.md",
+                "chars": len(stdout_s2),
+            }
+        return out
 
     stderr_lc = (proc.stderr or "").lower()
     if "login" in stderr_lc or "auth" in stderr_lc:
