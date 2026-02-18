@@ -128,6 +128,218 @@ def _serve_report_directory(
     return 0
 
 
+def _safe_load_json_object(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        obj_any = cast(object, json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return {}
+    if not isinstance(obj_any, dict):
+        return {}
+    return cast(dict[str, object], obj_any)
+
+
+def _as_int(value: object, *, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return int(value)
+    return default
+
+
+def _as_float(value: object, *, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    return default
+
+
+def _short_text(value: object, *, max_len: int = 96) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."
+
+
+def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> str:
+    if width <= 0:
+        width = 24
+    denom = max(1, max_count)
+    filled = int(round((max(0, count) / float(denom)) * float(width)))
+    filled = max(0, min(width, filled))
+    bar = ("#" * filled) + ("-" * (width - filled))
+    return f"{label:<6} |{bar}| {count}"
+
+
+def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
+    manifest = _safe_load_json_object(run_dir / "manifest.json")
+    report = _safe_load_json_object(run_dir / "report" / "report.json")
+    digest = _safe_load_json_object(run_dir / "report" / "analyst_digest.json")
+    candidates_payload = _safe_load_json_object(
+        run_dir / "stages" / "findings" / "exploit_candidates.json"
+    )
+
+    profile_any = manifest.get("profile")
+    profile = profile_any if isinstance(profile_any, str) and profile_any else "unknown"
+
+    report_completeness_any = report.get("report_completeness")
+    report_completeness = (
+        cast(dict[str, object], report_completeness_any)
+        if isinstance(report_completeness_any, dict)
+        else {}
+    )
+    report_status = _short_text(report_completeness.get("status")) or "unknown"
+    gate_passed = report_completeness.get("gate_passed")
+    gate_passed_text = (
+        "true" if gate_passed is True else "false" if gate_passed is False else "unknown"
+    )
+
+    llm_any = report.get("llm")
+    llm = cast(dict[str, object], llm_any) if isinstance(llm_any, dict) else {}
+    llm_status = _short_text(llm.get("status")) or "unknown"
+
+    verdict_any = digest.get("exploitability_verdict")
+    verdict = (
+        cast(dict[str, object], verdict_any) if isinstance(verdict_any, dict) else {}
+    )
+    verdict_state = _short_text(verdict.get("state")) or "unknown"
+    reason_codes_any = verdict.get("reason_codes")
+    reason_codes = (
+        [x for x in cast(list[object], reason_codes_any) if isinstance(x, str)]
+        if isinstance(reason_codes_any, list)
+        else []
+    )
+
+    summary_any = candidates_payload.get("summary")
+    summary = cast(dict[str, object], summary_any) if isinstance(summary_any, dict) else {}
+    high = _as_int(summary.get("high"))
+    medium = _as_int(summary.get("medium"))
+    low = _as_int(summary.get("low"))
+    chain_backed = _as_int(summary.get("chain_backed"))
+    candidate_count = _as_int(summary.get("candidate_count"))
+    max_bucket = max(high, medium, low, 1)
+
+    lines: list[str] = []
+    lines.append(f"AIEdge TUI :: {run_dir}")
+    lines.append("=" * 88)
+    lines.append(
+        f"profile={profile} | report_completeness={report_status} (gate_passed={gate_passed_text}) | llm={llm_status}"
+    )
+    lines.append(f"verdict={verdict_state}")
+    if reason_codes:
+        lines.append("reason_codes=" + ", ".join(reason_codes[:5]))
+    lines.append("")
+    lines.append("Exploit Candidate Map")
+    lines.append("-" * 88)
+    lines.append(
+        f"candidate_count={candidate_count} | chain_backed={chain_backed} | schema={_short_text(candidates_payload.get('schema_version')) or 'unknown'}"
+    )
+    lines.append(_count_bar("HIGH", count=high, max_count=max_bucket))
+    lines.append(_count_bar("MEDIUM", count=medium, max_count=max_bucket))
+    lines.append(_count_bar("LOW", count=low, max_count=max_bucket))
+
+    candidates_any = candidates_payload.get("candidates")
+    candidates = (
+        cast(list[dict[str, object]], candidates_any)
+        if isinstance(candidates_any, list)
+        else []
+    )
+    if not candidates:
+        lines.append("")
+        lines.append("(no candidates)")
+        return lines
+
+    lines.append("")
+    lines.append(f"Top {min(limit, len(candidates))} candidate(s)")
+    lines.append("-" * 88)
+    for idx, item in enumerate(candidates[:limit], start=1):
+        pr = _short_text(item.get("priority"), max_len=16) or "unknown"
+        source = _short_text(item.get("source"), max_len=16) or "unknown"
+        score = _as_float(item.get("score"))
+        path = _short_text(item.get("path"), max_len=120) or "(none)"
+        families_any = item.get("families")
+        families = (
+            [x for x in cast(list[object], families_any) if isinstance(x, str)]
+            if isinstance(families_any, list)
+            else []
+        )
+        family_text = ",".join(families[:3]) if families else "unknown"
+        hypothesis = _short_text(item.get("attack_hypothesis"), max_len=140)
+        impacts_any = item.get("expected_impact")
+        impacts = (
+            [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+            if isinstance(impacts_any, list)
+            else []
+        )
+        impact = _short_text(impacts[0], max_len=140) if impacts else ""
+        plan_any = item.get("validation_plan")
+        if isinstance(plan_any, list):
+            plans = [x for x in cast(list[object], plan_any) if isinstance(x, str)]
+        else:
+            fallback_any = item.get("analyst_next_steps")
+            plans = (
+                [x for x in cast(list[object], fallback_any) if isinstance(x, str)]
+                if isinstance(fallback_any, list)
+                else []
+            )
+        next_step = _short_text(plans[0], max_len=140) if plans else ""
+
+        lines.append(
+            f"{idx:02d}. [{pr}] score={score:.3f} source={source} family={family_text}"
+        )
+        lines.append(f"    path: {path}")
+        if hypothesis:
+            lines.append(f"    attack: {hypothesis}")
+        if impact:
+            lines.append(f"    impact: {impact}")
+        if next_step:
+            lines.append(f"    next: {next_step}")
+
+    return lines
+
+
+def _run_tui(
+    *,
+    run_dir_path: str,
+    limit: int,
+    watch: bool,
+    interval_s: float,
+) -> int:
+    run_dir = Path(run_dir_path).expanduser().resolve()
+    if not run_dir.is_dir():
+        print(f"Run directory not found: {run_dir}", file=sys.stderr)
+        return 20
+    if limit <= 0:
+        print("Invalid --limit value: must be > 0", file=sys.stderr)
+        return 20
+    if interval_s <= 0:
+        print("Invalid --interval-s value: must be > 0", file=sys.stderr)
+        return 20
+
+    def render_once() -> int:
+        lines = _build_tui_snapshot_lines(run_dir=run_dir, limit=limit)
+        print("\n".join(lines))
+        return 0
+
+    if not watch:
+        return render_once()
+
+    try:
+        while True:
+            lines = _build_tui_snapshot_lines(run_dir=run_dir, limit=limit)
+            # ANSI clear+home for lightweight terminal dashboard refresh.
+            print("\x1b[2J\x1b[H" + "\n".join(lines), end="", flush=True)
+            time.sleep(float(interval_s))
+    except KeyboardInterrupt:
+        print("")
+        return 0
+
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -568,6 +780,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional max runtime in seconds before auto-stop.",
     )
 
+    tui = sub.add_parser(
+        "tui",
+        help="Render an analyst-focused terminal dashboard for an existing run directory.",
+    )
+    _ = tui.add_argument(
+        "run_dir",
+        help="Path to an existing run directory.",
+    )
+    _ = tui.add_argument(
+        "--limit",
+        type=int,
+        default=12,
+        help="Maximum number of exploit candidates to print (default: 12).",
+    )
+    _ = tui.add_argument(
+        "--watch",
+        action="store_true",
+        help="Refresh dashboard continuously until Ctrl+C.",
+    )
+    _ = tui.add_argument(
+        "--interval-s",
+        type=float,
+        default=2.0,
+        metavar="SECONDS",
+        help="Refresh interval for --watch mode (default: 2.0).",
+    )
+
     return parser
 
 
@@ -822,6 +1061,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 port=port,
                 once=once,
                 duration_s=duration_s,
+            )
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "tui":
+        run_dir = cast(str, getattr(args, "run_dir"))
+        limit = cast(int, getattr(args, "limit"))
+        watch = bool(getattr(args, "watch", False))
+        interval_s = cast(float, getattr(args, "interval_s"))
+
+        try:
+            return _run_tui(
+                run_dir_path=run_dir,
+                limit=limit,
+                watch=watch,
+                interval_s=interval_s,
             )
         except Exception as e:
             print(f"Fatal error: {e}", file=sys.stderr)

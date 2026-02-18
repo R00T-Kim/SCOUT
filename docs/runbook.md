@@ -112,6 +112,14 @@ PY
 PYTHONPATH=src python3 -m aiedge serve <run_dir>
 ```
 
+- Terminal-only workflow (no browser required):
+
+```bash
+PYTHONPATH=src python3 -m aiedge tui <run_dir>
+# optional live refresh
+PYTHONPATH=src python3 -m aiedge tui <run_dir> --watch --interval-s 2
+```
+
 - Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
 - The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.
 - Offline behavior is supported via embedded bootstrap JSON in `viewer.html`; when opened via `file://`, browser fetch restrictions are surfaced in the in-page warning anchor `#file-warning` and the viewer falls back to embedded bootstrap data.

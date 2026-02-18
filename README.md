@@ -482,6 +482,16 @@ PYTHONPATH=src python3 -m aiedge serve aiedge-runs/<run_id>
 PYTHONPATH=src python3 -m aiedge serve aiedge-runs/<run_id> --port 0 --once
 ```
 
+### Terminal UI (TUI) Dashboard
+
+```bash
+# One-shot terminal dashboard
+PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id>
+
+# Live-refresh mode (Ctrl+C to exit)
+PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id> --watch --interval-s 2
+```
+
 Analyst workflow cockpit (additive, offline-safe):
 
 - Open `<run_dir>/report/viewer.html`.
