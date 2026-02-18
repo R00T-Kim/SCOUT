@@ -206,8 +206,35 @@ def _iter_candidate_files(
     *,
     max_files: int = 3000,
 ) -> list[Path]:
-    files: list[Path] = []
+    if max_files <= 0:
+        return []
+
+    def candidate_priority_rank(rel_posix: str) -> int:
+        rel = rel_posix.lower()
+        priority_tokens = (
+            "/opt/vyatta/",
+            "/opt/ubnt/",
+            "/opt/wireguard/",
+            "/usr/sbin/ubnt-",
+            "/usr/bin/ubnt-",
+            "/usr/libexec/vyatta/",
+            "/usr/libexec/ubnt/",
+            "/etc/init.d/",
+            "/cgi-bin/",
+            "/www/",
+            "/htdocs/",
+        )
+        if any(token in rel for token in priority_tokens):
+            return 0
+        leaf = rel.rsplit("/", 1)[-1]
+        if leaf.startswith(("ubnt-", "vyatta-", "wireguard")):
+            return 0
+        return 1
+
+    ranked: list[tuple[int, str, str, Path]] = []
     seen: set[str] = set()
+    scan_limit = min(120_000, max(20_000, int(max_files) * 20))
+    scanned = 0
     for root in roots:
         if not root.exists() or not root.is_dir():
             continue
@@ -223,12 +250,24 @@ def _iter_candidate_files(
                 if key in seen:
                     continue
                 seen.add(key)
-                files.append((root / rel).resolve())
-                if len(files) >= max_files:
-                    return files
+                rel_posix = rel.as_posix()
+                ranked.append(
+                    (
+                        candidate_priority_rank("/" + rel_posix),
+                        rel_posix,
+                        key,
+                        (root / rel).resolve(),
+                    )
+                )
+                scanned += 1
+                if scanned >= scan_limit:
+                    break
         except Exception:
             continue
-    return files
+        if scanned >= scan_limit:
+            break
+    ranked = sorted(ranked, key=lambda item: (item[0], item[1], item[2]))
+    return [item[3] for item in ranked[: int(max_files)]]
 
 
 def _safe_read_text(path: Path, *, max_bytes: int = 256 * 1024) -> str:
@@ -1206,8 +1245,10 @@ def _iter_text_rule_hits(
     include_php: bool,
 ) -> list[dict[str, JsonValue]]:
     hits: list[dict[str, JsonValue]] = []
-    max_per_rule = 20
+    max_per_rule = 40
+    max_per_rule_per_file = 3
     rule_counts: dict[str, int] = {}
+    rule_file_counts: dict[str, int] = {}
 
     rule_specs: list[tuple[str, str, str, re.Pattern[str], float]] = [
         (
@@ -1348,6 +1389,10 @@ def _iter_text_rule_hits(
                 current = rule_counts.get(key, 0)
                 if current >= max_per_rule:
                     continue
+                file_key = f"{key}:{rel}"
+                file_current = rule_file_counts.get(file_key, 0)
+                if file_current >= max_per_rule_per_file:
+                    continue
                 if pattern.search(raw_line) is None:
                     continue
 
@@ -1395,6 +1440,7 @@ def _iter_text_rule_hits(
                     }
                 )
                 rule_counts[key] = current + 1
+                rule_file_counts[file_key] = file_current + 1
 
     return sorted(
         hits,
@@ -1754,6 +1800,47 @@ def _candidate_priority_from_score(score: float) -> str:
     return "low"
 
 
+def _candidate_next_steps(
+    *,
+    families: list[str],
+    source: str,
+    path: str | None,
+) -> list[str]:
+    steps: list[str] = []
+    seen: set[str] = set()
+
+    def add(step: str) -> None:
+        if step not in seen:
+            seen.add(step)
+            steps.append(step)
+
+    if "archive_extraction" in families:
+        add("Trace archive input origin and confirm attacker-controllable source.")
+        add("Verify extraction path normalization and archive traversal protections.")
+    if "cmd_exec_injection_risk" in families:
+        add("Trace sink arguments to identify untrusted input propagation.")
+        add("Confirm shell execution context and quoting/sanitization boundaries.")
+    if "upload_exec_chain" in families:
+        add("Map upload write path and extension/content validation controls.")
+        add("Prove invocation edge from uploaded artifact to executable sink.")
+    if "auth_decorator_gaps" in families:
+        add("Verify route exposure and compensating auth middleware behavior.")
+
+    if source == "chain":
+        add("Reproduce chain in emulation with non-destructive PoC assertions.")
+    else:
+        add("Build chain hypothesis by correlating candidate with nearby components.")
+
+    if isinstance(path, str):
+        path_l = path.lower().replace("\\", "/")
+        if "/ubnt-" in path_l or "/vyatta/" in path_l:
+            add("Prioritize firmware update/management boundary review for this path.")
+        if "/wireguard/" in path_l:
+            add("Inspect key/peer parameter handling for command and config injection.")
+
+    return steps[:5]
+
+
 def _first_static_evidence_path(finding: dict[str, JsonValue]) -> str | None:
     evidence_any = finding.get("evidence")
     if not isinstance(evidence_any, list):
@@ -1873,11 +1960,24 @@ def _build_exploit_candidates_payload(
             ),
             "summary": f"Chain-backed candidate from {len(finding_ids)} linked finding(s).",
         }
+        candidate_path: str | None = None
         chain_path_any = chain.get("path")
         if isinstance(chain_path_any, str):
             chain_path = chain_path_any.replace("\\", "/")
             if _is_run_relative_ref(chain_path):
                 candidate["path"] = _safe_ascii_text(chain_path, max_len=240)
+                candidate_path = chain_path
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue],
+            cast(
+                list[object],
+                _candidate_next_steps(
+                    families=families,
+                    source="chain",
+                    path=candidate_path,
+                ),
+            ),
+        )
         candidates.append(candidate)
         chain_backed_finding_ids.update(finding_ids)
 
@@ -1934,6 +2034,17 @@ def _build_exploit_candidates_payload(
         }
         if path_s:
             candidate["path"] = _safe_ascii_text(path_s, max_len=240)
+        candidate["analyst_next_steps"] = cast(
+            list[JsonValue],
+            cast(
+                list[object],
+                _candidate_next_steps(
+                    families=[family],
+                    source="pattern",
+                    path=path_s if path_s else None,
+                ),
+            ),
+        )
         candidates.append(candidate)
 
     candidates = sorted(

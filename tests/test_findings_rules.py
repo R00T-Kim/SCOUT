@@ -6,7 +6,7 @@ from typing import cast
 
 from _pytest.monkeypatch import MonkeyPatch
 
-from aiedge.findings import run_findings
+from aiedge.findings import _iter_candidate_files, run_findings
 from aiedge.stage import StageContext
 
 
@@ -151,6 +151,26 @@ def test_run_findings_emits_v2_provenance_first_rules(tmp_path: Path) -> None:
     assert all(not str(ev.get("path", "")).startswith("/") for ev in key_evidence)
     joined_snippets = "\n".join(str(ev.get("snippet", "")) for ev in key_evidence)
     assert "secret-body-material" not in joined_snippets
+
+
+def test_iter_candidate_files_prioritizes_high_signal_paths_under_cap(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "rootfs"
+    (root / "aaa" / "noise").mkdir(parents=True)
+    for i in range(30):
+        _ = (root / "aaa" / "noise" / f"file-{i}.txt").write_text(
+            "noise\n", encoding="utf-8"
+        )
+    (root / "zzz" / "opt" / "vyatta" / "scripts").mkdir(parents=True)
+    _ = (root / "zzz" / "opt" / "vyatta" / "scripts" / "peer.sh").write_text(
+        '#!/bin/sh\neval "cfg_$1"\n',
+        encoding="utf-8",
+    )
+
+    files = _iter_candidate_files([root], max_files=10)
+    rels = [p.resolve().relative_to(root.resolve()).as_posix() for p in files]
+    assert "zzz/opt/vyatta/scripts/peer.sh" in rels
 
 
 def test_run_findings_keeps_no_signals_when_extracted_has_no_matches(
@@ -545,6 +565,11 @@ def test_run_findings_writes_pattern_scan_chain_and_gate_artifacts(
         for c in candidates
         if isinstance(c, dict)
     )
+    assert all(
+        isinstance(c.get("analyst_next_steps"), list) and bool(c.get("analyst_next_steps"))
+        for c in candidates
+        if isinstance(c, dict)
+    )
     summary_any = exploit_candidates.get("summary")
     assert isinstance(summary_any, dict)
     assert cast(dict[str, object], summary_any).get("chain_backed", 0) >= 1
@@ -686,6 +711,54 @@ def test_run_findings_suppresses_stdlib_exec_noise_and_promotes_opt_shell_signal
     summary_any = exploit_candidates.get("summary")
     assert isinstance(summary_any, dict)
     assert cast(dict[str, object], summary_any).get("candidate_count", 0) >= 1
+
+
+def test_run_findings_limits_per_file_rule_dominance_for_diversity(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "etc" / "bash_completion.d").mkdir(parents=True)
+    (extracted / "usr" / "bin").mkdir(parents=True)
+
+    noisy_lines = "\n".join(['eval "cfg_$1"' for _ in range(80)]) + "\n"
+    _ = (extracted / "etc" / "bash_completion.d" / "vyatta-cfg").write_text(
+        noisy_lines,
+        encoding="utf-8",
+    )
+    _ = (extracted / "usr" / "bin" / "ubnt-helper").write_text(
+        '#!/bin/sh\neval "$1"\n',
+        encoding="utf-8",
+    )
+
+    _ = run_findings(ctx)
+    pattern_scan = _read_json(ctx.run_dir / "stages" / "findings" / "pattern_scan.json")
+    hits = cast(list[dict[str, object]], pattern_scan.get("findings", []))
+
+    by_path: dict[str, int] = {}
+    for hit in hits:
+        family = hit.get("family")
+        lang = hit.get("language_layer")
+        if family != "cmd_exec_injection_risk" or lang != "shell":
+            continue
+        ev = cast(list[dict[str, object]], hit.get("evidence", []))
+        if not ev:
+            continue
+        path_any = ev[0].get("path")
+        if isinstance(path_any, str):
+            by_path[path_any] = by_path.get(path_any, 0) + 1
+
+    noisy_path = (
+        "stages/extraction/_firmware.bin.extracted/rootfs/"
+        "etc/bash_completion.d/vyatta-cfg"
+    )
+    diverse_path = "stages/extraction/_firmware.bin.extracted/rootfs/usr/bin/ubnt-helper"
+    assert by_path.get(noisy_path, 0) <= 3
+    assert by_path.get(diverse_path, 0) >= 1
 
 
 def test_run_findings_promotes_priority_path_medium_score_candidate(

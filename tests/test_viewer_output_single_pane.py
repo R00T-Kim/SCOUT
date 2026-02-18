@@ -112,6 +112,7 @@ def test_viewer_html_has_offline_warning_and_bootstrap_fallback_hooks(
     assert "renderOverview(window.__aiedge_overview);" in html
     assert "renderVulnerabilities(window.__aiedge_digest);" in html
     assert "renderExploitCandidateMap(safeExploitCandidates);" in html
+    assert "analyst_next_steps" in html
     assert "render({});" in html
 
 
