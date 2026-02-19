@@ -35,6 +35,19 @@ PYTHONPATH=src python3 -m aiedge stages <run_dir> \
   --no-llm
 ```
 
+### Dynamic validation privileged runner (flagless hardening)
+
+When container/runtime policy blocks `sudo` (`no new privileges`), set one env var once and rerun:
+
+```bash
+export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
+PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages dynamic_validation,exploit_autopoc
+```
+
+- `AIEDGE_PRIV_RUNNER` is a command prefix used for privileged actions (FirmAE boot, firewall snapshot, pcap capture).
+- Example prefixes: host bridge wrapper, root helper, or `sudo -n` wrapper.
+- Stage output now records `privileged_executor.mode/source/prefix` in `stages/dynamic_validation/dynamic_validation.json`.
+
 ## 3) Inject private exploit code and capture evidence-only artifacts
 
 `profile=exploit` runs now auto-generate and execute non-weaponized PoC probes for
@@ -186,7 +199,8 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 - `--exploit-dir` is private input only; exploit source must not be copied into `run_dir`.
 - Evidence files under `run_dir/exploits/` and `run_dir/verified_chain/` are policy-checked as evidence-only.
 - `report/duplicate_gate.json` is triage metadata only; it does not suppress/remove items from top-level `report/report.json` `findings`.
-- Dynamic validation requires non-interactive `sudo -n` for FirmAE/isolation captures (tight allowlist, no broad sudoers rules).
+- Dynamic validation prefers `AIEDGE_PRIV_RUNNER` when set; otherwise it falls back to `sudo -n`.
+- If both are unavailable, stage emits `privileged_executor_missing` and remains fail-open (`partial`).
 
 ## 10) Codex-first execution policy check
 

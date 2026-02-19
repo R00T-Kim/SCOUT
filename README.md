@@ -443,6 +443,11 @@ cd /path/to/SCOUT
 
 # Default (without --no-llm): exploit_autopoc uses LLM codegen first and
 # automatically falls back to deterministic template probes when unavailable.
+
+# If dynamic validation is blocked by container sudo policy (e.g. no-new-privileges),
+# set a privileged command prefix once (flagless) and rerun dynamic+autopoc:
+export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
+./scout stages aiedge-runs/<run_id> --stages dynamic_validation,exploit_autopoc
 ```
 
 ### With Terminator Orchestration (Full Pipeline)

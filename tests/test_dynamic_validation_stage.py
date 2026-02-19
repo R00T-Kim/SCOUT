@@ -246,6 +246,114 @@ def test_dynamic_validation_marks_sudo_nopasswd_required(
     assert "sudo_nopasswd_required" in out.limitations
 
 
+def test_dynamic_validation_uses_env_privileged_runner_for_boot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _ctx(tmp_path)
+    firmae_root = tmp_path / "FirmAE"
+    firmae_root.mkdir(parents=True)
+    _ = (firmae_root / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("AIEDGE_PRIV_RUNNER", "privrun --")
+    seen_boot_argv: list[list[str]] = []
+
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            "sudo": "/usr/bin/sudo",
+            "privrun": "/usr/local/bin/privrun",
+            "git": "/usr/bin/git",
+        }
+        return mapping.get(name)
+
+    def fake_run(
+        argv: list[str], *, timeout_s: float | None, cwd: Path | None = None
+    ) -> dv.CommandResult:
+        _ = timeout_s, cwd
+        if "run.sh" in " ".join(argv):
+            seen_boot_argv.append(list(argv))
+            return dv.CommandResult(
+                argv=argv,
+                returncode=1,
+                stdout="",
+                stderr="boot failed\n",
+                timed_out=False,
+                error=None,
+            )
+        return dv.CommandResult(
+            argv=argv,
+            returncode=1,
+            stdout="",
+            stderr="missing\n",
+            timed_out=False,
+            error=None,
+        )
+
+    monkeypatch.setattr("aiedge.dynamic_validation.shutil.which", fake_which)
+    monkeypatch.setattr(dv, "_run_command", fake_run)
+
+    out = DynamicValidationStage(firmae_root=str(firmae_root), max_retries=1).run(ctx)
+    assert out.status == "partial"
+    assert seen_boot_argv
+    assert seen_boot_argv[0][:2] == ["privrun", "--"]
+    assert "/usr/bin/sudo" not in seen_boot_argv[0][:2]
+    details = cast(dict[str, object], out.details)
+    priv_any = details.get("privileged_executor")
+    assert isinstance(priv_any, dict)
+    priv = cast(dict[str, object], priv_any)
+    assert priv.get("mode") == "runner"
+
+
+def test_dynamic_validation_invalid_env_privileged_runner_falls_back_to_sudo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _ctx(tmp_path)
+    firmae_root = tmp_path / "FirmAE"
+    firmae_root.mkdir(parents=True)
+    _ = (firmae_root / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("AIEDGE_PRIV_RUNNER", "missing-priv-runner --")
+    seen_boot_argv: list[list[str]] = []
+
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            "sudo": "/usr/bin/sudo",
+            "git": "/usr/bin/git",
+        }
+        return mapping.get(name)
+
+    def fake_run(
+        argv: list[str], *, timeout_s: float | None, cwd: Path | None = None
+    ) -> dv.CommandResult:
+        _ = timeout_s, cwd
+        if "run.sh" in " ".join(argv):
+            seen_boot_argv.append(list(argv))
+            return dv.CommandResult(
+                argv=argv,
+                returncode=1,
+                stdout="",
+                stderr="boot failed\n",
+                timed_out=False,
+                error=None,
+            )
+        return dv.CommandResult(
+            argv=argv,
+            returncode=1,
+            stdout="",
+            stderr="missing\n",
+            timed_out=False,
+            error=None,
+        )
+
+    monkeypatch.setattr("aiedge.dynamic_validation.shutil.which", fake_which)
+    monkeypatch.setattr(dv, "_run_command", fake_run)
+
+    out = DynamicValidationStage(firmae_root=str(firmae_root), max_retries=1).run(ctx)
+    assert out.status == "partial"
+    assert seen_boot_argv
+    assert seen_boot_argv[0][:2] == ["/usr/bin/sudo", "-n"]
+    assert "privileged_runner_unavailable" in out.limitations
+
+
 def test_dynamic_validation_marks_sudo_execution_blocked_without_boot_flaky(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

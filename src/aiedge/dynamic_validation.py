@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import json
+import os
 import re
+import shlex
 import shutil
 import socket
 import ssl
@@ -151,6 +153,14 @@ class CommandResult:
     error: str | None
 
 
+@dataclass(frozen=True)
+class PrivilegedExecutor:
+    mode: str
+    source: str
+    prefix: tuple[str, ...]
+    sudo_bin: str | None
+
+
 def _run_command(
     argv: list[str],
     *,
@@ -192,6 +202,118 @@ def _run_command(
             timed_out=False,
             error=f"{type(exc).__name__}: {exc}",
         )
+
+
+def _resolve_privileged_executor(*, run_dir: Path) -> tuple[PrivilegedExecutor, list[str]]:
+    limitations: list[str] = []
+    sudo_bin = shutil.which("sudo")
+
+    runner_raw = os.environ.get("AIEDGE_PRIV_RUNNER", "").strip()
+    if runner_raw:
+        try:
+            parsed = shlex.split(runner_raw)
+        except ValueError:
+            parsed = []
+            limitations.append("privileged_runner_invalid_config")
+
+        if parsed:
+            runner_bin = parsed[0]
+            if "/" in runner_bin:
+                runner_valid = Path(runner_bin).is_file()
+            else:
+                runner_valid = shutil.which(runner_bin) is not None
+            if runner_valid:
+                return (
+                    PrivilegedExecutor(
+                        mode="runner",
+                        source="env:AIEDGE_PRIV_RUNNER",
+                        prefix=tuple(parsed),
+                        sudo_bin=sudo_bin,
+                    ),
+                    limitations,
+                )
+            limitations.append("privileged_runner_unavailable")
+        else:
+            limitations.append("privileged_runner_invalid_config")
+
+    if sudo_bin:
+        return (
+            PrivilegedExecutor(
+                mode="sudo",
+                source="system:sudo",
+                prefix=(sudo_bin, "-n"),
+                sudo_bin=sudo_bin,
+            ),
+            limitations,
+        )
+
+    limitations.append("privileged_executor_missing")
+    return (
+        PrivilegedExecutor(
+            mode="none",
+            source="none",
+            prefix=tuple(),
+            sudo_bin=None,
+        ),
+        limitations,
+    )
+
+
+def _build_privileged_argv(
+    cmd_argv: list[str], *, executor: PrivilegedExecutor
+) -> list[str] | None:
+    if executor.mode in {"sudo", "runner"} and executor.prefix:
+        return list(executor.prefix) + list(cmd_argv)
+    return None
+
+
+def _record_privilege_failure_limitations(
+    *,
+    limitations: list[str],
+    executor: PrivilegedExecutor,
+    stderr: str,
+    error: str | None,
+) -> None:
+    text = f"{stderr}\n{error or ''}".lower()
+    if not text:
+        return
+
+    if "no new privileges" in text or "operation not permitted" in text:
+        limitations.append("sudo_execution_blocked")
+
+    if (
+        "password" in text
+        or "a password is required" in text
+        or "no tty present" in text
+        or ("sudo" in text and "askpass" in text)
+    ):
+        limitations.append("sudo_nopasswd_required")
+
+    if executor.mode == "runner":
+        if (
+            "permission denied" in text
+            or "not permitted" in text
+            or "not found" in text
+            or "no such file" in text
+            or "failed to execute" in text
+        ):
+            limitations.append("privileged_runner_failed")
+
+
+def _privileged_executor_payload(
+    *, executor: PrivilegedExecutor, run_dir: Path
+) -> dict[str, JsonValue]:
+    return {
+        "mode": executor.mode,
+        "source": executor.source,
+        "prefix": cast(
+            list[JsonValue],
+            cast(
+                list[object],
+                _sanitize_argv_for_output(list(executor.prefix), run_dir=run_dir),
+            ),
+        ),
+    }
 
 
 def _as_jsonable_command_result(
@@ -440,12 +562,12 @@ def _capture_firewall_snapshot(
     run_dir: Path,
     snapshot_path: Path,
     timeout_s: float,
+    privileged_executor: PrivilegedExecutor,
 ) -> tuple[list[str], list[dict[str, JsonValue]]]:
     limitations: list[str] = []
     sections: list[str] = []
     command_results: list[dict[str, JsonValue]] = []
 
-    sudo_bin = shutil.which("sudo")
     candidates: list[tuple[str, list[str], bool]] = [
         ("iptables_save", ["iptables-save"], True),
         ("ip6tables_save", ["ip6tables-save"], True),
@@ -472,13 +594,20 @@ def _capture_firewall_snapshot(
 
         argv = [cmd_bin] + cmd[1:]
         if use_sudo:
-            if not sudo_bin:
+            wrapped = _build_privileged_argv(argv, executor=privileged_executor)
+            if wrapped is None:
                 limitations.extend(
-                    ["sudo_nopasswd_required", "firewall_snapshot_incomplete"]
+                    [
+                        "privileged_executor_missing",
+                        "sudo_nopasswd_required",
+                        "firewall_snapshot_incomplete",
+                    ]
                 )
-                sections.append(f"### {label}\nSKIP: sudo unavailable\n")
+                sections.append(
+                    f"### {label}\nSKIP: privileged executor unavailable\n"
+                )
                 continue
-            argv = [sudo_bin, "-n"] + argv
+            argv = wrapped
 
         res = _run_command(argv, timeout_s=timeout_s)
         command_results.append(
@@ -504,8 +633,12 @@ def _capture_firewall_snapshot(
             )
         )
         if use_sudo and (res.returncode != 0 or res.timed_out):
-            limitations.extend(
-                ["sudo_nopasswd_required", "firewall_snapshot_incomplete"]
+            limitations.append("firewall_snapshot_incomplete")
+            _record_privilege_failure_limitations(
+                limitations=limitations,
+                executor=privileged_executor,
+                stderr=res.stderr,
+                error=res.error,
             )
 
     _ = snapshot_path.write_text("\n".join(sections), encoding="utf-8")
@@ -517,25 +650,23 @@ def _capture_pcap(
     run_dir: Path,
     pcap_path: Path,
     timeout_s: float,
+    privileged_executor: PrivilegedExecutor,
 ) -> tuple[list[str], dict[str, JsonValue]]:
     limitations: list[str] = []
     tcpdump_bin = shutil.which("tcpdump")
-    sudo_bin = shutil.which("sudo")
+    cmd_argv: list[str] = []
+    wrapped_argv: list[str] | None = None
 
-    if not tcpdump_bin or not sudo_bin:
+    if not tcpdump_bin:
         _write_minimal_pcap(pcap_path, linktype=1)
         limitations.append("pcap_placeholder")
-        if not sudo_bin:
-            limitations.append("sudo_nopasswd_required")
         return sorted(set(limitations)), {
             "status": "placeholder",
-            "reason": "tcpdump_or_sudo_missing",
+            "reason": "tcpdump_missing",
             "argv": cast(list[JsonValue], cast(list[object], [])),
         }
 
-    argv = [
-        sudo_bin,
-        "-n",
+    cmd_argv = [
         tcpdump_bin,
         "-i",
         "any",
@@ -546,9 +677,26 @@ def _capture_pcap(
         "-c",
         "1",
     ]
-    res = _run_command(argv, timeout_s=timeout_s)
+    wrapped_argv = _build_privileged_argv(cmd_argv, executor=privileged_executor)
+    if wrapped_argv is None:
+        _write_minimal_pcap(pcap_path, linktype=1)
+        limitations.extend(
+            ["pcap_placeholder", "privileged_executor_missing", "sudo_nopasswd_required"]
+        )
+        return sorted(set(limitations)), {
+            "status": "placeholder",
+            "reason": "privileged_executor_missing",
+            "argv": cast(list[JsonValue], cast(list[object], [])),
+        }
+
+    res = _run_command(wrapped_argv, timeout_s=timeout_s)
     if res.returncode != 0:
-        limitations.append("sudo_nopasswd_required")
+        _record_privilege_failure_limitations(
+            limitations=limitations,
+            executor=privileged_executor,
+            stderr=res.stderr,
+            error=res.error,
+        )
     if res.returncode != 0 and not pcap_path.exists():
         _write_minimal_pcap(pcap_path, linktype=1)
         limitations.append("pcap_placeholder")
@@ -1121,6 +1269,10 @@ class DynamicValidationStage:
         firmware_path = ctx.run_dir / "input" / "firmware.bin"
         roots = _read_inventory_roots(ctx.run_dir)
         limitations: list[str] = []
+        privileged_executor, privileged_limits = _resolve_privileged_executor(
+            run_dir=ctx.run_dir
+        )
+        limitations.extend(privileged_limits)
 
         evidence: list[dict[str, JsonValue]] = [
             {"path": _rel_to_run_dir(ctx.run_dir, boot_log_path)},
@@ -1134,7 +1286,6 @@ class DynamicValidationStage:
         firmae_root = Path(self.firmae_root)
         run_sh = firmae_root / "run.sh"
         scratch_root = firmae_root / "scratch"
-        sudo_bin = shutil.which("sudo")
         attempt_count = max(1, int(self.max_retries))
 
         boot_attempts: list[dict[str, JsonValue]] = []
@@ -1161,9 +1312,17 @@ class DynamicValidationStage:
                 )
                 break
 
-            if not sudo_bin:
+            boot_cmd = [str(run_sh), "-c", "auto", str(firmware_path)]
+            argv = _build_privileged_argv(
+                boot_cmd, executor=privileged_executor
+            )
+            if argv is None:
                 limitations.extend(
-                    ["boot_unavailable_sudo_missing", "sudo_nopasswd_required"]
+                    [
+                        "boot_unavailable_sudo_missing",
+                        "boot_unavailable_privileged_executor_missing",
+                        "sudo_nopasswd_required",
+                    ]
                 )
                 boot_blocked = True
                 boot_attempts.append(
@@ -1177,7 +1336,6 @@ class DynamicValidationStage:
                 break
 
             before = _list_scratch_dirs(scratch_root)
-            argv = [sudo_bin, "-n", str(run_sh), "-c", "auto", str(firmware_path)]
             boot_attempted = True
             res = _run_command(
                 argv, timeout_s=float(self.boot_timeout_s), cwd=firmae_root
@@ -1250,6 +1408,21 @@ class DynamicValidationStage:
             if sudo_exec_blocked:
                 limitations.append("sudo_execution_blocked")
                 boot_blocked = True
+            if res.returncode != 0:
+                _record_privilege_failure_limitations(
+                    limitations=limitations,
+                    executor=privileged_executor,
+                    stderr=res.stderr,
+                    error=res.error,
+                )
+                if privileged_executor.mode == "runner" and (
+                    (res.error or "").strip()
+                    or "permission denied" in stderr_l
+                    or "operation not permitted" in stderr_l
+                    or "not found" in stderr_l
+                    or "no such file" in stderr_l
+                ):
+                    boot_blocked = True
 
             if res.returncode == 0 and ip:
                 boot_success = True
@@ -1293,6 +1466,7 @@ class DynamicValidationStage:
             run_dir=ctx.run_dir,
             snapshot_path=snapshot_path,
             timeout_s=float(self.capture_timeout_s),
+            privileged_executor=privileged_executor,
         )
         limitations.extend(snapshot_limits)
 
@@ -1300,6 +1474,7 @@ class DynamicValidationStage:
             run_dir=ctx.run_dir,
             pcap_path=pcap_path,
             timeout_s=float(self.capture_timeout_s),
+            privileged_executor=privileged_executor,
         )
         limitations.extend(pcap_limits)
 
@@ -1367,6 +1542,10 @@ class DynamicValidationStage:
                 "pcap_capture": pcap_capture,
             },
             "versions": versions,
+            "privileged_executor": _privileged_executor_payload(
+                executor=privileged_executor,
+                run_dir=ctx.run_dir,
+            ),
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
             ),
@@ -1385,6 +1564,10 @@ class DynamicValidationStage:
             "evidence": cast(list[JsonValue], cast(list[object], evidence)),
             "boot_attempts": cast(list[JsonValue], cast(list[object], boot_attempts)),
             "pcap": _rel_to_run_dir(ctx.run_dir, pcap_path),
+            "privileged_executor": _privileged_executor_payload(
+                executor=privileged_executor,
+                run_dir=ctx.run_dir,
+            ),
         }
 
         status = (
