@@ -263,7 +263,18 @@ def _sanitize_url(raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
         return ""
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except Exception:
+        # Best-effort recovery for malformed bracketed IPv6-like URL strings.
+        # If reparsing still fails, treat as non-actionable and skip.
+        recovered = re.sub(r"[\[\]]", "", value)
+        try:
+            parsed = urlsplit(recovered)
+        except Exception:
+            return ""
+    if not parsed.scheme or not parsed.netloc:
+        return ""
     netloc = parsed.netloc
     if "@" in netloc:
         netloc = netloc.rsplit("@", 1)[1]

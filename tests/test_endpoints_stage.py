@@ -168,6 +168,44 @@ def test_endpoints_stage_falls_back_to_inventory_extracted_dir(tmp_path: Path) -
     )
 
 
+def test_endpoints_stage_tolerates_invalid_ipv6_url_like_tokens(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    root_dir = ctx.run_dir / "stages" / "carving" / "roots" / "root0"
+    root_dir.mkdir(parents=True)
+    _ = (root_dir / "urls.txt").write_text(
+        "\n".join(
+            [
+                "bad http://[2001:db8::1/path",
+                "good https://example.org/ok",
+                "domain valid.example.net",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _write_inventory(
+        ctx,
+        roots=["stages/carving/roots/root0"],
+        extracted_dir="stages/extraction/_firmware.bin.extracted",
+    )
+
+    out = EndpointsStage().run(ctx)
+    assert out.status == "ok"
+
+    payload = _read_json_obj(ctx.run_dir / "stages" / "endpoints" / "endpoints.json")
+    endpoints_any = payload.get("endpoints")
+    assert isinstance(endpoints_any, list)
+    endpoints = cast(list[object], endpoints_any)
+    values = [
+        cast(dict[str, object], item).get("value")
+        for item in endpoints
+        if isinstance(item, dict)
+    ]
+    assert "https://example.org/ok" in values
+    assert "valid.example.net" in values
+
+
 def test_run_subset_with_endpoints_populates_report(tmp_path: Path) -> None:
     firmware = tmp_path / "firmware.bin"
     _ = firmware.write_bytes(b"endpoints-subset")
