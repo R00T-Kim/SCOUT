@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -14,10 +15,10 @@ from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
 _LLM_CHAIN_PROMPT_TEMPLATE_VERSION = "aiedge-llm-chain-builder-v1"
-_LLM_CHAIN_TIMEOUT_S = 45.0
+_LLM_CHAIN_TIMEOUT_S = 120.0
 _LLM_CHAIN_MAX_INPUT_CANDIDATES = 12
 _LLM_CHAIN_MAX_OUTPUT_CHAINS = 24
-_LLM_CHAIN_RETRY_MAX_ATTEMPTS = 3
+_LLM_CHAIN_RETRY_MAX_ATTEMPTS = 4
 _LLM_CHAIN_RETRYABLE_STDERR_TOKENS: tuple[str, ...] = (
     "stream disconnected before completion",
     "error sending request",
@@ -102,6 +103,36 @@ def _safe_float01(value: object, default: float = 0.6) -> float:
     return out
 
 
+def _env_float(name: str, *, default: float, min_value: float, max_value: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except Exception:
+        return default
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
+def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except Exception:
+        return default
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
 def _truncate_text(text: str, *, max_chars: int = 12000) -> str:
     if len(text) <= max_chars:
         return text
@@ -174,7 +205,12 @@ def _run_codex_chain_builder_exec(
             "returncode": -1,
         }
 
-    timeout = max(1.0, min(float(timeout_s), 90.0))
+    timeout = _env_float(
+        "AIEDGE_LLM_CHAIN_TIMEOUT_S",
+        default=max(1.0, min(float(timeout_s), 180.0)),
+        min_value=10.0,
+        max_value=300.0,
+    )
     base_argv = [
         "codex",
         "exec",
@@ -206,12 +242,18 @@ def _run_codex_chain_builder_exec(
         )
         return cp
 
-    max_attempts = max(1, int(_LLM_CHAIN_RETRY_MAX_ATTEMPTS))
+    max_attempts = _env_int(
+        "AIEDGE_LLM_CHAIN_MAX_ATTEMPTS",
+        default=max(1, int(_LLM_CHAIN_RETRY_MAX_ATTEMPTS)),
+        min_value=1,
+        max_value=8,
+    )
     cp: subprocess.CompletedProcess[str] | None = None
     use_skip_git_repo_check = False
     retryable_error_detected = False
+    timeout_seen = False
 
-    for _attempt_idx in range(max_attempts):
+    for attempt_idx in range(max_attempts):
         cmd = (
             base_argv + ["--skip-git-repo-check", prompt]
             if use_skip_git_repo_check
@@ -220,6 +262,22 @@ def _run_codex_chain_builder_exec(
         try:
             cp = _exec_once(cmd)
         except subprocess.TimeoutExpired as exc:
+            timeout_seen = True
+            attempts.append(
+                {
+                    "argv": list(cmd),
+                    "returncode": -1,
+                    "stdout": _truncate_text(
+                        (exc.stdout if isinstance(exc.stdout, str) else "") or ""
+                    ),
+                    "stderr": _truncate_text(
+                        (exc.stderr if isinstance(exc.stderr, str) else "") or ""
+                    ),
+                    "exception": "TimeoutExpired",
+                }
+            )
+            if attempt_idx + 1 < max_attempts:
+                continue
             return {
                 "status": "timeout",
                 "stdout": _truncate_text(
@@ -277,6 +335,7 @@ def _run_codex_chain_builder_exec(
         "attempts": attempts,
         "returncode": int(cp.returncode),
         "retryable_error_detected": bool(retryable_error_detected),
+        "timeout_seen": bool(timeout_seen),
     }
 
 

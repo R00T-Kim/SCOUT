@@ -33,6 +33,15 @@ PYTHONPATH=src python3 -m aiedge stages <run_dir> \
   --stages dynamic_validation
 ```
 
+If Codex responses are slow/intermittent, increase LLM timeouts/retries for stage runs:
+
+```bash
+export AIEDGE_LLM_CHAIN_TIMEOUT_S=180
+export AIEDGE_LLM_CHAIN_MAX_ATTEMPTS=5
+export AIEDGE_AUTOPOC_LLM_TIMEOUT_S=180
+export AIEDGE_AUTOPOC_LLM_MAX_ATTEMPTS=4
+```
+
 ### Dynamic validation privileged runner (flagless hardening)
 
 When container/runtime policy blocks `sudo` (`no new privileges`), set one env var once and rerun:
