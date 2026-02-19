@@ -2267,15 +2267,16 @@ def _draw_interactive_tui_frame(
         ),
         attr=_attr("header"),
     )
+    detail_title = {
+        "threat": "Threat Model",
+        "runtime": "Runtime Model",
+        "asset": "Asset & Protocol Inventory",
+    }.get(detail_mode, "Details")
     _safe_curses_addstr(
         win,
         y=list_top - 1,
         x=right_x,
-        text=(
-            "[Threat Model]"
-            if detail_mode == "threat"
-            else "[Details]"
-        ),
+        text=f"[{detail_title}]",
         attr=_attr("header"),
     )
     _safe_curses_addstr(
@@ -2371,8 +2372,45 @@ def _draw_interactive_tui_frame(
             return [prefix]
         return [prefix + part for part in wrapped]
 
+    dynamic_protocols_any = asset_inventory.get("dynamic_protocol_counts")
+    dynamic_protocols = (
+        cast(dict[str, int], dynamic_protocols_any)
+        if isinstance(dynamic_protocols_any, dict)
+        else {}
+    )
+    dynamic_states_any = asset_inventory.get("dynamic_state_counts")
+    dynamic_states = (
+        cast(dict[str, int], dynamic_states_any)
+        if isinstance(dynamic_states_any, dict)
+        else {}
+    )
+    endpoint_types_any = asset_inventory.get("endpoint_type_counts")
+    endpoint_types = (
+        cast(dict[str, int], endpoint_types_any)
+        if isinstance(endpoint_types_any, dict)
+        else {}
+    )
+    interfaces_any = asset_inventory.get("interfaces")
+    interfaces = (
+        [x for x in cast(list[object], interfaces_any) if isinstance(x, str)]
+        if isinstance(interfaces_any, list)
+        else []
+    )
+    service_paths_any = asset_inventory.get("service_paths")
+    service_paths = (
+        [x for x in cast(list[object], service_paths_any) if isinstance(x, str)]
+        if isinstance(service_paths_any, list)
+        else []
+    )
+    top_daemons_any = asset_inventory.get("top_daemons")
+    top_daemons = (
+        [x for x in cast(list[object], top_daemons_any) if isinstance(x, str)]
+        if isinstance(top_daemons_any, list)
+        else []
+    )
+
     if detail_mode == "threat":
-        details.append("view: threat model (c: candidate view)")
+        details.append("view: threat model (c: candidates)")
         details.append("")
         tm = cast(dict[str, object], snapshot.get("threat_model", {}))
         if not bool(tm.get("available")):
@@ -2435,6 +2473,129 @@ def _draw_interactive_tui_frame(
             f"daemons={_as_int(asset_inventory.get('service_candidates'))} "
             f"open_ports={len(asset_open_ports)}"
         )
+    elif detail_mode == "runtime":
+        details.append("view: runtime model (c: candidates)")
+        details.append("")
+        runtime_rows = cast(list[object], runtime_model.get("rows", []))
+        details.append(
+            f"status={_short_text(runtime_model.get('status'), max_len=12) or '-'}  "
+            f"hosts={_as_int(runtime_summary.get('hosts'))}  "
+            f"services={_as_int(runtime_summary.get('services'))}  "
+            f"components={_as_int(runtime_summary.get('components'))}  "
+            f"rows={len(runtime_rows)}"
+        )
+        details.append(
+            f"evidence: "
+            f"D={_as_int(runtime_summary.get('rows_dynamic'))}, "
+            f"E={_as_int(runtime_summary.get('rows_exploit'))}, "
+            f"V={_as_int(runtime_summary.get('rows_verified_chain'))}, "
+            f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
+        )
+        if runtime_rows:
+            details.append("")
+            details.append("top_communications:")
+            for row_any in runtime_rows[: max(6, min(10, right_width // 12))]:
+                row = cast(dict[str, object], row_any)
+                row_host = _short_text(row.get("host"), max_len=16)
+                row_service_host = _short_text(row.get("service_host"), max_len=16)
+                row_port = _as_int(row.get("port"))
+                row_protocol = (_short_text(row.get("protocol"), max_len=8) or "tcp").upper()
+                row_badge = _short_text(row.get("evidence_badge"), max_len=8) or "S"
+                row_components = row.get("components")
+                if not isinstance(row_components, list):
+                    row_components = []
+                component_text = ", ".join(_short_text(v, max_len=20) for v in row_components[:2])
+                if not component_text:
+                    component_text = "unmapped"
+                evidence_signals = row.get("evidence_signals")
+                if not isinstance(evidence_signals, list):
+                    evidence_signals = []
+                evidence_text = ",".join(
+                    sorted(
+                        str(x)
+                        for x in cast(list[object], evidence_signals)
+                        if isinstance(x, str)
+                    )
+                )
+                if not evidence_text:
+                    evidence_text = row_badge
+                svc = f"{row_service_host}:{row_port}/{row_protocol}"
+                details.extend(
+                    _wrap_detail(
+                        f" - {row_host: <15} => {svc: <16} [{row_badge}] {component_text} ({evidence_text})"
+                    )
+                )
+        else:
+            details.append("")
+            details.append("communication matrix: unavailable or empty")
+    elif detail_mode == "asset":
+        details.append("view: asset inventory (c: candidates)")
+        details.append("")
+        details.append(
+            f"files={_as_int(asset_inventory.get('files'))}  "
+            f"binaries={_as_int(asset_inventory.get('binaries'))}  "
+            f"configs={_as_int(asset_inventory.get('configs'))}  "
+            f"service_candidates={_as_int(asset_inventory.get('service_candidates'))}"
+        )
+        kind_pairs = cast(
+            dict[str, int],
+            asset_inventory.get("service_kind_counts", {})
+            if isinstance(asset_inventory.get("service_kind_counts"), dict)
+            else {},
+        )
+        if kind_pairs:
+            kind_text = ", ".join(
+                f"{k}:{v}" for k, v in _sorted_count_pairs(kind_pairs, limit=6)
+            )
+            details.append(f"service_kinds={kind_text}")
+        if endpoint_types:
+            endpoint_text = ", ".join(
+                f"{k}:{v}" for k, v in _sorted_count_pairs(endpoint_types, limit=5)
+            )
+            details.append(f"endpoint_types={endpoint_text}")
+        details.append(
+            f"open_ports={len(asset_open_ports)}  "
+            f"probed={_as_int(asset_inventory.get('probed_ports'))}  "
+            f"scan_strategy={_short_text(asset_inventory.get('scan_strategy'), max_len=16)}"
+        )
+        if asset_open_ports:
+            details.append("open_ports=" + ", ".join(asset_open_ports[:6]))
+        proto_pairs = _sorted_count_pairs(
+            cast(
+                dict[str, int],
+                dynamic_protocols if isinstance(dynamic_protocols, dict) else {},
+            ),
+            limit=4,
+        )
+        if proto_pairs:
+            details.append(
+                "dynamic_proto="
+                + ", ".join(f"{k}:{v}" for k, v in proto_pairs)
+            )
+        state_pairs = _sorted_count_pairs(
+            cast(
+                dict[str, int],
+                dynamic_states if isinstance(dynamic_states, dict) else {},
+            ),
+            limit=4,
+        )
+        if state_pairs:
+            details.append(
+                "dynamic_state="
+                + ", ".join(f"{k}:{v}" for k, v in state_pairs)
+            )
+        if interfaces:
+            details.append("interfaces=" + ", ".join(interfaces[:5]))
+        daemon_paths = [
+            x for x in cast(list[object], service_paths) if isinstance(x, str)
+        ]
+        if daemon_paths:
+            details.append(
+                "daemon_evidence="
+                + ", ".join(_path_tail(x, max_segments=5, max_len=96) for x in daemon_paths[:4])
+            )
+        if top_daemons:
+            details.append("top_daemons=" + ", ".join(top_daemons[:6]))
     elif shown_groups:
         selected = cast(dict[str, object], shown_groups[selected_index])
         representative_id = _short_text(selected.get("representative_id"), max_len=120)
@@ -2591,7 +2752,7 @@ def _draw_interactive_tui_frame(
         win,
         y=status_row,
         x=0,
-        text="j/k or ↑/↓ move | g/G top/bottom | t threat | c candidate | r refresh | q quit",
+        text="j/k or ↑/↓ move | g/G top/bottom | c candidate | t threat | m runtime | a assets | r refresh | q quit",
         attr=_attr("meta"),
     )
     win.refresh()
@@ -2685,6 +2846,12 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
                 continue
             if key in (ord("t"), ord("T")):
                 detail_mode = "threat"
+                continue
+            if key in (ord("m"), ord("M")):
+                detail_mode = "runtime"
+                continue
+            if key in (ord("a"), ord("A")):
+                detail_mode = "asset"
                 continue
             if key in (ord("c"), ord("C")):
                 detail_mode = "candidate"

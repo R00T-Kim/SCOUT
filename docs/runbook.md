@@ -163,17 +163,13 @@ PY
 Terminal-only workflow (no browser required):
 
 ```bash
-# shortest launcher (repo root)
-./scout tui <run_dir>
-# default best-mode: picks interactive when TTY, static once otherwise
-./scout tui <run_dir>
-# explicit live refresh
-./scout tw <run_dir> -t 2
-# explicit interactive mode (q to quit)
-./scout ti <run_dir> -n 30
+./scout tui <run_dir>                     # auto mode
+./scout ti <run_dir>                     # interactive mode (q to quit)
+./scout tw <run_dir> -t 2 -n 20         # live watch
+./scout to <run_dir>                     # one-shot (explicit once mode)
 ```
 
-Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `t` threat panel, `c` candidate panel, `r` refresh, `q` quit.
+Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `c` candidate panel, `t` threat panel, `m` runtime-model panel, `a` assets/protocol panel, `r` refresh, `q` quit.
 
 ### 8.1) 2026-02-19 pipeline hardening snapshot (audited + fixed)
 
@@ -193,6 +189,8 @@ The following weaknesses were found during full pipeline audit and patched:
    - Fix: risk-score unknowns, infer threat candidates for actionable unknown endpoints, track truncation count.
 7. **Interactive TUI hid threat model context**
    - Fix: threat detail pane toggle (`t/c`), reason overflow indicator, and detail truncation indicator.
+8. **Interactive TUI visibility**
+   - Fix: added dedicated runtime/asset detail panels (`m` and `a`) so protocol/service/daemon/port/context become visible directly in a single pane without re-running analyses.
 
 - Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
 - The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.

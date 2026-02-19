@@ -17,7 +17,9 @@ Examples
   ./scout tui -i               # latest run, interactive mode
   ./scout ti                   # alias: tui -i
   ./scout tw                   # alias: tui -w
+  ./scout to                   # alias: tui -m once
   ./scout tui aiedge-runs/<run_id> -w -t 2 -n 20
+  ./scout t                    # alias: tui
   ./scout run firmware.bin --profile exploit
   ./scout report aiedge-runs/<run_id>
 EOF
@@ -36,6 +38,10 @@ case "${1:-}" in
   to)
     shift
     set -- tui -m once "$@"
+    ;;
+  t)
+    shift
+    set -- tui "$@"
     ;;
 esac
 
