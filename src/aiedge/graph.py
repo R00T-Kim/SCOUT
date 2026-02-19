@@ -696,6 +696,9 @@ def _collect_dynamic_open_ports(ports_obj: dict[str, object] | None) -> list[tup
     for entry_any in ports_any:
         if not isinstance(entry_any, dict):
             continue
+        state_any = entry_any.get("state")
+        if not isinstance(state_any, str) or state_any.lower() != "open":
+            continue
         port = _as_int(entry_any.get("port"))
         if port is None:
             continue

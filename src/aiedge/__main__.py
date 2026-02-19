@@ -919,6 +919,17 @@ def _collect_tui_asset_inventory(
 
     ports_any = ports_obj.get("ports")
     ports = cast(list[dict[str, object]], ports_any) if isinstance(ports_any, list) else []
+    ports_summary_any = ports_obj.get("summary")
+    ports_summary = (
+        cast(dict[str, object], ports_summary_any)
+        if isinstance(ports_summary_any, dict)
+        else {}
+    )
+    scan_strategy = _short_text(ports_obj.get("scan_strategy"), max_len=40)
+    scanned_total = _as_int(ports_summary.get("scanned"))
+    range_total = _as_int(ports_summary.get("range_total"))
+    coverage_pct = _as_float(ports_summary.get("coverage_pct"))
+    budget_hit = bool(ports_summary.get("budget_hit", False))
     dynamic_proto_counts: dict[str, int] = {}
     dynamic_state_counts: dict[str, int] = {}
     port_samples: list[str] = []
@@ -939,6 +950,14 @@ def _collect_tui_asset_inventory(
             port_samples.append(sample)
         if state == "open" and sample not in open_ports_from_rows:
             open_ports_from_rows.append(sample)
+
+    if ports_summary:
+        for key in ("open", "closed", "filtered", "error"):
+            count = _as_int(ports_summary.get(key))
+            if count > 0:
+                dynamic_state_counts[key] = count
+        if scanned_total > 0 and not dynamic_proto_counts:
+            dynamic_proto_counts["tcp"] = scanned_total
 
     open_ports_any = ports_obj.get("open_ports")
     open_ports_numeric = (
@@ -1001,7 +1020,11 @@ def _collect_tui_asset_inventory(
         "endpoint_protocol_counts": endpoint_protocol_counts,
         "endpoint_port_counts": endpoint_port_counts,
         "target_ip": _short_text(ports_obj.get("target_ip"), max_len=32),
-        "probed_ports": len(ports),
+        "probed_ports": scanned_total if scanned_total > 0 else len(ports),
+        "scan_range_total": range_total,
+        "scan_coverage_pct": coverage_pct if coverage_pct > 0 else 0.0,
+        "scan_budget_hit": budget_hit,
+        "scan_strategy": scan_strategy,
         "open_ports": open_ports,
         "port_samples": port_samples[:8],
         "dynamic_protocol_counts": dynamic_proto_counts,
@@ -1552,6 +1575,10 @@ def _build_tui_snapshot_lines(
         dynamic_state_text = ", ".join(
             f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_states, limit=4)
         ) or "-"
+        scan_strategy = _short_text(asset_inventory.get("scan_strategy"), max_len=32) or "default"
+        scan_coverage = _as_float(asset_inventory.get("scan_coverage_pct"), default=0.0)
+        scan_range_total = _as_int(asset_inventory.get("scan_range_total"))
+        scan_budget_hit = bool(asset_inventory.get("scan_budget_hit", False))
         target_ip = _short_text(asset_inventory.get("target_ip"), max_len=40) or "-"
 
         lines.append("")
@@ -1580,10 +1607,17 @@ def _build_tui_snapshot_lines(
         lines.append(
             f"protocols: static_url={endpoint_protocol_text} | dynamic_probe={dynamic_protocol_text}"
         )
-        lines.append(
+        port_line = (
             f"ports: target={target_ip} | probed={_as_int(asset_inventory.get('probed_ports'))} "
             f"| open={len(open_ports)} | states={dynamic_state_text}"
         )
+        if scan_range_total > 0:
+            port_line += f" | coverage={scan_coverage:.1f}%/{scan_range_total}"
+        if scan_strategy and scan_strategy != "default":
+            port_line += f" | scan={scan_strategy}"
+        lines.append(port_line)
+        if scan_budget_hit:
+            lines.append("  scan_note=budget_hit (increase AIEDGE_PORTSCAN_BUDGET_S if needed)")
         if open_ports:
             lines.append("  open_ports=" + ", ".join(open_ports[:6]))
         elif port_samples:
@@ -1959,6 +1993,7 @@ def _draw_interactive_tui_frame(
     proto_text = ",".join(
         f"{k}:{v}" for k, v in _sorted_count_pairs(asset_protocol_counts, limit=2)
     ) or "-"
+    asset_scan_cov = _as_float(asset_inventory.get("scan_coverage_pct"), default=0.0)
     blockers_any = runtime_health.get("blockers")
     blockers_count = (
         len([x for x in cast(list[object], blockers_any) if isinstance(x, str)])
@@ -1987,7 +2022,8 @@ def _draw_interactive_tui_frame(
             f"bins:{_as_int(asset_inventory.get('binaries'))}  "
             f"svcs:{_as_int(asset_inventory.get('service_candidates'))}  "
             f"proto:{proto_text}  "
-            f"ports_open:{len(asset_open_ports)}/{_as_int(asset_inventory.get('probed_ports'))}"
+            f"ports_open:{len(asset_open_ports)}/{_as_int(asset_inventory.get('probed_ports'))}  "
+            f"scan_cov:{asset_scan_cov:.0f}%"
         ),
         attr=_attr("meta"),
     )

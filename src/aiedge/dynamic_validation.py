@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+import errno
 
 import json
 import os
@@ -12,6 +14,7 @@ import ssl
 import stat
 import struct
 import subprocess
+import time
 from dataclasses import dataclass
 from http.client import HTTPResponse
 from pathlib import Path
@@ -435,13 +438,231 @@ def _collect_interfaces_from_target(
     }, limitations
 
 
+_BASE_PROBE_PORTS: tuple[int, ...] = (
+    22,
+    23,
+    53,
+    67,
+    68,
+    80,
+    81,
+    123,
+    161,
+    443,
+    5000,
+    7000,
+    7547,
+    8080,
+    8081,
+    8443,
+    8888,
+)
+
+_SERVICE_PORT_HINTS: dict[str, tuple[int, ...]] = {
+    "dropbear": (22,),
+    "sshd": (22,),
+    "ssh": (22,),
+    "telnetd": (23,),
+    "telnet": (23,),
+    "uhttpd": (80, 443),
+    "httpd": (80, 443),
+    "nginx": (80, 443),
+    "lighttpd": (80, 443),
+    "boa": (80,),
+    "mini_httpd": (80,),
+    "rpcd": (80, 443, 8080),
+    "dnsmasq": (53, 67),
+    "named": (53,),
+    "odhcpd": (67, 547),
+    "ntpd": (123,),
+    "snmpd": (161,),
+    "upnpd": (1900,),
+    "miniupnpd": (1900,),
+    "tftpd": (69,),
+    "ftpd": (21,),
+    "proftpd": (21,),
+}
+
+
+def _safe_load_json_object(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        obj_any = cast(object, json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return {}
+    if not isinstance(obj_any, dict):
+        return {}
+    return cast(dict[str, object], obj_any)
+
+
+def _collect_static_port_hints(*, run_dir: Path) -> tuple[list[int], list[str]]:
+    hints: set[int] = set(_BASE_PROBE_PORTS)
+    sources: list[str] = []
+
+    inv_obj = _safe_load_json_object(run_dir / "stages" / "inventory" / "inventory.json")
+    service_candidates_any = inv_obj.get("service_candidates")
+    if isinstance(service_candidates_any, list):
+        for item_any in cast(list[object], service_candidates_any):
+            if not isinstance(item_any, dict):
+                continue
+            item = cast(dict[str, object], item_any)
+            name = str(item.get("name", "")).strip().lower()
+            if not name:
+                continue
+            matched = False
+            for token, ports in _SERVICE_PORT_HINTS.items():
+                if token in name:
+                    hints.update(int(p) for p in ports)
+                    matched = True
+            if matched:
+                sources.append(f"service:{name}")
+
+    endpoints_obj = _safe_load_json_object(run_dir / "stages" / "endpoints" / "endpoints.json")
+    endpoints_any = endpoints_obj.get("endpoints")
+    if isinstance(endpoints_any, list):
+        for endpoint_any in cast(list[object], endpoints_any):
+            if not isinstance(endpoint_any, dict):
+                continue
+            endpoint = cast(dict[str, object], endpoint_any)
+            value = str(endpoint.get("value", "")).strip()
+            if not value:
+                continue
+            # URL with explicit port
+            match = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://[^/:]+:(\d{1,5})\b", value)
+            if match:
+                port = int(match.group(1))
+                if 1 <= port <= 65535:
+                    hints.add(port)
+                    sources.append(f"endpoint:{port}")
+                continue
+            # host:port style literal
+            match = re.match(r"^[a-zA-Z0-9_.:\-\[\]]+:(\d{1,5})$", value)
+            if match:
+                port = int(match.group(1))
+                if 1 <= port <= 65535:
+                    hints.add(port)
+                    sources.append(f"endpoint:{port}")
+
+    ordered_hints = sorted({p for p in hints if 1 <= p <= 65535})
+    ordered_sources = sorted(set(sources))
+    return ordered_hints, ordered_sources
+
+
+def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int, int]:
+    connect_timeout = min(0.35, max(0.08, float(timeout_s) / 12.0))
+    workers_default = 384
+    budget_default_s = 90.0
+    range_start_default = 1
+    range_end_default = 65535
+
+    workers_env = os.environ.get("AIEDGE_PORTSCAN_WORKERS", "").strip()
+    budget_env = os.environ.get("AIEDGE_PORTSCAN_BUDGET_S", "").strip()
+    range_start_env = os.environ.get("AIEDGE_PORTSCAN_START", "").strip()
+    range_end_env = os.environ.get("AIEDGE_PORTSCAN_END", "").strip()
+    timeout_env = os.environ.get("AIEDGE_PORTSCAN_CONNECT_TIMEOUT_S", "").strip()
+
+    workers = workers_default
+    if workers_env.isdigit():
+        workers = max(32, min(1024, int(workers_env)))
+
+    budget_s = budget_default_s
+    try:
+        if budget_env:
+            budget_s = max(15.0, min(600.0, float(budget_env)))
+    except Exception:
+        budget_s = budget_default_s
+
+    try:
+        if timeout_env:
+            connect_timeout = max(0.03, min(2.0, float(timeout_env)))
+    except Exception:
+        pass
+
+    range_start = range_start_default
+    range_end = range_end_default
+    if range_start_env.isdigit():
+        range_start = max(1, min(65535, int(range_start_env)))
+    if range_end_env.isdigit():
+        range_end = max(1, min(65535, int(range_end_env)))
+    if range_start > range_end:
+        range_start, range_end = range_end, range_start
+
+    return connect_timeout, workers, budget_s, range_start, range_end
+
+
+def _iter_port_scan_plan(
+    *,
+    prioritized: list[int],
+    range_start: int,
+    range_end: int,
+) -> Iterable[int]:
+    seen: set[int] = set()
+    for port in prioritized:
+        if not (range_start <= int(port) <= range_end):
+            continue
+        p = int(port)
+        if p in seen:
+            continue
+        seen.add(p)
+        yield p
+    for port in range(range_start, range_end + 1):
+        if port in seen:
+            continue
+        seen.add(port)
+        yield port
+
+
+def _scan_single_tcp_port(*, target_ip: str, port: int, timeout_s: float) -> tuple[int, str, str]:
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(float(timeout_s))
+        result = sock.connect_ex((target_ip, int(port)))
+        if result == 0:
+            return int(port), "open", ""
+        if result in (errno.ECONNREFUSED, 111):
+            return int(port), "closed", ""
+        if result in (
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.EHOSTDOWN,
+            errno.ENETDOWN,
+        ):
+            return int(port), "filtered", f"errno:{result}"
+        return int(port), "closed", f"errno:{result}"
+    except socket.timeout:
+        return int(port), "filtered", "TimeoutError: timed out"
+    except OSError as exc:
+        if exc.errno in (
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.EHOSTDOWN,
+            errno.ENETDOWN,
+        ):
+            return int(port), "filtered", f"OSError[{exc.errno}]: {exc.strerror or exc}"
+        if exc.errno in (errno.ECONNREFUSED,):
+            return int(port), "closed", f"OSError[{exc.errno}]: {exc.strerror or exc}"
+        return int(port), "error", f"OSError[{exc.errno}]: {exc.strerror or exc}"
+    except Exception as exc:
+        return int(port), "error", f"{type(exc).__name__}: {exc}"
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 def _probe_target_ports(
     *,
+    run_dir: Path,
     target_ip: str | None,
     timeout_s: float,
 ) -> tuple[dict[str, JsonValue], list[str]]:
     limitations: list[str] = []
-    probe_ports = [80, 443, 22, 23, 8080, 8443]
     if not target_ip:
         limitations.append("target_ip_missing")
         return {
@@ -452,41 +673,135 @@ def _probe_target_ports(
             "reason": "target_ip_unavailable",
         }, limitations
 
-    probed: list[dict[str, JsonValue]] = []
-    open_ports: list[int] = []
-    for port in probe_ports:
-        state = "closed"
-        error = ""
-        sock: socket.socket | None = None
-        try:
-            sock = socket.create_connection(
-                (target_ip, int(port)), timeout=float(timeout_s)
-            )
-            state = "open"
-            open_ports.append(int(port))
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-        finally:
-            if sock is not None:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-        probed.append(
-            {
-                "proto": "tcp",
-                "port": int(port),
-                "state": state,
-                "error": error,
-            }
-        )
+    hint_ports, hint_sources = _collect_static_port_hints(run_dir=run_dir)
+    connect_timeout_s, workers, budget_s, range_start, range_end = _derive_portscan_config(
+        timeout_s=timeout_s
+    )
+    plan_iter = _iter_port_scan_plan(
+        prioritized=hint_ports,
+        range_start=range_start,
+        range_end=range_end,
+    )
 
-    return {
-        "status": "ok",
+    scan_started = time.monotonic()
+    budget_deadline = scan_started + float(budget_s)
+    queue_depth = max(64, int(workers * 2))
+    inflight: dict[Future[tuple[int, str, str]], int] = {}
+    budget_hit = False
+    plan_exhausted = False
+
+    scanned_total = 0
+    state_counts: dict[str, int] = {"open": 0, "closed": 0, "filtered": 0, "error": 0}
+    open_ports: list[int] = []
+    open_rows: list[dict[str, JsonValue]] = []
+    sample_rows: list[dict[str, JsonValue]] = []
+
+    with ThreadPoolExecutor(max_workers=int(workers)) as executor:
+        while True:
+            now = time.monotonic()
+            if now >= budget_deadline:
+                budget_hit = True
+
+            while (not budget_hit) and len(inflight) < queue_depth:
+                try:
+                    port = next(plan_iter)
+                except StopIteration:
+                    plan_exhausted = True
+                    break
+                future = executor.submit(
+                    _scan_single_tcp_port,
+                    target_ip=target_ip,
+                    port=int(port),
+                    timeout_s=float(connect_timeout_s),
+                )
+                inflight[future] = int(port)
+
+            if not inflight:
+                if plan_exhausted or budget_hit:
+                    break
+                continue
+
+            done, _pending = wait(
+                set(inflight.keys()),
+                timeout=0.1,
+                return_when=FIRST_COMPLETED,
+            )
+            if not done:
+                if budget_hit:
+                    # deadline reached; stop submitting and wait for in-flight to drain
+                    continue
+                continue
+
+            for future in done:
+                _ = inflight.pop(future, None)
+                try:
+                    port, state, error = future.result()
+                except Exception as exc:
+                    state = "error"
+                    error = f"{type(exc).__name__}: {exc}"
+                    port = -1
+                if port <= 0:
+                    continue
+                scanned_total += 1
+                if state not in state_counts:
+                    state = "error"
+                state_counts[state] = state_counts.get(state, 0) + 1
+
+                row = {
+                    "proto": "tcp",
+                    "port": int(port),
+                    "state": state,
+                    "error": error,
+                }
+                if state == "open":
+                    open_ports.append(int(port))
+                    open_rows.append(row)
+                elif len(sample_rows) < 64:
+                    sample_rows.append(row)
+
+            if plan_exhausted and not inflight:
+                break
+
+    total_ports = max(1, (range_end - range_start + 1))
+    coverage_pct = round((float(scanned_total) / float(total_ports)) * 100.0, 2)
+    duration_s = round(max(0.0, time.monotonic() - scan_started), 3)
+    if budget_hit and not plan_exhausted:
+        limitations.append("port_scan_budget_exceeded")
+
+    serialized_ports = open_rows + sample_rows[:32]
+    open_unique = sorted({int(p) for p in open_ports if int(p) > 0})
+    status = "ok" if (not limitations and plan_exhausted) else "partial"
+
+    payload: dict[str, JsonValue] = {
+        "status": status,
         "target_ip": target_ip,
-        "ports": cast(list[JsonValue], cast(list[object], probed)),
-        "open_ports": cast(list[JsonValue], cast(list[object], open_ports)),
-    }, limitations
+        "scan_strategy": "adaptive_full_range_tcp",
+        "scan_range": cast(list[JsonValue], cast(list[object], [int(range_start), int(range_end)])),
+        "scan_connect_timeout_s": float(connect_timeout_s),
+        "scan_budget_s": float(budget_s),
+        "scan_workers": int(workers),
+        "hint_ports": cast(list[JsonValue], cast(list[object], hint_ports[:48])),
+        "hint_sources": cast(list[JsonValue], cast(list[object], hint_sources[:48])),
+        "ports": cast(list[JsonValue], cast(list[object], serialized_ports)),
+        "open_ports": cast(list[JsonValue], cast(list[object], open_unique)),
+        "summary": cast(
+            JsonValue,
+            {
+                "scanned": int(scanned_total),
+                "range_total": int(total_ports),
+                "coverage_pct": float(coverage_pct),
+                "open": int(state_counts.get("open", 0)),
+                "closed": int(state_counts.get("closed", 0)),
+                "filtered": int(state_counts.get("filtered", 0)),
+                "error": int(state_counts.get("error", 0)),
+                "budget_hit": bool(budget_hit and not plan_exhausted),
+                "duration_s": float(duration_s),
+            },
+        ),
+    }
+    if budget_hit and not plan_exhausted:
+        payload["reason"] = "scan_budget_reached_before_full_range_complete"
+    return payload, limitations
 
 
 def _run_http_probes(
@@ -1441,6 +1756,7 @@ class DynamicValidationStage:
         _write_json(interfaces_path, interfaces_payload)
 
         ports_payload, port_limits = _probe_target_ports(
+            run_dir=ctx.run_dir,
             target_ip=target_ip,
             timeout_s=float(self.probe_timeout_s),
         )
