@@ -1879,6 +1879,7 @@ def run_subset(
     )
 
     report = _load_report_json(info.report_json_path)
+    manifest_profile = _load_manifest_profile(info.manifest_path)
     source_input_path = _load_manifest_input_path(info.manifest_path)
 
     budget_s = int(time_budget_s)
@@ -1906,6 +1907,9 @@ def run_subset(
     report["limitations"] = cast(
         list[JsonValue], list(existing_limits) + list(rep.limitations)
     )
+    report["exploit_assessment"] = _build_exploit_assessment(
+        profile=manifest_profile, report=report, run_dir=info.run_dir
+    )
 
     _set_report_completion(
         report,
@@ -1915,7 +1919,21 @@ def run_subset(
     )
     _refresh_integrity_and_completeness(report, info, findings_executed=False)
 
-    _ = reporting.write_report_json(info.run_dir / "report", report)
+    report_dir = info.run_dir / "report"
+    _ = reporting.write_report_json(report_dir, report)
+    _ = reporting.write_report_html(report_dir, report)
+    try:
+        _write_analyst_report_artifacts(report_dir, report)
+    except Exception as exc:
+        limits = normalize_limitations_list(report.get("limitations"))
+        err_tag = f"subset_report_artifacts_failed:{type(exc).__name__}"
+        if err_tag not in limits:
+            limits.append(err_tag)
+            report["limitations"] = cast(
+                list[JsonValue], cast(list[object], limits)
+            )
+            _ = reporting.write_report_json(report_dir, report)
+            _ = reporting.write_report_html(report_dir, report)
     return rep
 
 

@@ -1141,13 +1141,16 @@ class DynamicValidationStage:
         boot_lines: list[str] = []
         boot_success = False
         saw_timeout = False
+        boot_attempted = False
+        boot_blocked = False
         target_ip: str | None = None
         target_iid: str | None = None
         scratch_state: dict[str, JsonValue] = {}
 
         for attempt in range(1, attempt_count + 1):
             if not run_sh.is_file():
-                limitations.append("boot_flaky")
+                limitations.append("boot_unavailable_run_sh_missing")
+                boot_blocked = True
                 boot_attempts.append(
                     {
                         "attempt": attempt,
@@ -1159,7 +1162,10 @@ class DynamicValidationStage:
                 break
 
             if not sudo_bin:
-                limitations.extend(["boot_flaky", "sudo_nopasswd_required"])
+                limitations.extend(
+                    ["boot_unavailable_sudo_missing", "sudo_nopasswd_required"]
+                )
+                boot_blocked = True
                 boot_attempts.append(
                     {
                         "attempt": attempt,
@@ -1172,6 +1178,7 @@ class DynamicValidationStage:
 
             before = _list_scratch_dirs(scratch_root)
             argv = [sudo_bin, "-n", str(run_sh), "-c", "auto", str(firmware_path)]
+            boot_attempted = True
             res = _run_command(
                 argv, timeout_s=float(self.boot_timeout_s), cwd=firmae_root
             )
@@ -1227,14 +1234,22 @@ class DynamicValidationStage:
             )
 
             stderr_l = (res.stderr or "").lower()
-            if (
+            sudo_auth_blocked = (
                 "password" in stderr_l
                 or "a password is required" in stderr_l
                 or "no tty present" in stderr_l
-                or "sudo" in stderr_l
-                and "askpass" in stderr_l
-            ):
+                or ("sudo" in stderr_l and "askpass" in stderr_l)
+            )
+            sudo_exec_blocked = "sudo" in stderr_l and (
+                "no new privileges" in stderr_l
+                or "operation not permitted" in stderr_l
+            )
+            if sudo_auth_blocked:
                 limitations.append("sudo_nopasswd_required")
+                boot_blocked = True
+            if sudo_exec_blocked:
+                limitations.append("sudo_execution_blocked")
+                boot_blocked = True
 
             if res.returncode == 0 and ip:
                 boot_success = True
@@ -1242,7 +1257,7 @@ class DynamicValidationStage:
 
         _ = boot_log_path.write_text("\n".join(boot_lines), encoding="utf-8")
 
-        if not boot_success:
+        if not boot_success and boot_attempted and not boot_blocked:
             limitations.append("boot_timeout" if saw_timeout else "boot_flaky")
 
         interfaces_payload, interface_limits = _collect_interfaces_from_target(

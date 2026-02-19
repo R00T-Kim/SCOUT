@@ -246,6 +246,55 @@ def test_dynamic_validation_marks_sudo_nopasswd_required(
     assert "sudo_nopasswd_required" in out.limitations
 
 
+def test_dynamic_validation_marks_sudo_execution_blocked_without_boot_flaky(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _ctx(tmp_path)
+    firmae_root = tmp_path / "FirmAE"
+    firmae_root.mkdir(parents=True)
+    _ = (firmae_root / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            "sudo": "/usr/bin/sudo",
+            "git": "/usr/bin/git",
+            "ip": "/usr/sbin/ip",
+            "tcpdump": "/usr/sbin/tcpdump",
+        }
+        return mapping.get(name)
+
+    def fake_run(
+        argv: list[str], *, timeout_s: float | None, cwd: Path | None = None
+    ) -> dv.CommandResult:
+        _ = timeout_s, cwd
+        if "run.sh" in " ".join(argv):
+            return dv.CommandResult(
+                argv=argv,
+                returncode=1,
+                stdout="",
+                stderr='sudo: The "no new privileges" flag is set.\n',
+                timed_out=False,
+                error=None,
+            )
+        return dv.CommandResult(
+            argv=argv,
+            returncode=1,
+            stdout="",
+            stderr="fail\n",
+            timed_out=False,
+            error=None,
+        )
+
+    monkeypatch.setattr("aiedge.dynamic_validation.shutil.which", fake_which)
+    monkeypatch.setattr(dv, "_run_command", fake_run)
+
+    out = DynamicValidationStage(firmae_root=str(firmae_root), max_retries=1).run(ctx)
+    assert out.status == "partial"
+    assert "sudo_execution_blocked" in out.limitations
+    assert "boot_flaky" not in out.limitations
+
+
 def test_run_subset_dynamic_validation_writes_stage_and_report_section(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -346,6 +395,10 @@ def test_run_subset_dynamic_validation_writes_stage_and_report_section(
     dv_report = cast(dict[str, object], dv_report_any)
     assert dv_report.get("status") in {"ok", "partial"}
     assert dv_report.get("dynamic_scope") in {"full_system", "single_binary"}
+    assessment_any = report.get("exploit_assessment")
+    assert isinstance(assessment_any, dict)
+    assessment = cast(dict[str, object], assessment_any)
+    assert assessment.get("profile") in {"analysis", "exploit"}
 
 
 def test_dynamic_validation_placeholder_pcap_has_valid_header(
