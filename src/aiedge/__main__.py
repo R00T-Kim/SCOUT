@@ -993,8 +993,12 @@ def _collect_tui_asset_inventory(
             scheme = parsed.scheme.lower().strip()
             if scheme:
                 endpoint_protocol_counts[scheme] = endpoint_protocol_counts.get(scheme, 0) + 1
-            if parsed.port is not None and 0 <= int(parsed.port) <= 65535:
-                port_key = str(int(parsed.port))
+            try:
+                parsed_port = parsed.port
+            except ValueError:
+                parsed_port = None
+            if parsed_port is not None and 0 <= int(parsed_port) <= 65535:
+                port_key = str(int(parsed_port))
                 endpoint_port_counts[port_key] = endpoint_port_counts.get(port_key, 0) + 1
             continue
         host_port = re.match(r"^[a-zA-Z0-9_.:-]+:(\d{1,5})$", value)
