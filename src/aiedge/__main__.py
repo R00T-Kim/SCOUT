@@ -1011,6 +1011,162 @@ def _collect_tui_asset_inventory(
     }
 
 
+def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
+    dynamic_obj = _safe_load_json_object(
+        run_dir / "stages" / "dynamic_validation" / "dynamic_validation.json"
+    )
+    dynamic_stage = _safe_load_json_object(
+        run_dir / "stages" / "dynamic_validation" / "stage.json"
+    )
+    emu_stage = _safe_load_json_object(run_dir / "stages" / "emulation" / "stage.json")
+
+    dynamic_status = _short_text(dynamic_obj.get("status"), max_len=24) or (
+        _short_text(dynamic_stage.get("status"), max_len=24) or "unknown"
+    )
+    dynamic_scope = _short_text(dynamic_obj.get("dynamic_scope"), max_len=40) or "unknown"
+
+    target_any = dynamic_obj.get("target")
+    target = cast(dict[str, object], target_any) if isinstance(target_any, dict) else {}
+    target_ip = _short_text(target.get("ip"), max_len=48)
+    target_iid = _short_text(target.get("iid"), max_len=24)
+
+    boot_any = dynamic_obj.get("boot")
+    boot = cast(dict[str, object], boot_any) if isinstance(boot_any, dict) else {}
+    boot_success = bool(boot.get("success", False))
+    attempts_any = boot.get("attempts")
+    attempts = cast(list[dict[str, object]], attempts_any) if isinstance(attempts_any, list) else []
+    boot_attempts = len(attempts)
+    last_error = ""
+    last_returncode = 0
+    if attempts:
+        last_attempt = attempts[-1]
+        if isinstance(last_attempt, dict):
+            last_error = _short_text(last_attempt.get("error"), max_len=240)
+            last_returncode = _as_int(last_attempt.get("returncode"))
+
+    privileged_any = dynamic_obj.get("privileged_executor")
+    privileged = (
+        cast(dict[str, object], privileged_any)
+        if isinstance(privileged_any, dict)
+        else {}
+    )
+    priv_mode = _short_text(privileged.get("mode"), max_len=24) or "-"
+    priv_source = _short_text(privileged.get("source"), max_len=48) or "-"
+
+    dynamic_limitations_any = dynamic_obj.get("limitations")
+    dynamic_limitations = (
+        [x for x in cast(list[object], dynamic_limitations_any) if isinstance(x, str)]
+        if isinstance(dynamic_limitations_any, list)
+        else []
+    )
+    stage_limitations_any = dynamic_stage.get("limitations")
+    stage_limitations = (
+        [x for x in cast(list[object], stage_limitations_any) if isinstance(x, str)]
+        if isinstance(stage_limitations_any, list)
+        else []
+    )
+    emu_limitations_any = emu_stage.get("limitations")
+    emu_limitations = (
+        [x for x in cast(list[object], emu_limitations_any) if isinstance(x, str)]
+        if isinstance(emu_limitations_any, list)
+        else []
+    )
+    limitation_list = [
+        x
+        for x in dict.fromkeys(dynamic_limitations + stage_limitations + emu_limitations)
+        if x
+    ]
+
+    isolation_any = dynamic_obj.get("isolation")
+    isolation = cast(dict[str, object], isolation_any) if isinstance(isolation_any, dict) else {}
+    fw_cmds_any = isolation.get("firewall_commands")
+    fw_cmds = cast(list[dict[str, object]], fw_cmds_any) if isinstance(fw_cmds_any, list) else []
+    no_new_priv = False
+    netlink_denied = False
+    for cmd_any in fw_cmds:
+        if not isinstance(cmd_any, dict):
+            continue
+        cmd = cast(dict[str, object], cmd_any)
+        stderr = _short_text(cmd.get("stderr"), max_len=800).lower()
+        if "no new privileges" in stderr:
+            no_new_priv = True
+        if "operation not permitted" in stderr:
+            netlink_denied = True
+
+    emu_status = _short_text(emu_stage.get("status"), max_len=24) or "unknown"
+    docker_permission_denied = any(
+        "docker is installed but not usable" in x.lower()
+        or "permission denied" in x.lower()
+        for x in emu_limitations
+    )
+
+    blockers: list[str] = []
+    if no_new_priv:
+        blockers.append("no_new_privileges")
+    if "sudo_execution_blocked" in limitation_list:
+        blockers.append("sudo_execution_blocked")
+    if "privileged_runner_failed" in limitation_list:
+        blockers.append("privileged_runner_failed")
+    if docker_permission_denied:
+        blockers.append("docker_permission_denied")
+    if "boot_timeout" in limitation_list:
+        blockers.append("boot_timeout")
+    if "boot_flaky" in limitation_list:
+        blockers.append("boot_flaky")
+    if netlink_denied:
+        blockers.append("netlink_permission_denied")
+
+    run_ref: str
+    try:
+        run_ref = run_dir.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except Exception:
+        run_ref = str(run_dir)
+
+    remediation: list[str] = []
+    if ("sudo_execution_blocked" in blockers) or ("no_new_privileges" in blockers):
+        remediation.append(
+            "priv-run 설정: export AIEDGE_PRIV_RUNNER=./scripts/priv-run"
+        )
+        remediation.append(
+            "sudo 검증: sudo -n true (필요 시 SUDO_PASSWORD 설정)"
+        )
+    if "privileged_runner_failed" in blockers:
+        remediation.append("priv-run 경로/권한 확인: ls -l ./scripts/priv-run")
+    if ("boot_timeout" in blockers) or ("boot_flaky" in blockers):
+        remediation.append("부팅 로그 확인: stages/dynamic_validation/firmae/boot.log")
+    if docker_permission_denied:
+        remediation.append("docker 권한 확인: docker ps (daemon/group 권한 점검)")
+    if blockers:
+        remediation.append(
+            f"재시도: ./scout stages {run_ref} --stages dynamic_validation,graph,exploit_autopoc"
+        )
+
+    health_state = "healthy"
+    if dynamic_status not in {"ok"}:
+        health_state = "degraded"
+    if blockers and health_state == "healthy":
+        health_state = "degraded"
+
+    return {
+        "available": bool(dynamic_obj or dynamic_stage),
+        "state": health_state,
+        "dynamic_status": dynamic_status,
+        "dynamic_scope": dynamic_scope,
+        "target_ip": target_ip,
+        "target_iid": target_iid,
+        "boot_success": bool(boot_success),
+        "boot_attempts": boot_attempts,
+        "last_error": last_error,
+        "last_returncode": last_returncode,
+        "privileged_mode": priv_mode,
+        "privileged_source": priv_source,
+        "emulation_status": emu_status,
+        "limitations": limitation_list[:8],
+        "blockers": blockers,
+        "remediation": remediation[:5],
+    }
+
+
 def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     manifest = _safe_load_json_object(run_dir / "manifest.json")
     report = _safe_load_json_object(run_dir / "report" / "report.json")
@@ -1073,6 +1229,7 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         run_dir=run_dir,
         candidates=candidates,
     )
+    runtime_health = _collect_tui_runtime_health(run_dir=run_dir)
 
     return {
         "profile": profile,
@@ -1094,6 +1251,7 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         "chain_bundle_index": chain_bundle_index,
         "runtime_model": runtime_model,
         "asset_inventory": asset_inventory,
+        "runtime_health": runtime_health,
     }
 
 
@@ -1249,6 +1407,66 @@ def _build_tui_snapshot_lines(
             lines.append("  legend: D=dynamic, E=exploit, V=verified_chain, S=static, !!=D+E")
     else:
         lines.append("Runtime exposure model: unavailable")
+
+    runtime_health = cast(dict[str, object], snapshot.get("runtime_health", {}))
+    if runtime_health:
+        blockers_any = runtime_health.get("blockers")
+        blockers = (
+            [x for x in cast(list[object], blockers_any) if isinstance(x, str)]
+            if isinstance(blockers_any, list)
+            else []
+        )
+        limitations_any = runtime_health.get("limitations")
+        limitations = (
+            [x for x in cast(list[object], limitations_any) if isinstance(x, str)]
+            if isinstance(limitations_any, list)
+            else []
+        )
+        remediation_any = runtime_health.get("remediation")
+        remediation = (
+            [x for x in cast(list[object], remediation_any) if isinstance(x, str)]
+            if isinstance(remediation_any, list)
+            else []
+        )
+
+        state = _short_text(runtime_health.get("state"), max_len=20) or "unknown"
+        dyn_status = _short_text(runtime_health.get("dynamic_status"), max_len=20) or "unknown"
+        dyn_scope = _short_text(runtime_health.get("dynamic_scope"), max_len=28) or "unknown"
+        target_ip = _short_text(runtime_health.get("target_ip"), max_len=40) or "-"
+        boot_success = bool(runtime_health.get("boot_success"))
+        boot_attempts = _as_int(runtime_health.get("boot_attempts"))
+        emu_status = _short_text(runtime_health.get("emulation_status"), max_len=20) or "unknown"
+        priv_mode = _short_text(runtime_health.get("privileged_mode"), max_len=20) or "-"
+        status_color = (_ANSI_BOLD, _ANSI_GREEN) if state == "healthy" else (_ANSI_BOLD, _ANSI_YELLOW)
+
+        lines.append("")
+        lines.append(_ansi("Runtime Reliability", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+        lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
+        lines.append(
+            "state="
+            + _ansi(state, *status_color, enabled=use_ansi)
+            + f" | dynamic={dyn_status}({dyn_scope}) | emulation={emu_status} | target={target_ip}"
+        )
+        lines.append(
+            f"boot: success={'yes' if boot_success else 'no'} attempts={boot_attempts} | privileged={priv_mode}"
+        )
+        if limitations:
+            lines.append("limitations: " + ", ".join(limitations[:3]))
+        if blockers:
+            lines.append(
+                _ansi(
+                    "blockers: " + ", ".join(blockers[:4]),
+                    _ANSI_YELLOW,
+                    enabled=use_ansi,
+                )
+            )
+        last_error = _short_text(runtime_health.get("last_error"), max_len=180)
+        if last_error:
+            lines.append("last_error: " + last_error)
+        if remediation:
+            lines.append("quick_fix:")
+            for hint in remediation[:4]:
+                lines.append("  - " + hint)
 
     asset_inventory = cast(dict[str, object], snapshot.get("asset_inventory", {}))
     if asset_inventory:
@@ -1599,12 +1817,12 @@ def _draw_interactive_tui_frame(
     win = cast("curses._CursesWindow", stdscr)
     win.erase()
     max_y, max_x = win.getmaxyx()
-    if max_y < 13 or max_x < 72:
+    if max_y < 14 or max_x < 72:
         _safe_curses_addstr(
             win,
             y=0,
             x=0,
-            text="Terminal too small (need >=72x13). Resize and retry.",
+            text="Terminal too small (need >=72x14). Resize and retry.",
         )
         win.refresh()
         return
@@ -1648,6 +1866,7 @@ def _draw_interactive_tui_frame(
     runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
     runtime_available = bool(runtime_model.get("available"))
     asset_inventory = cast(dict[str, object], snapshot.get("asset_inventory", {}))
+    runtime_health = cast(dict[str, object], snapshot.get("runtime_health", {}))
 
     _safe_curses_addstr(
         win,
@@ -1740,9 +1959,28 @@ def _draw_interactive_tui_frame(
     proto_text = ",".join(
         f"{k}:{v}" for k, v in _sorted_count_pairs(asset_protocol_counts, limit=2)
     ) or "-"
+    blockers_any = runtime_health.get("blockers")
+    blockers_count = (
+        len([x for x in cast(list[object], blockers_any) if isinstance(x, str)])
+        if isinstance(blockers_any, list)
+        else 0
+    )
     _safe_curses_addstr(
         win,
         y=6,
+        x=0,
+        text=(
+            f"health  state:{_short_text(runtime_health.get('state'), max_len=12) or '-'}  "
+            f"dyn:{_short_text(runtime_health.get('dynamic_status'), max_len=12) or '-'}  "
+            f"emu:{_short_text(runtime_health.get('emulation_status'), max_len=12) or '-'}  "
+            f"boot:{'ok' if bool(runtime_health.get('boot_success')) else 'no'}  "
+            f"blockers:{blockers_count}"
+        ),
+        attr=_attr("warning"),
+    )
+    _safe_curses_addstr(
+        win,
+        y=7,
         x=0,
         text=(
             f"assets  files:{_as_int(asset_inventory.get('files'))}  "
@@ -1756,13 +1994,13 @@ def _draw_interactive_tui_frame(
 
     _safe_curses_addstr(
         win,
-        y=7,
+        y=8,
         x=0,
         text="-" * (max_x - 1),
         attr=_attr("meta"),
     )
 
-    list_top = 8
+    list_top = 9
     status_row = max_y - 1
     list_height = max(3, status_row - list_top)
     list_body_height = max(1, list_height - 1)
