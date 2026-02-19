@@ -1034,6 +1034,117 @@ def _collect_tui_asset_inventory(
     }
 
 
+def _collect_tui_threat_model(*, run_dir: Path) -> dict[str, object]:
+    threat_obj = _safe_load_json_object(
+        run_dir / "stages" / "threat_model" / "threat_model.json"
+    )
+    if not threat_obj:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "threat_count": 0,
+            "unknown_count": 0,
+            "mitigation_count": 0,
+            "assumption_count": 0,
+            "attack_surface_items": 0,
+            "category_counts": {},
+            "top_threats": [],
+            "limitations": [],
+        }
+
+    summary_any = threat_obj.get("summary")
+    summary = (
+        cast(dict[str, object], summary_any)
+        if isinstance(summary_any, dict)
+        else {}
+    )
+    threats_any = threat_obj.get("threats")
+    threats = (
+        cast(list[dict[str, object]], threats_any)
+        if isinstance(threats_any, list)
+        else []
+    )
+    unknowns_any = threat_obj.get("unknowns")
+    unknowns = (
+        cast(list[dict[str, object]], unknowns_any)
+        if isinstance(unknowns_any, list)
+        else []
+    )
+    mitigations_any = threat_obj.get("mitigations")
+    mitigations = (
+        cast(list[dict[str, object]], mitigations_any)
+        if isinstance(mitigations_any, list)
+        else []
+    )
+    assumptions_any = threat_obj.get("assumptions")
+    assumptions = (
+        cast(list[dict[str, object]], assumptions_any)
+        if isinstance(assumptions_any, list)
+        else []
+    )
+    limitations_any = threat_obj.get("limitations")
+    limitations = (
+        [x for x in cast(list[object], limitations_any) if isinstance(x, str)]
+        if isinstance(limitations_any, list)
+        else []
+    )
+
+    category_counts: dict[str, int] = {}
+    top_threats: list[str] = []
+    for threat_any in threats:
+        if not isinstance(threat_any, dict):
+            continue
+        threat = cast(dict[str, object], threat_any)
+        category = _short_text(threat.get("category"), max_len=48) or "unknown"
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+        if len(top_threats) >= 3:
+            continue
+        title = _short_text(threat.get("title"), max_len=84)
+        endpoint_any = threat.get("endpoint")
+        endpoint_value = ""
+        if isinstance(endpoint_any, dict):
+            endpoint = cast(dict[str, object], endpoint_any)
+            endpoint_value = _short_text(endpoint.get("value"), max_len=72)
+        sample = (
+            f"{category}: {title} -> {endpoint_value}"
+            if title and endpoint_value
+            else f"{category}: {title}"
+            if title
+            else category
+        )
+        if sample not in top_threats:
+            top_threats.append(sample)
+
+    threat_count = _as_int(summary.get("threats"))
+    unknown_count = _as_int(summary.get("unknowns"))
+    mitigation_count = _as_int(summary.get("mitigations"))
+    assumption_count = _as_int(summary.get("assumptions"))
+    if threat_count <= 0:
+        threat_count = len(threats)
+    if unknown_count <= 0:
+        unknown_count = len(unknowns)
+    if mitigation_count <= 0:
+        mitigation_count = len(mitigations)
+    if assumption_count <= 0:
+        assumption_count = len(assumptions)
+
+    return {
+        "available": True,
+        "status": _short_text(threat_obj.get("status"), max_len=16) or "unknown",
+        "classification": _short_text(summary.get("classification"), max_len=20),
+        "observation": _short_text(summary.get("observation"), max_len=40),
+        "attack_surface_items": _as_int(summary.get("attack_surface_items")),
+        "threat_count": threat_count,
+        "unknown_count": unknown_count,
+        "mitigation_count": mitigation_count,
+        "assumption_count": assumption_count,
+        "category_counts": category_counts,
+        "top_threats": top_threats,
+        "limitations": limitations[:4],
+    }
+
+
 def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
     dynamic_obj = _safe_load_json_object(
         run_dir / "stages" / "dynamic_validation" / "dynamic_validation.json"
@@ -1252,6 +1363,7 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         run_dir=run_dir,
         candidates=candidates,
     )
+    threat_model = _collect_tui_threat_model(run_dir=run_dir)
     runtime_health = _collect_tui_runtime_health(run_dir=run_dir)
 
     return {
@@ -1274,6 +1386,7 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         "chain_bundle_index": chain_bundle_index,
         "runtime_model": runtime_model,
         "asset_inventory": asset_inventory,
+        "threat_model": threat_model,
         "runtime_health": runtime_health,
     }
 
@@ -1430,6 +1543,57 @@ def _build_tui_snapshot_lines(
             lines.append("  legend: D=dynamic, E=exploit, V=verified_chain, S=static, !!=D+E")
     else:
         lines.append("Runtime exposure model: unavailable")
+
+    threat_model = cast(dict[str, object], snapshot.get("threat_model", {}))
+    if threat_model:
+        lines.append("")
+        lines.append(_ansi("Threat Modeling Overview", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+        lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
+        if bool(threat_model.get("available")):
+            tm_status = _short_text(threat_model.get("status"), max_len=20) or "unknown"
+            tm_threats = _as_int(threat_model.get("threat_count"))
+            tm_unknowns = _as_int(threat_model.get("unknown_count"))
+            tm_mitigations = _as_int(threat_model.get("mitigation_count"))
+            tm_assumptions = _as_int(threat_model.get("assumption_count"))
+            tm_surface_items = _as_int(threat_model.get("attack_surface_items"))
+            tm_class = _short_text(threat_model.get("classification"), max_len=20) or "-"
+            tm_obs = _short_text(threat_model.get("observation"), max_len=28) or "-"
+            lines.append(
+                f"threat_model: status={tm_status} | threats={tm_threats} | unknowns={tm_unknowns} | "
+                f"mitigations={tm_mitigations} | assumptions={tm_assumptions} | "
+                f"attack_surface_items={tm_surface_items}"
+            )
+            lines.append(f"classification={tm_class} | observation={tm_obs}")
+            category_counts_any = threat_model.get("category_counts")
+            category_counts = (
+                cast(dict[str, int], category_counts_any)
+                if isinstance(category_counts_any, dict)
+                else {}
+            )
+            category_text = ", ".join(
+                f"{k}={v}" for k, v in _sorted_count_pairs(category_counts, limit=4)
+            ) or "-"
+            lines.append(f"categories: {category_text}")
+            top_threats_any = threat_model.get("top_threats")
+            top_threats = (
+                [x for x in cast(list[object], top_threats_any) if isinstance(x, str)]
+                if isinstance(top_threats_any, list)
+                else []
+            )
+            if top_threats:
+                lines.append("top_threats:")
+                for sample in top_threats[:3]:
+                    lines.append("  - " + sample)
+            limitations_any = threat_model.get("limitations")
+            limitations = (
+                [x for x in cast(list[object], limitations_any) if isinstance(x, str)]
+                if isinstance(limitations_any, list)
+                else []
+            )
+            if limitations:
+                lines.append("limitations: " + ", ".join(limitations[:3]))
+        else:
+            lines.append("threat_model: unavailable (run stage: threat_model)")
 
     runtime_health = cast(dict[str, object], snapshot.get("runtime_health", {}))
     if runtime_health:
@@ -1900,6 +2064,7 @@ def _draw_interactive_tui_frame(
     runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
     runtime_available = bool(runtime_model.get("available"))
     asset_inventory = cast(dict[str, object], snapshot.get("asset_inventory", {}))
+    threat_model = cast(dict[str, object], snapshot.get("threat_model", {}))
     runtime_health = cast(dict[str, object], snapshot.get("runtime_health", {}))
 
     _safe_curses_addstr(
@@ -2027,16 +2192,42 @@ def _draw_interactive_tui_frame(
         ),
         attr=_attr("meta"),
     )
-
+    tm_available = bool(threat_model.get("available"))
+    tm_status = _short_text(threat_model.get("status"), max_len=12) or "-"
+    tm_threats = _as_int(threat_model.get("threat_count"))
+    tm_unknowns = _as_int(threat_model.get("unknown_count"))
+    tm_mitigations = _as_int(threat_model.get("mitigation_count"))
+    tm_categories_any = threat_model.get("category_counts")
+    tm_categories = (
+        cast(dict[str, int], tm_categories_any)
+        if isinstance(tm_categories_any, dict)
+        else {}
+    )
+    tm_category_text = ",".join(
+        f"{k}:{v}" for k, v in _sorted_count_pairs(tm_categories, limit=2)
+    ) or "-"
+    tm_attr = _attr("success") if tm_available and tm_threats > 0 else _attr("warning")
     _safe_curses_addstr(
         win,
         y=8,
+        x=0,
+        text=(
+            f"threat  {'on' if tm_available else 'off'}  status:{tm_status}  "
+            f"threats:{tm_threats}  unknowns:{tm_unknowns}  mitigations:{tm_mitigations}  "
+            f"top:{tm_category_text}"
+        ),
+        attr=tm_attr,
+    )
+
+    _safe_curses_addstr(
+        win,
+        y=9,
         x=0,
         text="-" * (max_x - 1),
         attr=_attr("meta"),
     )
 
-    list_top = 9
+    list_top = 10
     status_row = max_y - 1
     list_height = max(3, status_row - list_top)
     list_body_height = max(1, list_height - 1)

@@ -110,6 +110,65 @@ def test_tui_cli_renders_candidate_dashboard(
     assert "next: Trace sink arguments" in out
 
 
+def test_tui_cli_shows_threat_model_overview(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = tmp_path / "run"
+    _seed_minimal_run(run_dir)
+    threat_dir = run_dir / "stages" / "threat_model"
+    threat_dir.mkdir(parents=True)
+    (threat_dir / "threat_model.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "summary": {
+                    "attack_surface_items": 5,
+                    "threats": 3,
+                    "unknowns": 1,
+                    "mitigations": 2,
+                    "assumptions": 1,
+                    "classification": "candidate",
+                    "observation": "deterministic_static_inference",
+                },
+                "threats": [
+                    {
+                        "category": "elevation_of_privilege",
+                        "title": "Privilege escalation path",
+                        "endpoint": {"type": "url", "value": "http://192.0.2.10/admin"},
+                    },
+                    {
+                        "category": "tampering",
+                        "title": "Firmware update tampering",
+                        "endpoint": {"type": "url", "value": "http://192.0.2.10/update"},
+                    },
+                    {
+                        "category": "information_disclosure",
+                        "title": "Config disclosure path",
+                        "endpoint": {"type": "url", "value": "http://192.0.2.10/config"},
+                    },
+                ],
+                "unknowns": [{"reason": "manual review"}],
+                "mitigations": [{"category": "tampering"}],
+                "assumptions": [{"id": "tm.assumption.static-only"}],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rc = main(["tui", str(run_dir), "--limit", "5"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    out = captured.out
+    assert "Threat Modeling Overview" in out
+    assert "threat_model: status=ok | threats=3 | unknowns=1" in out
+    assert "categories: elevation_of_privilege=1" in out
+    assert "top_threats:" in out
+
+
 def test_tui_cli_defaults_to_latest_run_dir(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
