@@ -2008,6 +2008,7 @@ def _draw_interactive_tui_frame(
     candidate_groups: list[dict[str, object]],
     selected_index: int,
     list_limit: int,
+    detail_mode: str = "candidate",
     theme: dict[str, int] | None = None,
 ) -> None:
     import curses
@@ -2249,7 +2250,11 @@ def _draw_interactive_tui_frame(
         win,
         y=list_top - 1,
         x=right_x,
-        text="[Details]",
+        text=(
+            "[Threat Model]"
+            if detail_mode == "threat"
+            else "[Details]"
+        ),
         attr=_attr("header"),
     )
     _safe_curses_addstr(
@@ -2331,6 +2336,85 @@ def _draw_interactive_tui_frame(
             attr = (row_attr | curses.A_REVERSE | curses.A_BOLD) if idx == selected_index else row_attr
             _safe_curses_addstr(win, y=list_top + row, x=0, text=line, attr=attr)
 
+    details: list[str] = []
+    right_width = max(24, max_x - right_x - 3)
+
+    def _wrap_detail(text: str, *, prefix: str = "") -> list[str]:
+        wrapped = textwrap.wrap(
+            text,
+            width=max(12, right_width - len(prefix)),
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        if not wrapped:
+            return [prefix]
+        return [prefix + part for part in wrapped]
+
+    if detail_mode == "threat":
+        details.append("view: threat model (c: candidate view)")
+        details.append("")
+        tm = cast(dict[str, object], snapshot.get("threat_model", {}))
+        if not bool(tm.get("available")):
+            details.append("threat_model: unavailable")
+            details.append("hint: run stage threat_model")
+        else:
+            details.append(
+                f"status={_short_text(tm.get('status'), max_len=12) or '-'}  "
+                f"threats={_as_int(tm.get('threat_count'))}  "
+                f"unknowns={_as_int(tm.get('unknown_count'))}"
+            )
+            details.append(
+                f"mitigations={_as_int(tm.get('mitigation_count'))}  "
+                f"assumptions={_as_int(tm.get('assumption_count'))}"
+            )
+            details.append(
+                f"attack_surface_items={_as_int(tm.get('attack_surface_items'))}"
+            )
+            tm_cat_any = tm.get("category_counts")
+            tm_cat = cast(dict[str, int], tm_cat_any) if isinstance(tm_cat_any, dict) else {}
+            cat_text = ", ".join(
+                f"{k}:{v}" for k, v in _sorted_count_pairs(tm_cat, limit=4)
+            ) or "-"
+            details.extend(_wrap_detail("categories: " + cat_text))
+            details.append("")
+            tm_top_any = tm.get("top_threats")
+            tm_top = (
+                [x for x in cast(list[object], tm_top_any) if isinstance(x, str)]
+                if isinstance(tm_top_any, list)
+                else []
+            )
+            details.append("top_threats:")
+            if tm_top:
+                for sample in tm_top[:3]:
+                    details.extend(_wrap_detail(sample, prefix="  - "))
+            else:
+                details.append("  - (none)")
+
+            tm_lim_any = tm.get("limitations")
+            tm_lim = (
+                [x for x in cast(list[object], tm_lim_any) if isinstance(x, str)]
+                if isinstance(tm_lim_any, list)
+                else []
+            )
+            if tm_lim:
+                details.append("")
+                details.append("limitations:")
+                for item in tm_lim[:3]:
+                    details.extend(_wrap_detail(item, prefix="  - "))
+
+        details.append("")
+        details.append("system context:")
+        details.append(
+            f"runtime hosts={_as_int(runtime_summary.get('hosts'))} "
+            f"services={_as_int(runtime_summary.get('services'))} "
+            f"components={_as_int(runtime_summary.get('components'))}"
+        )
+        details.append(
+            f"assets endpoints={_as_int(asset_inventory.get('endpoint_total'))} "
+            f"daemons={_as_int(asset_inventory.get('service_candidates'))} "
+            f"open_ports={len(asset_open_ports)}"
+        )
+    elif shown_groups:
         selected = cast(dict[str, object], shown_groups[selected_index])
         representative_id = _short_text(selected.get("representative_id"), max_len=120)
         representative = None
@@ -2340,20 +2424,6 @@ def _draw_interactive_tui_frame(
                     representative = item
                     break
         path_signature = _short_text(selected.get("path_signature"), max_len=72)
-
-        details: list[str] = []
-        right_width = max(24, max_x - right_x - 3)
-
-        def _wrap_detail(text: str, *, prefix: str = "") -> list[str]:
-            wrapped = textwrap.wrap(
-                text,
-                width=max(12, right_width - len(prefix)),
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
-            if not wrapped:
-                return [prefix]
-            return [prefix + part for part in wrapped]
 
         details.append(
             f"group G{selected_index + 1:02d}  "
@@ -2457,31 +2527,40 @@ def _draw_interactive_tui_frame(
                 details.append("  - (none)")
         else:
             details.append("No representative candidate available.")
-        for i, line in enumerate(details[:list_height]):
-            detail_attr = 0
-            if line.startswith("attack:") or line.startswith("impact:"):
-                detail_attr = _attr("warning", bold=True)
-            elif line.startswith("next:"):
-                detail_attr = _attr("accent", bold=True)
-            elif line.startswith("evidence_refs:"):
-                detail_attr = _attr("meta", bold=True)
-            elif line.startswith("  - "):
-                detail_attr = _attr("meta")
-            elif line.startswith("candidate_id:") or line.startswith("group G"):
-                detail_attr = _attr("header")
-            _safe_curses_addstr(
-                win,
-                y=list_top + i,
-                x=right_x,
-                text=line,
-                attr=detail_attr,
-            )
+    else:
+        details.append("No candidate groups available.")
+
+    for i, line in enumerate(details[:list_height]):
+        detail_attr = 0
+        if line.startswith("attack:") or line.startswith("impact:"):
+            detail_attr = _attr("warning", bold=True)
+        elif line.startswith("next:"):
+            detail_attr = _attr("accent", bold=True)
+        elif line.startswith("evidence_refs:"):
+            detail_attr = _attr("meta", bold=True)
+        elif line.startswith("  - "):
+            detail_attr = _attr("meta")
+        elif (
+            line.startswith("candidate_id:")
+            or line.startswith("group G")
+            or line.startswith("view:")
+            or line.startswith("status=")
+            or line.startswith("threat_model:")
+        ):
+            detail_attr = _attr("header")
+        _safe_curses_addstr(
+            win,
+            y=list_top + i,
+            x=right_x,
+            text=line,
+            attr=detail_attr,
+        )
 
     _safe_curses_addstr(
         win,
         y=status_row,
         x=0,
-        text="j/k or ↑/↓ move | g/G top/bottom | r refresh | q quit",
+        text="j/k or ↑/↓ move | g/G top/bottom | t threat | c candidate | r refresh | q quit",
         attr=_attr("meta"),
     )
     win.refresh()
@@ -2511,6 +2590,7 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
         theme = _build_tui_color_theme(curses_mod=curses)
 
         selected_index = 0
+        detail_mode = "candidate"
         snapshot = _build_tui_snapshot(run_dir=run_dir)
         last_refresh = time.monotonic()
         force_refresh = False
@@ -2543,6 +2623,7 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
                 candidate_groups=candidate_groups,
                 selected_index=selected_index,
                 list_limit=limit,
+                detail_mode=detail_mode,
                 theme=theme,
             )
 
@@ -2570,6 +2651,12 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
                 continue
             if key in (ord("r"), ord("R")):
                 force_refresh = True
+                continue
+            if key in (ord("t"), ord("T")):
+                detail_mode = "threat"
+                continue
+            if key in (ord("c"), ord("C")):
+                detail_mode = "candidate"
                 continue
 
     try:
