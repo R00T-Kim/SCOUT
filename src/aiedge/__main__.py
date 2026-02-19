@@ -77,6 +77,45 @@ _TUI_RUNTIME_COMMUNICATION_NODE_TYPE_ORDER = {
     "unknown": 6,
 }
 
+_ANSI_RESET = "\x1b[0m"
+_ANSI_BOLD = "\x1b[1m"
+_ANSI_DIM = "\x1b[2m"
+_ANSI_CYAN = "\x1b[36m"
+_ANSI_GREEN = "\x1b[32m"
+_ANSI_YELLOW = "\x1b[33m"
+_ANSI_RED = "\x1b[31m"
+_ANSI_MAGENTA = "\x1b[35m"
+_ANSI_BLUE = "\x1b[34m"
+
+
+def _tui_ansi_supported() -> bool:
+    no_color = os.environ.get("NO_COLOR")
+    if no_color:
+        return False
+    force_color = os.environ.get("FORCE_COLOR") or os.environ.get("CLICOLOR_FORCE")
+    if force_color and force_color != "0":
+        return True
+    if os.environ.get("TERM", "dumb").lower() == "dumb":
+        return False
+    if os.environ.get("CLICOLOR") == "0":
+        return False
+    return bool(sys.stdout.isatty())
+
+
+def _tui_unicode_supported() -> bool:
+    if os.environ.get("AIEDGE_TUI_ASCII") == "1":
+        return False
+    encoding = (sys.stdout.encoding or "").lower()
+    if not encoding:
+        return False
+    return "utf" in encoding
+
+
+def _ansi(text: str, *codes: str, enabled: bool) -> str:
+    if not enabled or not codes:
+        return text
+    return "".join(codes) + text + _ANSI_RESET
+
 
 def _serve_report_directory(
     *,
@@ -370,6 +409,26 @@ def _candidate_verification_signals(
     return signals
 
 
+def _candidate_signal_badge(signals: list[str]) -> str:
+    sig = set(signals)
+    has_d = "dynamic_validation" in sig
+    has_e = "exploit_bundle" in sig
+    has_v = "verified_chain" in sig
+    if has_d and has_e and has_v:
+        return "D+E+V"
+    if has_d and has_e:
+        return "D+E"
+    if has_v:
+        return "V"
+    if has_e:
+        return "E"
+    if has_d:
+        return "D"
+    if "chain_linked" in sig:
+        return "C"
+    return "S"
+
+
 def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
     family_text = _candidate_family_text(item)
     families_any = item.get("families")
@@ -397,6 +456,7 @@ def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
     source = _short_text(item.get("source"), max_len=16) or "unknown"
     path = item.get("path")
     path_signature = _path_tail(path, max_segments=2, max_len=60)
+    sample_path = _path_tail(path, max_segments=5, max_len=84)
     candidate_id = item.get("candidate_id")
     return {
         "family": family_text,
@@ -413,7 +473,7 @@ def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
         if isinstance(item.get("candidate_id"), str)
         else [],
         "max_score": score,
-        "sample_paths": [_path_tail(path, max_segments=5, max_len=84)],
+        "sample_paths": [sample_path] if sample_path else [],
         "representative_id": cast(str, candidate_id) if isinstance(candidate_id, str) else "",
     }
 
@@ -429,7 +489,7 @@ def _collect_tui_candidate_groups(
             cast(str, payload["family"]),
             cast(str, payload["hypothesis"]),
             cast(str, payload["impact"]),
-            cast(str, payload["path_signature"]),
+            cast(str, payload["source"]),
         )
         group = groups.get(group_key)
         if group is None:
@@ -825,7 +885,18 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     }
 
 
-def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
+def _build_tui_snapshot_lines(
+    *,
+    run_dir: Path,
+    limit: int,
+    use_ansi: bool | None = None,
+    use_unicode: bool | None = None,
+) -> list[str]:
+    if use_ansi is None:
+        use_ansi = _tui_ansi_supported()
+    if use_unicode is None:
+        use_unicode = _tui_unicode_supported()
+
     snapshot = _build_tui_snapshot(run_dir=run_dir)
     profile = _short_text(snapshot.get("profile"), max_len=40) or "unknown"
     report_status = _short_text(snapshot.get("report_status"), max_len=40) or "unknown"
@@ -856,18 +927,28 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     exploit_bundle_refs = cast(list[str], verifier_artifacts.get("exploit_bundle_refs", []))
     verified_chain_present = bool(verifier_artifacts.get("verified_chain_present", False))
 
+    horizontal = "─" if use_unicode else "-"
+    section_rule = horizontal * 96
+
     lines: list[str] = []
-    lines.append(f"AIEdge TUI :: {run_dir}")
-    lines.append("=" * 88)
+    lines.append(_ansi(f"AIEdge TUI :: {run_dir}", _ANSI_BOLD, _ANSI_CYAN, enabled=use_ansi))
+    lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(
-        f"profile={profile} | report_completeness={report_status} (gate_passed={gate_passed_text}) | llm={llm_status}"
+        _ansi("Status", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+        + f"  profile={profile} | report_completeness={report_status} (gate_passed={gate_passed_text}) | llm={llm_status}"
     )
-    lines.append(f"verdict={verdict_state}")
+    verdict_style = (_ANSI_BOLD, _ANSI_RED)
+    verdict_upper = verdict_state.upper()
+    if "VERIFIED" in verdict_upper:
+        verdict_style = (_ANSI_BOLD, _ANSI_GREEN)
+    elif "NOT_ATTEMPTED" in verdict_upper:
+        verdict_style = (_ANSI_BOLD, _ANSI_YELLOW)
+    lines.append("verdict=" + _ansi(verdict_state, *verdict_style, enabled=use_ansi))
     if reason_codes:
         lines.append("reason_codes=" + ", ".join(reason_codes[:5]))
     lines.append("")
-    lines.append("Exploit Candidate Map")
-    lines.append("-" * 88)
+    lines.append(_ansi("Exploit Candidate Map", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+    lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(
         f"candidate_count={candidate_count} | chain_backed={chain_backed} | schema={schema_version}"
     )
@@ -922,7 +1003,9 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
             f"status={_short_text(runtime_model.get('status'), max_len=16) or 'partial'}"
         )
         if rows:
-            lines.append("  service_edges:")
+            lines.append(
+                _ansi("  service_edges:", _ANSI_BOLD, _ANSI_BLUE, enabled=use_ansi)
+            )
             for row_any in rows[: min(limit, len(rows))]:
                 row = cast(dict[str, object], row_any)
                 row_host = _short_text(row.get("host"), max_len=42)
@@ -940,18 +1023,34 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
                 )
                 dynamic_exploit = bool(row.get("dynamic_exploit_chain", False))
                 evidence_mark = " !!" if dynamic_exploit else ""
+                badge_style = (_ANSI_BOLD, _ANSI_RED) if dynamic_exploit else (_ANSI_BOLD, _ANSI_YELLOW)
+                rendered_badge = _ansi(
+                    f"[{evidence_badge}]{evidence_mark}",
+                    *badge_style,
+                    enabled=use_ansi,
+                )
                 lines.append(
                     f"    {row_host} -> {row_service_host}:{row_port}/{row_protocol} "
                     f"({components if components else 'components=unmapped'}) "
-                    f"[{evidence_badge}]{evidence_mark}"
+                    f"{rendered_badge}"
                 )
             lines.append("  legend: D=dynamic, E=exploit, V=verified_chain, S=static, !!=D+E")
     else:
         lines.append("Runtime exposure model: unavailable")
 
-    lines.append(_count_bar("HIGH", count=high, max_count=max_bucket))
-    lines.append(_count_bar("MEDIUM", count=medium, max_count=max_bucket))
-    lines.append(_count_bar("LOW", count=low, max_count=max_bucket))
+    lines.append(
+        _ansi(_count_bar("HIGH", count=high, max_count=max_bucket), _ANSI_RED, enabled=use_ansi)
+    )
+    lines.append(
+        _ansi(
+            _count_bar("MEDIUM", count=medium, max_count=max_bucket),
+            _ANSI_YELLOW,
+            enabled=use_ansi,
+        )
+    )
+    lines.append(
+        _ansi(_count_bar("LOW", count=low, max_count=max_bucket), _ANSI_GREEN, enabled=use_ansi)
+    )
 
     candidates = cast(list[dict[str, object]], snapshot.get("candidates", []))
     if not candidates:
@@ -969,32 +1068,20 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
     lines.append(
         f"Top {min(limit, len(candidate_groups))} grouped candidate(s) [compact]"
     )
-    lines.append("-" * 88)
+    lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(f"Candidate groups: {len(candidate_groups)} unique")
-    lines.append("-" * 88)
+    lines.append(_ansi("ID  P   Score   Hits  Evidence  Family", _ANSI_BOLD, _ANSI_BLUE, enabled=use_ansi))
+    lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
+    previous_triplet: tuple[str, str, str] | None = None
     for idx, group in enumerate(candidate_groups[: min(limit, len(candidate_groups))], start=1):
         priority = _short_text(group.get("priority"), max_len=12) or "unknown"
         priority_tag = priority[:1].upper() if priority else "?"
-        family = _short_text(group.get("family"), max_len=28) or "unknown"
+        family = _short_text(group.get("family"), max_len=42) or "unknown"
         count = _as_int(group.get("path_count"))
         max_score = _as_float(group.get("max_score"))
         source = _short_text(group.get("source", ""), max_len=16) or "unknown"
-        path_signature = _short_text(group.get("path_signature"), max_len=72) or "(unspecified)"
-        lines.append(
-            f"G{idx:02d} [{priority_tag}] family={family} source={source} count={count} max_score={max_score:.3f}"
-        )
-        lines.append(f"    path: {path_signature}")
-        hypothesis = _short_text(group.get("hypothesis"), max_len=140)
-        impact = _short_text(group.get("impact"), max_len=140)
-        next_step = _short_text(group.get("next_step"), max_len=140)
-        if hypothesis:
-            lines.append(f"    attack: {hypothesis}")
-        if impact:
-            lines.append(f"    impact: {impact}")
-        if next_step:
-            lines.append(f"    next: {next_step}")
         representative_id = _short_text(group.get("representative_id"), max_len=120)
-        representative = None
+        representative: dict[str, object] | None = None
         if representative_id:
             for candidate in candidates:
                 if (
@@ -1014,14 +1101,44 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
             )
             if signal_text:
                 signal_items = signal_text.split(",")
-        lines.append(
-            f"    source={source} | evidence={','.join(signal_items)}"
+        signal_badge = _candidate_signal_badge(signal_items)
+        header_line = (
+            f"G{idx:02d} [{priority_tag}] family={family} source={source} "
+            f"count={count} max_score={max_score:.3f} evidence={signal_badge}"
         )
-        sample_paths = cast(list[str], group.get("sample_paths"))
+        priority_style: tuple[str, ...] = (_ANSI_DIM,)
+        if priority_tag == "H":
+            priority_style = (_ANSI_BOLD, _ANSI_RED)
+        elif priority_tag == "M":
+            priority_style = (_ANSI_BOLD, _ANSI_YELLOW)
+        elif priority_tag == "L":
+            priority_style = (_ANSI_BOLD, _ANSI_GREEN)
+        lines.append(_ansi(header_line, *priority_style, enabled=use_ansi))
+
+        path_signature = _short_text(group.get("path_signature"), max_len=72) or "(unspecified)"
+        lines.append(f"    path: {path_signature}")
+        hypothesis = _short_text(group.get("hypothesis"), max_len=140)
+        impact = _short_text(group.get("impact"), max_len=140)
+        next_step = _short_text(group.get("next_step"), max_len=140)
+        current_triplet = (hypothesis, impact, next_step)
+        if previous_triplet is not None and current_triplet == previous_triplet:
+            lines.append("    note: same attack/impact/next as previous candidate group")
+        else:
+            if hypothesis:
+                lines.append(f"    attack: {hypothesis}")
+            if impact:
+                lines.append(f"    impact: {impact}")
+            if next_step:
+                lines.append(f"    next: {next_step}")
+        previous_triplet = current_triplet
+
+        lines.append(f"    source={source} | evidence={','.join(signal_items)}")
+        sample_paths_all = cast(list[str], group.get("sample_paths"))
+        sample_paths = [x for x in sample_paths_all if isinstance(x, str) and x]
         if sample_paths:
             lines.append("    sample_paths:")
-            for sample in sample_paths:
-                lines.append(f"      - {sample}")
+            for sample in sample_paths[:3]:
+                lines.append(f"      - {_path_tail(sample, max_segments=6, max_len=96)}")
 
     return lines
 
@@ -1077,6 +1194,58 @@ def _safe_curses_addstr(
         return
 
 
+def _build_tui_color_theme(*, curses_mod: object) -> dict[str, int]:
+    curses = cast(object, curses_mod)
+    theme: dict[str, int] = {}
+    try:
+        has_colors = bool(getattr(curses, "has_colors")())
+    except Exception:
+        has_colors = False
+    if not has_colors:
+        return theme
+
+    try:
+        _ = getattr(curses, "start_color")()
+    except Exception:
+        return theme
+
+    try:
+        use_default = getattr(curses, "use_default_colors", None)
+        if callable(use_default):
+            use_default()
+    except Exception:
+        pass
+
+    # pair id -> foreground / background(default)
+    pair_defs: list[tuple[int, int]] = [
+        (1, getattr(curses, "COLOR_CYAN")),  # header
+        (2, getattr(curses, "COLOR_GREEN")),  # success
+        (3, getattr(curses, "COLOR_YELLOW")),  # warning
+        (4, getattr(curses, "COLOR_RED")),  # error/high
+        (5, getattr(curses, "COLOR_MAGENTA")),  # accent
+        (6, getattr(curses, "COLOR_BLUE")),  # divider/meta
+    ]
+
+    for pair_id, fg in pair_defs:
+        try:
+            getattr(curses, "init_pair")(pair_id, int(fg), -1)
+        except Exception:
+            continue
+
+    try:
+        theme["header"] = int(getattr(curses, "color_pair")(1)) | int(
+            getattr(curses, "A_BOLD")
+        )
+        theme["success"] = int(getattr(curses, "color_pair")(2))
+        theme["warning"] = int(getattr(curses, "color_pair")(3))
+        theme["error"] = int(getattr(curses, "color_pair")(4))
+        theme["accent"] = int(getattr(curses, "color_pair")(5))
+        theme["meta"] = int(getattr(curses, "color_pair")(6))
+    except Exception:
+        return {}
+    return theme
+
+
 def _draw_interactive_tui_frame(
     *,
     stdscr: object,
@@ -1086,6 +1255,7 @@ def _draw_interactive_tui_frame(
     candidate_groups: list[dict[str, object]],
     selected_index: int,
     list_limit: int,
+    theme: dict[str, int] | None = None,
 ) -> None:
     import curses
 
@@ -1101,6 +1271,14 @@ def _draw_interactive_tui_frame(
         )
         win.refresh()
         return
+
+    theme = theme or {}
+
+    def _attr(name: str, *, bold: bool = False) -> int:
+        base = int(theme.get(name, 0))
+        if bold:
+            base |= curses.A_BOLD
+        return base
 
     if not candidate_groups:
         candidate_groups = _collect_tui_candidate_groups(candidates)
@@ -1133,59 +1311,95 @@ def _draw_interactive_tui_frame(
     runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
     runtime_available = bool(runtime_model.get("available"))
 
-    _safe_curses_addstr(win, y=0, x=0, text=f"AIEdge Interactive TUI :: {run_dir.name}")
+    _safe_curses_addstr(
+        win,
+        y=0,
+        x=0,
+        text=f"AIEdge Interactive TUI :: {run_dir.name}",
+        attr=_attr("header"),
+    )
     _safe_curses_addstr(
         win,
         y=1,
         x=0,
         text=(
-            f"profile={profile} | report={report_status}(gate={gate_passed_text}) | "
-            f"llm={llm_status}"
+            f"status  profile:{profile}  report:{report_status}(gate={gate_passed_text})  "
+            f"llm:{llm_status}"
         ),
+        attr=_attr("accent"),
     )
-    _safe_curses_addstr(win, y=2, x=0, text=f"verdict={verdict_state}")
-    if reason_codes:
-        _safe_curses_addstr(
-            win,
-            y=3,
-            x=0,
-            text="reason_codes=" + ", ".join(reason_codes[:3]),
-        )
+    verdict_upper = verdict_state.upper()
+    verdict_attr = _attr("warning")
+    if "VERIFIED" in verdict_upper:
+        verdict_attr = _attr("success", bold=True)
+    elif "FAILED" in verdict_upper:
+        verdict_attr = _attr("error", bold=True)
+    _safe_curses_addstr(
+        win,
+        y=2,
+        x=0,
+        text=(
+            f"verdict {verdict_state}"
+            + (
+                f"  |  reason: {', '.join(reason_codes[:2])}"
+                if reason_codes
+                else "  |  reason: -"
+            )
+        ),
+        attr=verdict_attr,
+    )
+    _safe_curses_addstr(
+        win,
+        y=3,
+        x=0,
+        text=(
+            f"scope   candidates:{candidate_count}  high:{high}  medium:{medium}  low:{low}  "
+            f"chain_backed:{chain_backed}"
+        ),
+        attr=_attr("accent"),
+    )
+    proof_attr = (
+        _attr("success")
+        if dynamic_total > 0 and dynamic_present == dynamic_total
+        else _attr("warning")
+    )
     _safe_curses_addstr(
         win,
         y=4,
         x=0,
         text=(
-            f"candidates={candidate_count} (H={high}, M={medium}, L={low}, "
-            f"chain_backed={chain_backed})"
+            f"proof   dynamic:{dynamic_present}/{dynamic_total}  "
+            f"verified_chain:{'on' if verified_chain_present else 'off'}  "
+            f"bundles:{len(exploit_bundle_refs)}"
         ),
+        attr=proof_attr,
     )
     _safe_curses_addstr(
         win,
         y=5,
         x=0,
         text=(
-            f"artifacts: dyn_validation={dynamic_present}/{dynamic_total} | "
-            f"verified_chain={'on' if verified_chain_present else 'off'} | "
-            f"bundles={len(exploit_bundle_refs)}"
+            f"runtime {'on' if runtime_available else 'off'}  "
+            f"hosts:{_as_int(runtime_summary.get('hosts'))}  "
+            f"services:{_as_int(runtime_summary.get('services'))}  "
+            f"components:{_as_int(runtime_summary.get('components'))}  "
+            f"D+E:{_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
         ),
+        attr=_attr("meta"),
     )
+
     _safe_curses_addstr(
         win,
         y=6,
         x=0,
-        text=(
-            f"runtime: {'on' if runtime_available else 'off'} | "
-            f"hosts={_as_int(runtime_summary.get('hosts'))} "
-            f"services={_as_int(runtime_summary.get('services'))} "
-            f"components={_as_int(runtime_summary.get('components'))} "
-            f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
-        ),
+        text="-" * (max_x - 1),
+        attr=_attr("meta"),
     )
 
     list_top = 7
     status_row = max_y - 1
     list_height = max(3, status_row - list_top)
+    list_body_height = max(1, list_height - 1)
     left_width = max(42, int(max_x * 0.52))
     left_width = min(left_width, max_x - 24)
     right_x = left_width + 2
@@ -1194,24 +1408,50 @@ def _draw_interactive_tui_frame(
         win,
         y=list_top - 1,
         x=0,
-        text=f"[Candidate Groups] showing {min(list_limit, len(candidate_groups))}/{len(candidate_groups)}",
+        text=(
+            "[Candidate Groups] "
+            f"showing {min(list_limit, len(candidate_groups))}/{len(candidate_groups)}"
+        ),
+        attr=_attr("header"),
     )
-    _safe_curses_addstr(win, y=list_top - 1, x=right_x, text="[Details]")
+    _safe_curses_addstr(
+        win,
+        y=list_top - 1,
+        x=right_x,
+        text="[Details]",
+        attr=_attr("header"),
+    )
+    _safe_curses_addstr(
+        win,
+        y=list_top,
+        x=0,
+        text="#  P  Score  Hits  Family                      Sig",
+        attr=_attr("accent", bold=True),
+    )
+    _safe_curses_addstr(
+        win,
+        y=list_top,
+        x=right_x,
+        text="Sig: S=static C=chain D=dynamic E=bundle V=verified",
+        attr=_attr("meta"),
+    )
+    for y in range(list_top - 1, status_row):
+        _safe_curses_addstr(win, y=y, x=left_width + 1, text="|", attr=_attr("meta"))
 
     shown_groups = candidate_groups[:list_limit]
     if not shown_groups:
-        _safe_curses_addstr(win, y=list_top, x=0, text="(no candidate groups)")
+        _safe_curses_addstr(win, y=list_top + 1, x=0, text="(no candidate groups)")
     else:
         selected_index = max(0, min(selected_index, len(shown_groups) - 1))
-        if selected_index < list_height // 2:
+        if selected_index < list_body_height // 2:
             start = 0
         else:
-            start = selected_index - (list_height // 2)
-        max_start = max(0, len(shown_groups) - list_height)
+            start = selected_index - (list_body_height // 2)
+        max_start = max(0, len(shown_groups) - list_body_height)
         start = min(start, max_start)
-        stop = min(len(shown_groups), start + list_height)
+        stop = min(len(shown_groups), start + list_body_height)
 
-        for row, idx in enumerate(range(start, stop)):
+        for row, idx in enumerate(range(start, stop), start=1):
             group = shown_groups[idx]
             pr = _short_text(group.get("priority"), max_len=12) or "unknown"
             pr_tag = pr[:1].upper() if pr else "?"
@@ -1239,24 +1479,25 @@ def _draw_interactive_tui_frame(
                 )
                 if signal_text:
                     signal_items = signal_text.split(",")
-            signals = ",".join(signal_items)
-            sample_paths = cast(list[str], group.get("sample_paths"))
-            path = sample_paths[0] if sample_paths else "sample-path-unavailable"
-            path_signature = _short_text(group.get("path_signature"), max_len=72)
+            signal_badge = _candidate_signal_badge(signal_items)
+            family_cell = _short_text(family, max_len=26)
             line = (
-                f"{idx + 1:02d} [{pr_tag}] {score:.3f} x{path_count} {family} | "
-                f"{path or '(none)'}"
+                f"{idx + 1:02d} {pr_tag:>2} {score:>6.3f}  x{path_count:<2}  "
+                f"{family_cell:<26}  [{signal_badge}]"
             )
-            if path_signature and len(path_signature) > 10:
-                line = f"{line} | {path_signature}"
             max_line_width = max(18, left_width - 3)
-            suffix = f" [{signals}]"
-            if len(line) + len(suffix) <= max_line_width:
-                line = f"{line}{suffix}"
+            if len(line) > max_line_width:
+                line = line[:max_line_width]
+            row_attr = 0
+            if pr_tag == "H":
+                row_attr = _attr("error")
+            elif pr_tag == "M":
+                row_attr = _attr("warning")
+            elif pr_tag == "L":
+                row_attr = _attr("success")
             else:
-                line = line[: max_line_width - len(suffix) - 1].rstrip()
-                line = f"{line}{suffix}"
-            attr = curses.A_REVERSE if idx == selected_index else 0
+                row_attr = _attr("meta")
+            attr = (row_attr | curses.A_REVERSE | curses.A_BOLD) if idx == selected_index else row_attr
             _safe_curses_addstr(win, y=list_top + row, x=0, text=line, attr=attr)
 
         selected = cast(dict[str, object], shown_groups[selected_index])
@@ -1270,56 +1511,102 @@ def _draw_interactive_tui_frame(
         path_signature = _short_text(selected.get("path_signature"), max_len=72)
 
         details: list[str] = []
+        right_width = max(24, max_x - right_x - 3)
+
+        def _wrap_detail(text: str, *, prefix: str = "") -> list[str]:
+            wrapped = textwrap.wrap(
+                text,
+                width=max(12, right_width - len(prefix)),
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+            if not wrapped:
+                return [prefix]
+            return [prefix + part for part in wrapped]
+
         details.append(
-            f"group: G{selected_index + 1:02d} "
-            f"{_short_text(selected.get('priority'), max_len=10)} / "
-            f"{_short_text(selected.get('family'), max_len=28)}"
+            f"group G{selected_index + 1:02d}  "
+            f"priority={_short_text(selected.get('priority'), max_len=10)}  "
+            f"family={_short_text(selected.get('family'), max_len=28)}"
+        )
+        details.append(
+            f"score={_as_float(selected.get('max_score')):.3f}  hits={_as_int(selected.get('path_count'))}"
         )
         if path_signature:
-            details.append(f"path: {path_signature}")
-        details.append(
-            f"hits: {_as_int(selected.get('path_count'))} | score={_as_float(selected.get('max_score')):.3f}"
-        )
+            details.extend(_wrap_detail(f"path: {path_signature}"))
+        details.append("")
+
         if representative is not None:
-            details.append(
-                f"id: {_short_text(representative.get('candidate_id'), max_len=max(20, max_x - right_x - 4))}"
+            details.extend(
+                _wrap_detail(
+                    "candidate_id: "
+                    + (
+                        _short_text(
+                            representative.get("candidate_id"),
+                            max_len=max(20, right_width - 2),
+                        )
+                        or "(none)"
+                    )
+                )
             )
-            details.append(
-                f"priority/source: {_short_text(representative.get('priority'), max_len=10)} / "
-                f"{_short_text(representative.get('source'), max_len=16)}"
-            )
-            rep_chain_id = _short_text(representative.get("chain_id"), max_len=24)
+            rep_chain_id = _short_text(representative.get("chain_id"), max_len=48)
             if rep_chain_id:
                 details.append(f"chain_id: {rep_chain_id}")
-            details.append(f"score: {_as_float(representative.get('score')):.3f}")
+            details.append(
+                "source: "
+                + (
+                    f"{_short_text(representative.get('source'), max_len=16) or 'unknown'}"
+                )
+            )
+
             selected_signals = _candidate_verification_signals(
                 representative,
                 chain_bundle_index=chain_bundle_index,
                 verified_chain_present=verified_chain_present,
             )
             details.append(
-                f"signals: {','.join(selected_signals) if selected_signals else 'static'}"
+                "signals: "
+                + (
+                    ",".join(selected_signals)
+                    if selected_signals
+                    else "static"
+                )
+                + f" [{_candidate_signal_badge(selected_signals)}]"
             )
-            details.append(
-                f"family: {_short_text(_candidate_family_text(representative), max_len=max(20, max_x - right_x - 4))}"
+            details.append("")
+
+            representative_path = (
+                _path_tail(
+                    representative.get("path"),
+                    max_segments=6,
+                    max_len=max(24, right_width - 2),
+                )
+                or "(none)"
             )
-            details.append(
-                f"path: {_path_tail(representative.get('path'), max_segments=6, max_len=max(24, max_x - right_x - 4)) or '(none)'}"
-            )
-            details.append(
-                f"attack: {_short_text(representative.get('attack_hypothesis'), max_len=max(24, max_x - right_x - 10)) or '(none)'}"
-            )
+            details.extend(_wrap_detail("path: " + representative_path))
+
+            attack_text = _short_text(
+                representative.get("attack_hypothesis"),
+                max_len=max(24, right_width * 3),
+            ) or "(none)"
+            details.append("attack:")
+            details.extend(_wrap_detail(attack_text, prefix="  "))
+
             impacts_any = representative.get("expected_impact")
             if isinstance(impacts_any, list):
                 impacts = [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
             else:
                 impacts = []
-            details.append(
-                f"impact: {_short_text(impacts[0], max_len=max(24, max_x - right_x - 10)) if impacts else '(none)'}"
+            impact_text = _short_text(
+                impacts[0] if impacts else "(none)",
+                max_len=max(24, right_width * 2),
             )
-            details.append(
-                f"next: {_candidate_next_step_text(representative) or '(none)'}"
-            )
+            details.append("impact:")
+            details.extend(_wrap_detail(impact_text, prefix="  "))
+
+            next_text = _candidate_next_step_text(representative) or "(none)"
+            details.append("next:")
+            details.extend(_wrap_detail(next_text, prefix="  "))
 
             refs = _candidate_evidence_refs(
                 representative,
@@ -1328,22 +1615,43 @@ def _draw_interactive_tui_frame(
             )
             details.append("evidence_refs:")
             if refs:
-                for ref in refs[:4]:
-                    details.append(
-                        "  - " + _short_text(ref, max_len=max(16, max_x - right_x - 4))
+                for ref in refs[:3]:
+                    details.extend(
+                        _wrap_detail(
+                            _short_text(ref, max_len=max(20, right_width * 2)),
+                            prefix="  - ",
+                        )
                     )
             else:
                 details.append("  - (none)")
         else:
             details.append("No representative candidate available.")
         for i, line in enumerate(details[:list_height]):
-            _safe_curses_addstr(win, y=list_top + i, x=right_x, text=line)
+            detail_attr = 0
+            if line.startswith("attack:") or line.startswith("impact:"):
+                detail_attr = _attr("warning", bold=True)
+            elif line.startswith("next:"):
+                detail_attr = _attr("accent", bold=True)
+            elif line.startswith("evidence_refs:"):
+                detail_attr = _attr("meta", bold=True)
+            elif line.startswith("  - "):
+                detail_attr = _attr("meta")
+            elif line.startswith("candidate_id:") or line.startswith("group G"):
+                detail_attr = _attr("header")
+            _safe_curses_addstr(
+                win,
+                y=list_top + i,
+                x=right_x,
+                text=line,
+                attr=detail_attr,
+            )
 
     _safe_curses_addstr(
         win,
         y=status_row,
         x=0,
         text="j/k or ↑/↓ move | g/G top/bottom | r refresh | q quit",
+        attr=_attr("meta"),
     )
     win.refresh()
 
@@ -1369,6 +1677,7 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
             curses.curs_set(0)
         except Exception:
             pass
+        theme = _build_tui_color_theme(curses_mod=curses)
 
         selected_index = 0
         snapshot = _build_tui_snapshot(run_dir=run_dir)
@@ -1403,6 +1712,7 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
                 candidate_groups=candidate_groups,
                 selected_index=selected_index,
                 list_limit=limit,
+                theme=theme,
             )
 
             key = win.getch()
@@ -1480,6 +1790,8 @@ def _run_tui(
     if effective_mode == "interactive":
         return _run_tui_interactive(run_dir=run_dir, limit=limit, interval_s=interval_s)
 
+    supports_ansi = _tui_ansi_supported()
+
     def render_once() -> int:
         lines = _build_tui_snapshot_lines(run_dir=run_dir, limit=limit)
         print("\n".join(lines))
@@ -1488,8 +1800,10 @@ def _run_tui(
     if effective_mode != "watch":
         return render_once()
 
-    supports_ansi = bool(
-        sys.stdout.isatty() and os.environ.get("TERM", "dumb").lower() != "dumb"
+    watch_clear = bool(
+        supports_ansi
+        and sys.stdout.isatty()
+        and os.environ.get("TERM", "dumb").lower() != "dumb"
     )
     last_snapshot: str | None = None
 
@@ -1498,7 +1812,7 @@ def _run_tui(
             lines = _build_tui_snapshot_lines(run_dir=run_dir, limit=limit)
             snapshot = "\n".join(lines)
             if snapshot != last_snapshot:
-                if supports_ansi:
+                if watch_clear:
                     # ANSI clear+home for lightweight terminal dashboard refresh.
                     print("\x1b[2J\x1b[H" + snapshot, end="", flush=True)
                 else:
