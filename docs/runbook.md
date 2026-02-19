@@ -65,6 +65,12 @@ export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
 - `AIEDGE_PRIV_RUNNER` is a command prefix used for privileged actions (FirmAE boot, firewall snapshot, pcap capture).
 - Example prefixes: host bridge wrapper, root helper, or `sudo -n` wrapper.
 - Stage output now records `privileged_executor.mode/source/prefix` in `stages/dynamic_validation/dynamic_validation.json`.
+- `AIEDGE_PRIV_RUNNER` accepts relative paths (e.g. `tools/priv-runner --`), which are now resolved in order as:
+  1) current working directory
+  2) run directory
+  3) repository root (`scripts`-relative path from `src/aiedge` module)
+  4) parent directories of run_dir
+- If unresolved, SCOUT falls back to `sudo -n` and records `privileged_runner_unavailable`.
 
 ## 3) Inject private exploit code and capture evidence-only artifacts
 
