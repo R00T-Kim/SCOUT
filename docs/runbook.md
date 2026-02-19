@@ -37,8 +37,12 @@ PYTHONPATH=src python3 -m aiedge stages <run_dir> \
 
 ## 3) Inject private exploit code and capture evidence-only artifacts
 
-`profile=exploit` runs now auto-generate and execute deterministic non-weaponized PoC probes for
+`profile=exploit` runs now auto-generate and execute non-weaponized PoC probes for
 `chain_id`-backed candidates (`stages/exploit_autopoc/*` and `exploits/chain_*/evidence_bundle.json`).
+
+- Default path: LLM codegen (`codex exec`) creates plugin code from candidate context, then runner executes it.
+- Fail-safe path: if LLM CLI is unavailable/invalid, SCOUT falls back to deterministic template plugin and still executes.
+- Both paths remain evidence-only (lab-only, authorized gate required) and do not emit weaponized payloads.
 
 Re-run only this step when needed:
 

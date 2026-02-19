@@ -94,7 +94,7 @@ def _make_exploit_autopoc_stage(
     _ = info, source_input_path, remaining_s, no_llm
     mod = importlib.import_module("aiedge.exploit_autopoc")
     cls = cast(type[Stage], getattr(mod, "ExploitAutoPoCStage"))
-    return cls()
+    return cls(no_llm=no_llm)
 
 
 def _make_exploit_policy_stage(

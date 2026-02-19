@@ -440,6 +440,9 @@ cd /path/to/SCOUT
 ./scout stages aiedge-runs/<run_id> \
   --no-llm \
   --stages exploit_autopoc
+
+# Default (without --no-llm): exploit_autopoc uses LLM codegen first and
+# automatically falls back to deterministic template probes when unavailable.
 ```
 
 ### With Terminator Orchestration (Full Pipeline)

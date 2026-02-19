@@ -3598,7 +3598,7 @@ def analyze_run(
         try:
             from .exploit_autopoc import ExploitAutoPoCStage
 
-            autopoc_stage: Stage = ExploitAutoPoCStage()
+            autopoc_stage: Stage = ExploitAutoPoCStage(no_llm=no_llm)
             autopoc_rep = run_stages([autopoc_stage], ctx)
             _write_stage_manifests(
                 ctx=ctx,
