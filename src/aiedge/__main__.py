@@ -20,6 +20,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from types import ModuleType
 from typing import Callable, Protocol, cast
+from urllib.parse import urlparse
 
 from . import __version__
 from .corpus import (
@@ -804,6 +805,212 @@ def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> st
     return f"{label:<6} |{bar}| {count}"
 
 
+def _sorted_count_pairs(
+    counts: dict[str, int],
+    *,
+    limit: int = 6,
+) -> list[tuple[str, int]]:
+    ordered = sorted(
+        ((k, v) for k, v in counts.items() if k and v > 0),
+        key=lambda kv: (-int(kv[1]), kv[0]),
+    )
+    return ordered[: max(0, limit)]
+
+
+def _collect_tui_asset_inventory(
+    *,
+    run_dir: Path,
+    candidates: list[dict[str, object]],
+) -> dict[str, object]:
+    inv_obj = _safe_load_json_object(run_dir / "stages" / "inventory" / "inventory.json")
+    endpoints_obj = _safe_load_json_object(run_dir / "stages" / "endpoints" / "endpoints.json")
+    ports_obj = _safe_load_json_object(
+        run_dir / "stages" / "dynamic_validation" / "network" / "ports.json"
+    )
+    ifaces_obj = _safe_load_json_object(
+        run_dir / "stages" / "dynamic_validation" / "network" / "interfaces.json"
+    )
+
+    inv_summary_any = inv_obj.get("summary")
+    inv_summary = cast(dict[str, object], inv_summary_any) if isinstance(inv_summary_any, dict) else {}
+    files = _as_int(inv_summary.get("files"))
+    binaries = _as_int(inv_summary.get("binaries"))
+    configs = _as_int(inv_summary.get("configs"))
+    roots_scanned = _as_int(inv_summary.get("roots_scanned"))
+    string_hits = _as_int(inv_summary.get("string_hits"))
+
+    service_candidates_any = inv_obj.get("service_candidates")
+    service_candidates = (
+        cast(list[dict[str, object]], service_candidates_any)
+        if isinstance(service_candidates_any, list)
+        else []
+    )
+    service_kind_counts: dict[str, int] = {}
+    daemon_rank: dict[str, tuple[float, str]] = {}
+    daemon_paths: list[str] = []
+    for candidate_any in service_candidates:
+        if not isinstance(candidate_any, dict):
+            continue
+        candidate = cast(dict[str, object], candidate_any)
+        kind = _short_text(candidate.get("kind"), max_len=24) or "unknown"
+        name = _short_text(candidate.get("name"), max_len=40) or "unknown"
+        confidence = _as_float(candidate.get("confidence"), default=0.0)
+        service_kind_counts[kind] = service_kind_counts.get(kind, 0) + 1
+        normalized_name = name.lower()
+        include_in_daemon_rank = not (
+            normalized_name.startswith(".")
+            or normalized_name.startswith("readme")
+            or normalized_name.startswith("depend")
+        )
+        existing = daemon_rank.get(name) if include_in_daemon_rank else None
+        rel_path = ""
+        evidence_any = candidate.get("evidence")
+        if isinstance(evidence_any, list) and evidence_any:
+            ev0 = evidence_any[0]
+            if isinstance(ev0, dict):
+                rel_path = _path_tail(ev0.get("path"), max_segments=6, max_len=96)
+        if include_in_daemon_rank:
+            if existing is None or confidence > existing[0]:
+                daemon_rank[name] = (confidence, kind)
+        if include_in_daemon_rank and rel_path and rel_path not in daemon_paths:
+            daemon_paths.append(rel_path)
+
+    top_daemons = [
+        name
+        for name, _ in sorted(
+            daemon_rank.items(),
+            key=lambda kv: (-float(kv[1][0]), kv[0]),
+        )[:8]
+    ]
+
+    endpoints_any = endpoints_obj.get("endpoints")
+    endpoints = (
+        cast(list[dict[str, object]], endpoints_any)
+        if isinstance(endpoints_any, list)
+        else []
+    )
+    endpoint_type_counts: dict[str, int] = {}
+    endpoint_protocol_counts: dict[str, int] = {}
+    endpoint_port_counts: dict[str, int] = {}
+    for endpoint_any in endpoints:
+        if not isinstance(endpoint_any, dict):
+            continue
+        endpoint = cast(dict[str, object], endpoint_any)
+        endpoint_type = _short_text(endpoint.get("type"), max_len=20) or "unknown"
+        endpoint_type_counts[endpoint_type] = endpoint_type_counts.get(endpoint_type, 0) + 1
+        value = _short_text(endpoint.get("value"), max_len=260)
+        if not value:
+            continue
+        parsed = urlparse(value)
+        if parsed.scheme:
+            scheme = parsed.scheme.lower().strip()
+            if scheme:
+                endpoint_protocol_counts[scheme] = endpoint_protocol_counts.get(scheme, 0) + 1
+            if parsed.port is not None and 0 <= int(parsed.port) <= 65535:
+                port_key = str(int(parsed.port))
+                endpoint_port_counts[port_key] = endpoint_port_counts.get(port_key, 0) + 1
+            continue
+        host_port = re.match(r"^[a-zA-Z0-9_.:-]+:(\d{1,5})$", value)
+        if host_port:
+            port_num = int(host_port.group(1))
+            if 0 <= port_num <= 65535:
+                port_key = str(port_num)
+                endpoint_port_counts[port_key] = endpoint_port_counts.get(port_key, 0) + 1
+
+    ports_any = ports_obj.get("ports")
+    ports = cast(list[dict[str, object]], ports_any) if isinstance(ports_any, list) else []
+    dynamic_proto_counts: dict[str, int] = {}
+    dynamic_state_counts: dict[str, int] = {}
+    port_samples: list[str] = []
+    open_ports_from_rows: list[str] = []
+    for row_any in ports:
+        if not isinstance(row_any, dict):
+            continue
+        row = cast(dict[str, object], row_any)
+        port = _as_int(row.get("port"), default=-1)
+        if port < 0:
+            continue
+        proto = _short_text(row.get("proto"), max_len=12).lower() or "tcp"
+        state = _short_text(row.get("state"), max_len=20).lower() or "unknown"
+        dynamic_proto_counts[proto] = dynamic_proto_counts.get(proto, 0) + 1
+        dynamic_state_counts[state] = dynamic_state_counts.get(state, 0) + 1
+        sample = f"{proto}/{port}({state})"
+        if sample not in port_samples:
+            port_samples.append(sample)
+        if state == "open" and sample not in open_ports_from_rows:
+            open_ports_from_rows.append(sample)
+
+    open_ports_any = ports_obj.get("open_ports")
+    open_ports_numeric = (
+        [int(x) for x in cast(list[object], open_ports_any) if isinstance(x, int)]
+        if isinstance(open_ports_any, list)
+        else []
+    )
+    open_ports = [f"tcp/{p}" for p in sorted(set(open_ports_numeric))]
+    if not open_ports:
+        open_ports = open_ports_from_rows
+
+    interfaces_any = ifaces_obj.get("interfaces")
+    interfaces = (
+        cast(list[dict[str, object]], interfaces_any)
+        if isinstance(interfaces_any, list)
+        else []
+    )
+    interface_labels: list[str] = []
+    for iface_any in interfaces:
+        if not isinstance(iface_any, dict):
+            continue
+        iface = cast(dict[str, object], iface_any)
+        ifname = _short_text(iface.get("ifname"), max_len=20) or "if"
+        ipv4_any = iface.get("ipv4")
+        ipv4s = (
+            [_short_text(x, max_len=32) for x in cast(list[object], ipv4_any) if isinstance(x, str)]
+            if isinstance(ipv4_any, list)
+            else []
+        )
+        if ipv4s:
+            label = f"{ifname}:{','.join(ipv4s[:2])}"
+        else:
+            label = ifname
+        if label not in interface_labels:
+            interface_labels.append(label)
+
+    candidate_paths: list[str] = []
+    for item_any in candidates:
+        if not isinstance(item_any, dict):
+            continue
+        item = cast(dict[str, object], item_any)
+        candidate_path = _path_tail(item.get("path"), max_segments=6, max_len=104)
+        if candidate_path and candidate_path not in candidate_paths:
+            candidate_paths.append(candidate_path)
+
+    return {
+        "available": bool(inv_obj or endpoints_obj or ports_obj or ifaces_obj),
+        "inventory_status": _short_text(inv_obj.get("status"), max_len=16) or "unknown",
+        "files": files,
+        "binaries": binaries,
+        "configs": configs,
+        "roots_scanned": roots_scanned,
+        "string_hits": string_hits,
+        "service_candidates": len(service_candidates),
+        "service_kind_counts": service_kind_counts,
+        "top_daemons": top_daemons,
+        "service_paths": daemon_paths[:5],
+        "endpoint_total": len(endpoints),
+        "endpoint_type_counts": endpoint_type_counts,
+        "endpoint_protocol_counts": endpoint_protocol_counts,
+        "endpoint_port_counts": endpoint_port_counts,
+        "target_ip": _short_text(ports_obj.get("target_ip"), max_len=32),
+        "probed_ports": len(ports),
+        "open_ports": open_ports,
+        "port_samples": port_samples[:8],
+        "dynamic_protocol_counts": dynamic_proto_counts,
+        "dynamic_state_counts": dynamic_state_counts,
+        "interfaces": interface_labels[:5],
+        "candidate_paths": candidate_paths[:5],
+    }
+
+
 def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     manifest = _safe_load_json_object(run_dir / "manifest.json")
     report = _safe_load_json_object(run_dir / "report" / "report.json")
@@ -862,6 +1069,10 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     verifier_artifacts = _collect_tui_verifier_artifacts(run_dir=run_dir)
     chain_bundle_index = _collect_tui_chain_bundle_index(run_dir=run_dir)
     runtime_model = _collect_runtime_communication_summary(run_dir=run_dir)
+    asset_inventory = _collect_tui_asset_inventory(
+        run_dir=run_dir,
+        candidates=candidates,
+    )
 
     return {
         "profile": profile,
@@ -882,6 +1093,7 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         "verifier_artifacts": cast(dict[str, object], verifier_artifacts),
         "chain_bundle_index": chain_bundle_index,
         "runtime_model": runtime_model,
+        "asset_inventory": asset_inventory,
     }
 
 
@@ -1037,6 +1249,131 @@ def _build_tui_snapshot_lines(
             lines.append("  legend: D=dynamic, E=exploit, V=verified_chain, S=static, !!=D+E")
     else:
         lines.append("Runtime exposure model: unavailable")
+
+    asset_inventory = cast(dict[str, object], snapshot.get("asset_inventory", {}))
+    if asset_inventory:
+        service_kinds_any = asset_inventory.get("service_kind_counts")
+        service_kinds = (
+            cast(dict[str, int], service_kinds_any)
+            if isinstance(service_kinds_any, dict)
+            else {}
+        )
+        endpoint_types_any = asset_inventory.get("endpoint_type_counts")
+        endpoint_types = (
+            cast(dict[str, int], endpoint_types_any)
+            if isinstance(endpoint_types_any, dict)
+            else {}
+        )
+        endpoint_protocols_any = asset_inventory.get("endpoint_protocol_counts")
+        endpoint_protocols = (
+            cast(dict[str, int], endpoint_protocols_any)
+            if isinstance(endpoint_protocols_any, dict)
+            else {}
+        )
+        dynamic_protocols_any = asset_inventory.get("dynamic_protocol_counts")
+        dynamic_protocols = (
+            cast(dict[str, int], dynamic_protocols_any)
+            if isinstance(dynamic_protocols_any, dict)
+            else {}
+        )
+        dynamic_states_any = asset_inventory.get("dynamic_state_counts")
+        dynamic_states = (
+            cast(dict[str, int], dynamic_states_any)
+            if isinstance(dynamic_states_any, dict)
+            else {}
+        )
+        top_daemons_any = asset_inventory.get("top_daemons")
+        top_daemons = (
+            [x for x in cast(list[object], top_daemons_any) if isinstance(x, str)]
+            if isinstance(top_daemons_any, list)
+            else []
+        )
+        service_paths_any = asset_inventory.get("service_paths")
+        service_paths = (
+            [x for x in cast(list[object], service_paths_any) if isinstance(x, str)]
+            if isinstance(service_paths_any, list)
+            else []
+        )
+        open_ports_any = asset_inventory.get("open_ports")
+        open_ports = (
+            [x for x in cast(list[object], open_ports_any) if isinstance(x, str)]
+            if isinstance(open_ports_any, list)
+            else []
+        )
+        port_samples_any = asset_inventory.get("port_samples")
+        port_samples = (
+            [x for x in cast(list[object], port_samples_any) if isinstance(x, str)]
+            if isinstance(port_samples_any, list)
+            else []
+        )
+        interfaces_any = asset_inventory.get("interfaces")
+        interfaces = (
+            [x for x in cast(list[object], interfaces_any) if isinstance(x, str)]
+            if isinstance(interfaces_any, list)
+            else []
+        )
+        candidate_paths_any = asset_inventory.get("candidate_paths")
+        candidate_paths = (
+            [x for x in cast(list[object], candidate_paths_any) if isinstance(x, str)]
+            if isinstance(candidate_paths_any, list)
+            else []
+        )
+
+        kind_text = ", ".join(
+            f"{k}={v}" for k, v in _sorted_count_pairs(service_kinds, limit=4)
+        ) or "-"
+        endpoint_type_text = ", ".join(
+            f"{k}={v}" for k, v in _sorted_count_pairs(endpoint_types, limit=4)
+        ) or "-"
+        endpoint_protocol_text = ", ".join(
+            f"{k}={v}" for k, v in _sorted_count_pairs(endpoint_protocols, limit=4)
+        ) or "-"
+        dynamic_protocol_text = ", ".join(
+            f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_protocols, limit=3)
+        ) or "-"
+        dynamic_state_text = ", ".join(
+            f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_states, limit=4)
+        ) or "-"
+        target_ip = _short_text(asset_inventory.get("target_ip"), max_len=40) or "-"
+
+        lines.append("")
+        lines.append(
+            _ansi("Firmware Service & Protocol Inventory", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+        )
+        lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
+        lines.append(
+            "inventory: "
+            f"files={_as_int(asset_inventory.get('files'))} "
+            f"binaries={_as_int(asset_inventory.get('binaries'))} "
+            f"configs={_as_int(asset_inventory.get('configs'))} "
+            f"service_candidates={_as_int(asset_inventory.get('service_candidates'))}"
+        )
+        lines.append(f"service_kinds: {kind_text}")
+        if top_daemons:
+            lines.append("daemon_candidates: " + ", ".join(top_daemons[:8]))
+        if service_paths:
+            lines.append(
+                "daemon_evidence: "
+                + ", ".join(_path_tail(x, max_segments=6, max_len=96) for x in service_paths[:3])
+            )
+        lines.append(
+            f"endpoints: total={_as_int(asset_inventory.get('endpoint_total'))} | types={endpoint_type_text}"
+        )
+        lines.append(
+            f"protocols: static_url={endpoint_protocol_text} | dynamic_probe={dynamic_protocol_text}"
+        )
+        lines.append(
+            f"ports: target={target_ip} | probed={_as_int(asset_inventory.get('probed_ports'))} "
+            f"| open={len(open_ports)} | states={dynamic_state_text}"
+        )
+        if open_ports:
+            lines.append("  open_ports=" + ", ".join(open_ports[:6]))
+        elif port_samples:
+            lines.append("  probed_sample=" + ", ".join(port_samples[:6]))
+        if interfaces:
+            lines.append("interfaces: " + ", ".join(interfaces[:4]))
+        if candidate_paths:
+            lines.append("candidate_paths(top): " + ", ".join(candidate_paths[:4]))
 
     lines.append(
         _ansi(_count_bar("HIGH", count=high, max_count=max_bucket), _ANSI_RED, enabled=use_ansi)
@@ -1262,12 +1599,12 @@ def _draw_interactive_tui_frame(
     win = cast("curses._CursesWindow", stdscr)
     win.erase()
     max_y, max_x = win.getmaxyx()
-    if max_y < 12 or max_x < 72:
+    if max_y < 13 or max_x < 72:
         _safe_curses_addstr(
             win,
             y=0,
             x=0,
-            text="Terminal too small (need >=72x12). Resize and retry.",
+            text="Terminal too small (need >=72x13). Resize and retry.",
         )
         win.refresh()
         return
@@ -1310,6 +1647,7 @@ def _draw_interactive_tui_frame(
     runtime_model = cast(dict[str, object], snapshot.get("runtime_model", {}))
     runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
     runtime_available = bool(runtime_model.get("available"))
+    asset_inventory = cast(dict[str, object], snapshot.get("asset_inventory", {}))
 
     _safe_curses_addstr(
         win,
@@ -1387,16 +1725,44 @@ def _draw_interactive_tui_frame(
         ),
         attr=_attr("meta"),
     )
-
+    asset_protocol_counts_any = asset_inventory.get("endpoint_protocol_counts")
+    asset_protocol_counts = (
+        cast(dict[str, int], asset_protocol_counts_any)
+        if isinstance(asset_protocol_counts_any, dict)
+        else {}
+    )
+    asset_open_ports_any = asset_inventory.get("open_ports")
+    asset_open_ports = (
+        [x for x in cast(list[object], asset_open_ports_any) if isinstance(x, str)]
+        if isinstance(asset_open_ports_any, list)
+        else []
+    )
+    proto_text = ",".join(
+        f"{k}:{v}" for k, v in _sorted_count_pairs(asset_protocol_counts, limit=2)
+    ) or "-"
     _safe_curses_addstr(
         win,
         y=6,
+        x=0,
+        text=(
+            f"assets  files:{_as_int(asset_inventory.get('files'))}  "
+            f"bins:{_as_int(asset_inventory.get('binaries'))}  "
+            f"svcs:{_as_int(asset_inventory.get('service_candidates'))}  "
+            f"proto:{proto_text}  "
+            f"ports_open:{len(asset_open_ports)}/{_as_int(asset_inventory.get('probed_ports'))}"
+        ),
+        attr=_attr("meta"),
+    )
+
+    _safe_curses_addstr(
+        win,
+        y=7,
         x=0,
         text="-" * (max_x - 1),
         attr=_attr("meta"),
     )
 
-    list_top = 7
+    list_top = 8
     status_row = max_y - 1
     list_height = max(3, status_row - list_top)
     list_body_height = max(1, list_height - 1)
