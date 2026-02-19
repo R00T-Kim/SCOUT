@@ -12,11 +12,31 @@ if [[ "${1:-}" == "" ]]; then
 Usage: ./scout <aiedge-args...>
 
 Examples
-  ./scout tui aiedge-runs/<run_id> --watch --interval-s 2 --limit 20
+  ./scout tui                  # latest run, auto mode
+  ./scout tui -w               # latest run, watch mode
+  ./scout tui -i               # latest run, interactive mode
+  ./scout ti                   # alias: tui -i
+  ./scout tw                   # alias: tui -w
+  ./scout tui aiedge-runs/<run_id> -w -t 2 -n 20
   ./scout run firmware.bin --profile exploit
   ./scout report aiedge-runs/<run_id>
 EOF
   exit 0
 fi
+
+case "${1:-}" in
+  ti)
+    shift
+    set -- tui -i "$@"
+    ;;
+  tw)
+    shift
+    set -- tui -w "$@"
+    ;;
+  to)
+    shift
+    set -- tui -m once "$@"
+    ;;
+esac
 
 exec env PYTHONPATH="${PYTHONPATH_VALUE}" python3 -m aiedge "$@"

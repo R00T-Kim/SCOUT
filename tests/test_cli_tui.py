@@ -8,32 +8,16 @@ import pytest
 from aiedge.__main__ import main
 
 
-def test_tui_cli_requires_existing_run_dir(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    missing_run_dir = tmp_path / "missing-run"
-    rc = main(["tui", str(missing_run_dir)])
-    captured = capsys.readouterr()
-    assert rc == 20
-    assert "Run directory not found" in captured.err
-
-
-def test_tui_cli_renders_candidate_dashboard(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    run_dir = tmp_path / "run"
+def _seed_minimal_run(run_dir: Path, *, candidate_count: int = 1) -> None:
     report_dir = run_dir / "report"
     findings_dir = run_dir / "stages" / "findings"
     report_dir.mkdir(parents=True)
     findings_dir.mkdir(parents=True)
-
-    _ = (run_dir / "manifest.json").write_text(
+    (run_dir / "manifest.json").write_text(
         json.dumps({"profile": "exploit"}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    _ = (report_dir / "report.json").write_text(
+    (report_dir / "report.json").write_text(
         json.dumps(
             {
                 "llm": {"status": "ok"},
@@ -45,7 +29,7 @@ def test_tui_cli_renders_candidate_dashboard(
         + "\n",
         encoding="utf-8",
     )
-    _ = (report_dir / "analyst_digest.json").write_text(
+    (report_dir / "analyst_digest.json").write_text(
         json.dumps(
             {
                 "exploitability_verdict": {
@@ -59,15 +43,15 @@ def test_tui_cli_renders_candidate_dashboard(
         + "\n",
         encoding="utf-8",
     )
-    _ = (findings_dir / "exploit_candidates.json").write_text(
+    (findings_dir / "exploit_candidates.json").write_text(
         json.dumps(
             {
                 "schema_version": "exploit-candidates-v1",
                 "summary": {
-                    "candidate_count": 1,
+                    "candidate_count": int(candidate_count),
                     "chain_backed": 0,
                     "high": 0,
-                    "medium": 1,
+                    "medium": int(candidate_count),
                     "low": 0,
                 },
                 "candidates": [
@@ -93,6 +77,25 @@ def test_tui_cli_renders_candidate_dashboard(
         encoding="utf-8",
     )
 
+
+def test_tui_cli_requires_existing_run_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing_run_dir = tmp_path / "missing-run"
+    rc = main(["tui", str(missing_run_dir)])
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert "Run directory not found" in captured.err
+
+
+def test_tui_cli_renders_candidate_dashboard(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = tmp_path / "run"
+    _seed_minimal_run(run_dir)
+
     rc = main(["tui", str(run_dir), "--limit", "5"])
     captured = capsys.readouterr()
     assert rc == 0
@@ -105,6 +108,48 @@ def test_tui_cli_renders_candidate_dashboard(
     assert "G01 [M] family=cmd_exec_injection_risk" in out
     assert "attack: Potential command injection" in out
     assert "next: Trace sink arguments" in out
+
+
+def test_tui_cli_defaults_to_latest_run_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs_dir = tmp_path / "aiedge-runs"
+    old_run = runs_dir / "run-old"
+    new_run = runs_dir / "run-new"
+    _seed_minimal_run(old_run, candidate_count=1)
+    _seed_minimal_run(new_run, candidate_count=2)
+
+    old_ts = 1_700_000_000
+    new_ts = old_ts + 100
+    old_manifest = old_run / "manifest.json"
+    new_manifest = new_run / "manifest.json"
+    old_manifest.touch()
+    new_manifest.touch()
+    import os
+
+    os.utime(old_manifest, (old_ts, old_ts))
+    os.utime(new_manifest, (new_ts, new_ts))
+
+    monkeypatch.chdir(tmp_path)
+    rc = main(["tui", "--limit", "1"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "run-new" in captured.out
+    assert "candidate_count=2" in captured.out
+
+
+def test_tui_cli_defaults_fail_without_any_runs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    rc = main(["tui"])
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert "Run directory not found" in captured.err
 
 
 def test_tui_cli_rejects_invalid_limit(

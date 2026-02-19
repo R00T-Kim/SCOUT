@@ -2191,6 +2191,94 @@ def _run_tui(
         print("")
         return 0
 
+
+def _looks_like_run_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    manifest_ok = (path / "manifest.json").is_file()
+    report_ok = (path / "report" / "report.json").is_file() or (path / "report" / "viewer.html").is_file()
+    return bool(manifest_ok and report_ok)
+
+
+def _run_dir_mtime(path: Path) -> float:
+    candidates = [
+        path / "report" / "report.json",
+        path / "report" / "analyst_digest.json",
+        path / "manifest.json",
+        path,
+    ]
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                return float(candidate.stat().st_mtime)
+        except OSError:
+            continue
+    return 0.0
+
+
+def _discover_latest_run_dir(*, cwd: Path) -> Path | None:
+    env_roots_raw = os.environ.get("AIEDGE_RUNS_DIRS", "").strip()
+    env_roots = [x for x in env_roots_raw.split(os.pathsep) if x] if env_roots_raw else []
+    roots: list[Path] = [Path(x).expanduser() for x in env_roots]
+    roots.extend(
+        [
+            cwd / "aiedge-runs",
+            cwd / "aiedge-8mb-runs",
+            cwd,
+        ]
+    )
+
+    seen_roots: set[str] = set()
+    discovered: list[Path] = []
+    for root in roots:
+        try:
+            root_resolved = root.resolve()
+        except Exception:
+            root_resolved = root
+        root_key = str(root_resolved)
+        if root_key in seen_roots:
+            continue
+        seen_roots.add(root_key)
+
+        if not root_resolved.is_dir():
+            continue
+
+        if _looks_like_run_dir(root_resolved):
+            discovered.append(root_resolved)
+
+        try:
+            children = list(root_resolved.iterdir())
+        except OSError:
+            continue
+
+        for child in children:
+            if not child.is_dir():
+                continue
+            if _looks_like_run_dir(child):
+                discovered.append(child)
+
+    if not discovered:
+        return None
+
+    discovered.sort(
+        key=lambda p: (_run_dir_mtime(p), str(p)),
+        reverse=True,
+    )
+    return discovered[0]
+
+
+def _resolve_tui_run_dir(raw: str | None) -> Path | None:
+    token = (raw or "").strip()
+    if token == ".":
+        cwd = Path.cwd().resolve()
+        if _looks_like_run_dir(cwd):
+            return cwd
+    latest_tokens = {"", "latest", "@latest"}
+    if token not in latest_tokens:
+        return Path(token).expanduser().resolve()
+    return _discover_latest_run_dir(cwd=Path.cwd())
+
+
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -2637,9 +2725,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _ = tui.add_argument(
         "run_dir",
-        help="Path to an existing run directory.",
+        nargs="?",
+        default="latest",
+        help=(
+            "Path to an existing run directory. Omit (or use 'latest') to auto-pick "
+            "the most recent run from aiedge-runs/ or aiedge-8mb-runs/."
+        ),
     )
     _ = tui.add_argument(
+        "-m",
         "--mode",
         choices=("once", "watch", "interactive", "auto"),
         default="auto",
@@ -2649,22 +2743,26 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _ = tui.add_argument(
+        "-n",
         "--limit",
         type=int,
         default=12,
         help="Maximum number of exploit candidates to print (default: 12).",
     )
     _ = tui.add_argument(
+        "-w",
         "--watch",
         action="store_true",
         help="Alias for --mode watch. Refresh dashboard continuously until Ctrl+C.",
     )
     _ = tui.add_argument(
+        "-i",
         "--interactive",
         action="store_true",
         help="Alias for --mode interactive. Launch interactive terminal UI (keyboard navigation).",
     )
     _ = tui.add_argument(
+        "-t",
         "--interval-s",
         type=float,
         default=2.0,
@@ -2932,7 +3030,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 20
 
     if command == "tui":
-        run_dir = cast(str, getattr(args, "run_dir"))
+        run_dir_raw = cast(str | None, getattr(args, "run_dir", None))
+        run_dir_path = _resolve_tui_run_dir(run_dir_raw)
+        if run_dir_path is None:
+            print(
+                (
+                    "Run directory not found: provide <run_dir> or create at least one run under "
+                    "./aiedge-runs (or set AIEDGE_RUNS_DIRS)."
+                ),
+                file=sys.stderr,
+            )
+            return 20
         limit = cast(int, getattr(args, "limit"))
         mode = cast(str, getattr(args, "mode", "auto"))
         watch = bool(getattr(args, "watch", False))
@@ -2941,7 +3049,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         try:
             return _run_tui(
-                run_dir_path=run_dir,
+                run_dir_path=str(run_dir_path),
                 limit=limit,
                 mode=mode,
                 watch=watch,
