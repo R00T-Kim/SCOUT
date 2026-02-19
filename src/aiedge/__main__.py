@@ -564,6 +564,17 @@ def _extract_service_node_value(value: str) -> tuple[str, int, str]:
     return service_part, 0, proto
 
 
+def _service_endpoint(host: object, port: object, protocol: object) -> str:
+    service_host = _short_text(host, max_len=220)
+    service_port = _as_int(port)
+    service_protocol = _short_text(protocol, max_len=12).upper() or "TCP"
+    if service_host and service_port > 0:
+        return f"{service_host}:{service_port}/{service_protocol}"
+    if service_host:
+        return f"{service_host}/{service_protocol}"
+    return service_protocol
+
+
 def _collect_runtime_communication_summary(
     *, run_dir: Path
 ) -> dict[str, object]:
@@ -634,6 +645,46 @@ def _collect_runtime_communication_summary(
                     )
 
                 if matrix_rows:
+                    host_components_map: dict[str, set[str]] = {}
+                    host_service_map: dict[str, set[str]] = {}
+                    protocol_counts: dict[str, int] = {}
+                    for row_any in matrix_rows:
+                        row = cast(dict[str, object], row_any)
+                        row_host = _short_text(row.get("host"), max_len=220)
+                        row_component = _short_text(row.get("component"), max_len=120)
+                        row_service_host = _short_text(row.get("service_host"), max_len=220)
+                        row_port = _as_int(row.get("port"))
+                        row_protocol = (
+                            _short_text(row.get("protocol"), max_len=12) or "tcp"
+                        )
+                        endpoint = _service_endpoint(row_service_host, row_port, row_protocol)
+                        if row_host:
+                            if row_component:
+                                host_components_map.setdefault(row_host, set()).add(
+                                    row_component
+                                )
+                            if endpoint:
+                                host_service_map.setdefault(row_host, set()).add(endpoint)
+                            protocol_counts[row_protocol] = protocol_counts.get(
+                                row_protocol, 0
+                            ) + 1
+                    runtime_system_map: list[dict[str, object]] = []
+                    host_component_counts: dict[str, int] = {}
+                    host_service_counts: dict[str, int] = {}
+                    for map_host in sorted(host_components_map):
+                        components = sorted(host_components_map.get(map_host, set()))
+                        services = sorted(host_service_map.get(map_host, set()))
+                        host_component_counts[map_host] = len(components)
+                        host_service_counts[map_host] = len(services)
+                        runtime_system_map.append(
+                            {
+                                "host": map_host,
+                                "components": components,
+                                "services": services,
+                                "component_count": len(components),
+                                "service_count": len(services),
+                            }
+                        )
                     summary = {
                         "hosts": 0,
                         "services": 0,
@@ -655,6 +706,12 @@ def _collect_runtime_communication_summary(
                                 ),
                                 "rows_dynamic_exploit": _as_int(
                                     summary_any.get("rows_dynamic_exploit"), default=0
+                                ),
+                                "service_count_by_protocol": protocol_counts,
+                                "host_service_counts": host_service_counts,
+                                "host_component_counts": host_component_counts,
+                                "runtime_system_map": cast(
+                                    list[object], runtime_system_map
                                 ),
                             }
                         )
@@ -680,6 +737,10 @@ def _collect_runtime_communication_summary(
                     "rows_exploit": 0,
                     "rows_verified_chain": 0,
                     "rows_dynamic_exploit": 0,
+                    "service_count_by_protocol": {},
+                    "host_service_counts": {},
+                    "host_component_counts": {},
+                    "runtime_system_map": [],
                     "artifacts": [_path_tail(str(matrix_path), max_segments=4, max_len=90)],
                 },
             }
@@ -710,6 +771,9 @@ def _collect_runtime_communication_summary(
     host_services: dict[str, list[tuple[str, int, str]]] = {}
     component_hosts: dict[str, set[str]] = {}
     host_components: dict[str, set[str]] = {}
+    protocol_counts: dict[str, int] = {}
+    host_service_counts: dict[str, int] = {}
+    runtime_system_map: list[dict[str, object]] = []
     for edge_any in edges_any:
         if not isinstance(edge_any, dict):
             continue
@@ -749,18 +813,20 @@ def _collect_runtime_communication_summary(
         )
         if not service_host and host:
             service_host = host
+        service_proto = (service_proto or "tcp").lower()
         service_key = (service_host, service_port, service_proto)
         host_services.setdefault(host, []).append(service_key)
+        protocol_counts[service_proto] = protocol_counts.get(service_proto, 0) + 1
 
     service_rows: list[dict[str, object]] = []
     for host, services in sorted(
         host_services.items(), key=lambda item: item[0].lower()
     ):
+        unique_services = sorted(set(services), key=lambda item: (item[0], item[1], item[2]))
+        host_service_counts[host] = len(unique_services)
         comp_names = sorted(host_components.get(host, set())) or ["unmapped"]
         seen: set[tuple[str, int, str]] = set()
-        for service_host, service_port, service_proto in sorted(
-            set(services), key=lambda s: (s[0], s[1], s[2])
-        ):
+        for service_host, service_port, service_proto in unique_services:
             if (service_host, service_port, service_proto) in seen:
                 continue
             seen.add((service_host, service_port, service_proto))
@@ -773,6 +839,21 @@ def _collect_runtime_communication_summary(
                     "port": service_port,
                     "protocol": service_proto,
                     "components": comp_names,
+                }
+            )
+        if unique_services:
+            runtime_system_map.append(
+                {
+                    "host": host,
+                    "components": comp_names,
+                    "services": sorted(
+                        {
+                            _service_endpoint(svc_host, svc_port, svc_proto)
+                            for svc_host, svc_port, svc_proto in unique_services
+                        }
+                    ),
+                    "component_count": len(comp_names),
+                    "service_count": len(unique_services),
                 }
             )
 
@@ -788,6 +869,12 @@ def _collect_runtime_communication_summary(
             "rows_exploit": 0,
             "rows_verified_chain": 0,
             "rows_dynamic_exploit": 0,
+            "service_count_by_protocol": protocol_counts,
+            "host_service_counts": host_service_counts,
+            "host_component_counts": {
+                host: len(components) for host, components in host_components.items()
+            },
+            "runtime_system_map": cast(list[object], runtime_system_map),
             "artifacts": [
                 _path_tail(str(comm_path), max_segments=4, max_len=90),
             ],
@@ -1498,6 +1585,24 @@ def _build_tui_snapshot_lines(
             dict[str, object], runtime_model.get("summary", {})
         )
         rows = cast(list[object], runtime_model.get("rows", []))
+        runtime_system_map_any = runtime_summary.get("runtime_system_map", [])
+        runtime_system_map = (
+            [cast(dict[str, object], x) for x in cast(list[object], runtime_system_map_any)]
+            if isinstance(runtime_system_map_any, list)
+            else []
+        )
+        runtime_protocol_counts_any = runtime_summary.get("service_count_by_protocol", {})
+        runtime_protocol_counts = (
+            cast(dict[str, int], runtime_protocol_counts_any)
+            if isinstance(runtime_protocol_counts_any, dict)
+            else {}
+        )
+        runtime_host_service_counts_any = runtime_summary.get("host_service_counts", {})
+        runtime_host_service_counts = (
+            cast(dict[str, int], runtime_host_service_counts_any)
+            if isinstance(runtime_host_service_counts_any, dict)
+            else {}
+        )
         lines.append(
             f"runtime: hosts={_as_int(runtime_summary.get('hosts'))} | "
             f"services={_as_int(runtime_summary.get('services'))} | "
@@ -1508,6 +1613,19 @@ def _build_tui_snapshot_lines(
             f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))} | "
             f"status={_short_text(runtime_model.get('status'), max_len=16) or 'partial'}"
         )
+        if runtime_protocol_counts:
+            protocol_text = ", ".join(
+                f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=4)
+            )
+            if protocol_text:
+                lines.append(f"runtime_protocols: {protocol_text}")
+        if runtime_host_service_counts:
+            host_text = ", ".join(
+                f"{k}->{v}"
+                for k, v in _sorted_count_pairs(runtime_host_service_counts, limit=4)
+            )
+            if host_text:
+                lines.append(f"runtime_system_map: {host_text}")
         lines.append(
             _ansi("Runtime Exposure Model", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
         )
@@ -1530,6 +1648,11 @@ def _build_tui_snapshot_lines(
                 )
                 evidence_badge = (
                     _short_text(row.get("evidence_badge"), max_len=16) or "S"
+                )
+                evidence_counts = (
+                    f"D{_as_int(row.get('dynamic_evidence_count'))}"
+                    f"/E{_as_int(row.get('exploit_evidence_count'))}"
+                    f"/V{_as_int(row.get('verified_chain_evidence_count'))}"
                 )
                 dynamic_exploit = bool(row.get("dynamic_exploit_chain", False))
                 badge_style = (_ANSI_BOLD, _ANSI_RED) if dynamic_exploit else (_ANSI_BOLD, _ANSI_YELLOW)
@@ -1554,7 +1677,7 @@ def _build_tui_snapshot_lines(
                 lines.append(
                     f"  {row_host: <24} | {service_endpoint: <18} | "
                     f"{(components if components else 'unmapped'): <24} "
-                    f"[{rendered_badge}] ({evidence_text})"
+                    f"[{rendered_badge}] {evidence_counts} ({evidence_text})"
                 )
             lines.append(
                 "  legend: D=dynamic, E=exploit, V=verified_chain, S=static, D+E=D+E"
@@ -2087,6 +2210,24 @@ def _draw_interactive_tui_frame(
     asset_inventory = cast(dict[str, object], snapshot.get("asset_inventory", {}))
     threat_model = cast(dict[str, object], snapshot.get("threat_model", {}))
     runtime_health = cast(dict[str, object], snapshot.get("runtime_health", {}))
+    runtime_protocol_counts_any = runtime_summary.get("service_count_by_protocol", {})
+    runtime_protocol_counts = (
+        cast(dict[str, int], runtime_protocol_counts_any)
+        if isinstance(runtime_protocol_counts_any, dict)
+        else {}
+    )
+    runtime_system_map_any = runtime_summary.get("runtime_system_map", [])
+    runtime_system_map = (
+        [cast(dict[str, object], x) for x in cast(list[object], runtime_system_map_any)]
+        if isinstance(runtime_system_map_any, list)
+        else []
+    )
+    runtime_host_services_any = runtime_summary.get("host_service_counts", {})
+    runtime_host_services = (
+        cast(dict[str, int], runtime_host_services_any)
+        if isinstance(runtime_host_services_any, dict)
+        else {}
+    )
 
     _safe_curses_addstr(
         win,
@@ -2161,10 +2302,35 @@ def _draw_interactive_tui_frame(
             f"hosts:{_as_int(runtime_summary.get('hosts'))}  "
             f"services:{_as_int(runtime_summary.get('services'))}  "
             f"components:{_as_int(runtime_summary.get('components'))}  "
-            f"D+E:{_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
+            f"D+E:{_as_int(runtime_summary.get('rows_dynamic_exploit'))}  "
+            f"D:{_as_int(runtime_summary.get('rows_dynamic'))} "
+            f"E:{_as_int(runtime_summary.get('rows_exploit'))} "
+            f"V:{_as_int(runtime_summary.get('rows_verified_chain'))}"
         ),
         attr=_attr("meta"),
     )
+    proto_text_runtime = ", ".join(
+        f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=4)
+    ) or "-"
+    map_text = ", ".join(
+        f"{k}->{v}" for k, v in _sorted_count_pairs(runtime_host_services, limit=4)
+    ) or "-"
+    if proto_text_runtime:
+        _safe_curses_addstr(
+            win,
+            y=6,
+            x=0,
+            text=f"runtime_proto:{proto_text_runtime}",
+            attr=_attr("meta"),
+        )
+    if map_text:
+        _safe_curses_addstr(
+            win,
+            y=7,
+            x=0,
+            text=f"runtime_map:{map_text}",
+            attr=_attr("meta"),
+        )
     asset_protocol_counts_any = asset_inventory.get("endpoint_protocol_counts")
     asset_protocol_counts = (
         cast(dict[str, int], asset_protocol_counts_any)
@@ -2187,9 +2353,10 @@ def _draw_interactive_tui_frame(
         if isinstance(blockers_any, list)
         else 0
     )
+    health_line = 8
     _safe_curses_addstr(
         win,
-        y=6,
+        y=health_line,
         x=0,
         text=(
             f"health  state:{_short_text(runtime_health.get('state'), max_len=12) or '-'}  "
@@ -2202,7 +2369,7 @@ def _draw_interactive_tui_frame(
     )
     _safe_curses_addstr(
         win,
-        y=7,
+        y=health_line + 1,
         x=0,
         text=(
             f"assets  files:{_as_int(asset_inventory.get('files'))}  "
@@ -2214,6 +2381,7 @@ def _draw_interactive_tui_frame(
         ),
         attr=_attr("meta"),
     )
+    threat_row_line = 9
     tm_available = bool(threat_model.get("available"))
     tm_status = _short_text(threat_model.get("status"), max_len=12) or "-"
     tm_threats = _as_int(threat_model.get("threat_count"))
@@ -2231,7 +2399,7 @@ def _draw_interactive_tui_frame(
     tm_attr = _attr("success") if tm_available and tm_threats > 0 else _attr("warning")
     _safe_curses_addstr(
         win,
-        y=8,
+        y=threat_row_line,
         x=0,
         text=(
             f"threat  {'on' if tm_available else 'off'}  status:{tm_status}  "
@@ -2240,17 +2408,46 @@ def _draw_interactive_tui_frame(
         ),
         attr=tm_attr,
     )
+    status_row = max_y - 1
+    if runtime_system_map:
+        map_line = threat_row_line + 1
+        for map_entry in runtime_system_map[: max(1, max_y - map_line - 1)]:
+            host_label = _short_text(map_entry.get("host"), max_len=24) or "unknown"
+            service_count = _as_int(map_entry.get("service_count"))
+            component_count = _as_int(map_entry.get("component_count"))
+            services_any = map_entry.get("services")
+            service_values = (
+                [x for x in cast(list[object], services_any) if isinstance(x, str)]
+                if isinstance(services_any, list)
+                else []
+            )
+            service_sample = ", ".join(service_values[:2]) or "-"
+            _safe_curses_addstr(
+                win,
+                y=map_line,
+                x=0,
+                text=(
+                    f"runtime_map {host_label:<24} svcs={service_count:<3} "
+                    f"daemons={component_count:<3} {service_sample}"
+                ),
+                attr=_attr("meta"),
+            )
+            map_line += 1
+        divider_y = max(map_line, threat_row_line + 1)
+    else:
+        divider_y = threat_row_line
+
+    divider_y = min(divider_y, status_row - 1)
 
     _safe_curses_addstr(
         win,
-        y=9,
+        y=divider_y,
         x=0,
         text="-" * (max_x - 1),
         attr=_attr("meta"),
     )
 
-    list_top = 10
-    status_row = max_y - 1
+    list_top = divider_y + 1
     list_height = max(3, status_row - list_top)
     list_body_height = max(1, list_height - 1)
     left_width = max(42, int(max_x * 0.52))
@@ -2477,6 +2674,12 @@ def _draw_interactive_tui_frame(
         details.append("view: runtime model (c: candidates)")
         details.append("")
         runtime_rows = cast(list[object], runtime_model.get("rows", []))
+        runtime_system_map_local = runtime_summary.get("runtime_system_map", [])
+        runtime_system_map_local_rows = (
+            [cast(dict[str, object], x) for x in cast(list[object], runtime_system_map_local)]
+            if isinstance(runtime_system_map_local, list)
+            else []
+        )
         details.append(
             f"status={_short_text(runtime_model.get('status'), max_len=12) or '-'}  "
             f"hosts={_as_int(runtime_summary.get('hosts'))}  "
@@ -2491,6 +2694,36 @@ def _draw_interactive_tui_frame(
             f"V={_as_int(runtime_summary.get('rows_verified_chain'))}, "
             f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
         )
+        runtime_protocol_counts_any = runtime_summary.get("service_count_by_protocol", {})
+        runtime_protocol_counts = (
+            cast(dict[str, int], runtime_protocol_counts_any)
+            if isinstance(runtime_protocol_counts_any, dict)
+            else {}
+        )
+        if runtime_protocol_counts:
+            details.append(
+                "protocols: "
+                + ", ".join(
+                    f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=6)
+                )
+            )
+        if runtime_system_map_local_rows:
+            details.append("")
+            details.append("system map:")
+            for row in runtime_system_map_local_rows[: max(3, min(6, right_width // 16))]:
+                host = _short_text(row.get("host"), max_len=24)
+                service_count = _as_int(row.get("service_count"))
+                component_count = _as_int(row.get("component_count"))
+                services_any = row.get("services")
+                service_values = (
+                    [x for x in cast(list[object], services_any) if isinstance(x, str)]
+                    if isinstance(services_any, list)
+                    else []
+                )
+                details.append(
+                    f" - {host:<18} svcs:{service_count:>2} daemons:{component_count:>2} "
+                    f"{', '.join(service_values[:3])}"
+                )
         if runtime_rows:
             details.append("")
             details.append("top_communications:")
@@ -2519,10 +2752,16 @@ def _draw_interactive_tui_frame(
                 )
                 if not evidence_text:
                     evidence_text = row_badge
+                evidence_counts = (
+                    f"D{_as_int(row.get('dynamic_evidence_count'))}"
+                    f"/E{_as_int(row.get('exploit_evidence_count'))}"
+                    f"/V{_as_int(row.get('verified_chain_evidence_count'))}"
+                )
                 svc = f"{row_service_host}:{row_port}/{row_protocol}"
                 details.extend(
                     _wrap_detail(
-                        f" - {row_host: <15} => {svc: <16} [{row_badge}] {component_text} ({evidence_text})"
+                        f" - {row_host: <15} => {svc: <16} [{row_badge}] "
+                        f"{evidence_counts} {component_text} ({evidence_text})"
                     )
                 )
         else:

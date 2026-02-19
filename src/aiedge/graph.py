@@ -954,6 +954,7 @@ def _communication_matrix_payload(
 ) -> dict[str, JsonValue]:
     host_to_components: dict[str, set[str]] = {}
     host_to_service_edges: dict[str, list[_RuntimeEdge]] = {}
+    protocol_counts: dict[str, int] = {}
 
     for edge in comm_edges:
         src_node = comm_nodes.get(edge.src)
@@ -988,6 +989,7 @@ def _communication_matrix_payload(
             service_host = service_host or host_value
             service_port = int(service_port)
             protocol = _normalize_protocol(protocol) or "tcp"
+            protocol_counts[protocol] = protocol_counts.get(protocol, 0) + 1
             for component_id in components_for_host:
                 row_key = (
                     component_id,
@@ -1044,6 +1046,50 @@ def _communication_matrix_payload(
             str(row.get("protocol", "")),
         ),
     )
+    host_to_service_rows: dict[str, set[tuple[str, int, str]]] = {}
+    host_to_component_rows: dict[str, set[str]] = {}
+    for row in matrix_rows:
+        host = row.get("host")
+        if not isinstance(host, str):
+            continue
+        service_host = row.get("service_host")
+        if not isinstance(service_host, str):
+            service_host = host
+        service_port = _as_int(row.get("service_port"), default=0)
+        protocol = _as_str(row.get("protocol")) or "tcp"
+        host_to_service_rows.setdefault(host, set()).add((service_host, service_port, protocol))
+        component_label = row.get("component_label")
+        if not isinstance(component_label, str):
+            component_label = str(row.get("component_id", "unmapped"))
+        host_to_component_rows.setdefault(host, set()).add(component_label or "unmapped")
+
+    host_service_counts: dict[str, int] = {
+        host: len(services)
+        for host, services in sorted(host_to_service_rows.items())
+    }
+    host_component_counts: dict[str, int] = {
+        host: len(components)
+        for host, components in sorted(host_to_component_rows.items())
+    }
+    runtime_system_map: list[dict[str, JsonValue]] = []
+    for host in sorted(host_to_service_rows):
+        components = sorted(host_to_component_rows.get(host, set()))
+        services = sorted(
+            host_to_service_rows.get(host, set()),
+            key=lambda value: (str(value[0]), int(value[1]), str(value[2])),
+        )
+        runtime_system_map.append(
+            {
+                "host": host,
+                "components": components,
+                "services": [
+                    f"{svc_host}:{svc_port}/{svc_protocol.upper()}"
+                    for svc_host, svc_port, svc_protocol in services
+                ],
+                "component_count": len(components),
+                "service_count": len(services),
+            }
+        )
     matrix_payload: dict[str, JsonValue] = {
         "status": "ok" if matrix_rows else "partial",
         "rows": cast(list[JsonValue], cast(list[object], matrix_rows)),
@@ -1056,6 +1102,10 @@ def _communication_matrix_payload(
                     for row in matrix_rows
                 }
             ),
+            "service_count_by_protocol": protocol_counts,
+            "host_service_counts": cast(dict[str, JsonValue], cast(dict[str, int], host_service_counts)),
+            "host_component_counts": cast(dict[str, JsonValue], cast(dict[str, int], host_component_counts)),
+            "runtime_system_map": cast(list[JsonValue], cast(list[object], runtime_system_map)),
             "observations": sorted(
                 {row.get("observation", "") for row in matrix_rows}
             ),
