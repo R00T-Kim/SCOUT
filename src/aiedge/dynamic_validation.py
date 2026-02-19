@@ -222,7 +222,38 @@ def _resolve_privileged_executor(*, run_dir: Path) -> tuple[PrivilegedExecutor, 
         if parsed:
             runner_bin = parsed[0]
             if "/" in runner_bin:
-                runner_valid = Path(runner_bin).is_file()
+                runner_candidates: list[Path] = []
+                runner_path = Path(runner_bin).expanduser()
+                if runner_path.is_absolute():
+                    runner_candidates.append(runner_path)
+                else:
+                    runner_candidates.extend(
+                        [
+                            Path.cwd() / runner_path,
+                            run_dir / runner_path,
+                            Path(__file__).resolve().parents[2] / runner_path,
+                        ]
+                    )
+                runner_candidates.extend(
+                    run_dir.parents[i] / runner_path
+                    for i in range(1, len(run_dir.parents))
+                )
+                runner_bin_path: Path | None = None
+                seen_paths: set[str] = set()
+                for candidate in runner_candidates:
+                    candidate_key = str(candidate)
+                    if candidate_key in seen_paths:
+                        continue
+                    seen_paths.add(candidate_key)
+                    if candidate.is_file():
+                        runner_bin_path = candidate
+                        break
+
+                runner_valid = runner_bin_path is not None
+                if not runner_valid:
+                    limitations.append("privileged_runner_unavailable")
+                else:
+                    parsed = [str(runner_bin_path)] + parsed[1:]
             else:
                 runner_valid = shutil.which(runner_bin) is not None
             if runner_valid:
