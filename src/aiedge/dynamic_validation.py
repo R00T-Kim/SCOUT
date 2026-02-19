@@ -614,46 +614,42 @@ def _iter_port_scan_plan(
 
 
 def _scan_single_tcp_port(*, target_ip: str, port: int, timeout_s: float) -> tuple[int, str, str]:
-    sock: socket.socket | None = None
+    sock: object | None = None
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(float(timeout_s))
-        result = sock.connect_ex((target_ip, int(port)))
-        if result == 0:
-            return int(port), "open", ""
-        if result in (errno.ECONNREFUSED, 111):
-            return int(port), "closed", ""
-        if result in (
-            errno.ETIMEDOUT,
-            errno.EHOSTUNREACH,
-            errno.ENETUNREACH,
-            errno.EHOSTDOWN,
-            errno.ENETDOWN,
-        ):
-            return int(port), "filtered", f"errno:{result}"
-        return int(port), "closed", f"errno:{result}"
+        # keep socket.create_connection for compatibility with tests/monkeypatching
+        # and consistent behavior across platforms.
+        sock = socket.create_connection((target_ip, int(port)), float(timeout_s))
+        return int(port), "open", ""
     except socket.timeout:
         return int(port), "filtered", "TimeoutError: timed out"
     except OSError as exc:
-        if exc.errno in (
+        err_no = exc.errno
+        if err_no in (
             errno.ETIMEDOUT,
             errno.EHOSTUNREACH,
             errno.ENETUNREACH,
             errno.EHOSTDOWN,
             errno.ENETDOWN,
         ):
-            return int(port), "filtered", f"OSError[{exc.errno}]: {exc.strerror or exc}"
-        if exc.errno in (errno.ECONNREFUSED,):
-            return int(port), "closed", f"OSError[{exc.errno}]: {exc.strerror or exc}"
-        return int(port), "error", f"OSError[{exc.errno}]: {exc.strerror or exc}"
+            return int(port), "filtered", f"OSError[{err_no}]: {exc.strerror or exc}"
+        if err_no in (errno.ECONNREFUSED,):
+            return int(port), "closed", f"OSError[{err_no}]: {exc.strerror or exc}"
+
+        # Some environments/tests raise OSError without errno for closed ports.
+        message = str(exc).strip().lower()
+        if err_no is None and message in {"closed", "connection refused"}:
+            return int(port), "closed", f"OSError: {exc}"
+        return int(port), "error", f"OSError[{err_no}]: {exc.strerror or exc}"
     except Exception as exc:
         return int(port), "error", f"{type(exc).__name__}: {exc}"
     finally:
         if sock is not None:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            close_fn = getattr(sock, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    pass
 
 
 def _probe_target_ports(
