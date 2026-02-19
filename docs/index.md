@@ -2,6 +2,9 @@
 
 이 문서는 SCOUT 저장소의 "문서 시작점"입니다.
 
+- [README (English)](../README.md)
+- [README (한국어)](../README.ko.md)
+
 ## 1) 큰 그림 (청사진)
 
 - `docs/blueprint.md`

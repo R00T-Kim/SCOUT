@@ -11,6 +11,8 @@
 
 ---
 
+**Languages:** English (this file), [한국어 README.ko.md](README.ko.md)
+
 *Deterministic firmware analysis engine that produces hash-anchored evidence artifacts — from unpacking through vulnerability discovery to full-chain exploit verification.*
 
 </div>
@@ -35,6 +37,24 @@ SCOUT doesn't guess. Each stage produces **hash-anchored artifacts** in a `run_d
 - **Fail-open stages, fail-closed governance** — Individual stages degrade gracefully (partial results over crashes); final promotion gates reject anything without complete evidence
 - **Full-chain or nothing** — The pipeline doesn't stop at "potential command injection." It traces source→sink→primitive→chain→PoC→verification, marking exactly where the chain breaks
 - **Deterministic engine, non-deterministic judgment** — SCOUT produces reproducible artifacts; LLM tribunal and exploit generation happen in the orchestrator layer with full audit trails
+
+---
+
+## What changed recently (quick sync notes)
+
+- `./scout` is now the preferred launcher (shorter than `PYTHONPATH=... python3 -m aiedge ...`).
+- Dynamic validation and exploit auto-generation are now linked through **exploit evidence bundle** flow:
+  - `stages/dynamic_validation/*.json` records validation outcomes
+  - `stages/exploit_autopoc/*` + `exploits/chain_*` receives `verifier_refs`/`verification_refs` when evidence exists
+  - This enables single-screen operator triage of D/E/V confidence.
+- Communication/runtime modeling is now explicit:
+  - `stages/graph/communication_graph.json`
+  - `stages/graph/communication_graph.cypher`
+  - `stages/graph/communication_matrix.json` / `.csv`
+- TUI / viewer now provide dedicated panels for:
+  - threat model (`t`), runtime model (`m`), assets/protocols (`a`)
+  - dynamic + exploit + chain evidence badges (`D`, `E`, `V`, `S`) and reason/truncation hints
+- `AIEDGE_PRIV_RUNNER` accepts relative paths and now resolves in multiple safe locations (including `run_dir` and parent dirs).
 
 ---
 
@@ -425,7 +445,7 @@ cd /path/to/SCOUT
 # optional short launcher (no PYTHONPATH typing)
 ./scout --help
 
-# Full deterministic analysis
+# Full deterministic analysis (no LLM, quick profile run)
 ./scout analyze firmware.bin \
   --ack-authorization --no-llm \
   --case-id my-analysis \
@@ -436,18 +456,40 @@ cd /path/to/SCOUT
   --no-llm \
   --stages inventory
 
-# Auto-generate non-weaponized PoC probes for chain-backed exploit candidates
-./scout stages aiedge-runs/<run_id> \
-  --no-llm \
-  --stages exploit_autopoc
+# Full analysis profile (default) with evidence-aware LLM flows:
+# 1) LLM synthesis (reasoning + attack-chain hypotheses)
+# 2) dynamic validation
+# 3) exploit_autopoc (LLM-first; deterministic fallback)
+./scout analyze firmware.bin \
+  --ack-authorization \
+  --case-id my-analysis \
+  --profile exploit \
+  --exploit-flag lab \
+  --exploit-attestation authorized \
+  --exploit-scope lab-only
 
-# Default (without --no-llm): exploit_autopoc uses LLM codegen first and
-# automatically falls back to deterministic template probes when unavailable.
+# Re-run only evidence generation/execution stages
+./scout stages aiedge-runs/<run_id> \
+  --stages llm_synthesis,dynamic_validation,exploit_autopoc \
+  --time-budget-s 900
+
+export AIEDGE_LLM_CHAIN_TIMEOUT_S=180
+export AIEDGE_LLM_CHAIN_MAX_ATTEMPTS=5
+export AIEDGE_AUTOPOC_LLM_TIMEOUT_S=180
+export AIEDGE_AUTOPOC_LLM_MAX_ATTEMPTS=4
+./scout stages aiedge-runs/<run_id> --stages llm_synthesis,exploit_autopoc
 
 # If dynamic validation is blocked by container sudo policy (e.g. no-new-privileges),
 # set a privileged command prefix once (flagless) and rerun dynamic+autopoc:
 export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
 ./scout stages aiedge-runs/<run_id> --stages dynamic_validation,exploit_autopoc
+
+# Port probing defaults (runtime validation): scan top-k hints first, then range
+export AIEDGE_PORTSCAN_TOP_K=1000
+export AIEDGE_PORTSCAN_START=1
+export AIEDGE_PORTSCAN_END=65535
+export AIEDGE_PORTSCAN_WORKERS=128
+export AIEDGE_PORTSCAN_BUDGET_S=120
 ```
 
 ### With Terminator Orchestration (Full Pipeline)
@@ -505,12 +547,16 @@ python3 bridge/validate_confirmed_policy.py --report-dir reports/<report_id>
 
 # Live-refresh mode (Ctrl+C to exit)
 ./scout tui aiedge-runs/<run_id> --watch --interval-s 2
+./scout tw aiedge-runs/<run_id> -t 2 -n 20   # short alias
 
 # Interactive mode (j/k/arrow navigation, q to quit)
 ./scout tui aiedge-runs/<run_id> --interactive --limit 30
+./scout ti aiedge-runs/<run_id>              # short alias
+./scout to aiedge-runs/<run_id>              # one-shot
 ```
 
-Interactive keys: `j/k` or `↑/↓` move, `g/G` top/bottom, `r` refresh, `q` quit.
+Interactive keys: `j/k` or `↑/↓` move, `g/G` top/bottom, `c` candidate panel,
+`t` threat panel, `m` runtime-model panel, `a` assets/protocol panel, `r` refresh, `q` quit.
 
 ### Neo4j Communication Graph Import (short)
 
