@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 from typing import cast
 
@@ -112,6 +113,23 @@ def test_dynamic_validation_uses_firmae_target_ip_and_sanitized_summary(
             )
 
         if "tcpdump" in cmd:
+            if "-w" in argv:
+                idx = argv.index("-w")
+                if idx + 1 < len(argv):
+                    pcap_path = Path(argv[idx + 1])
+                    pcap_path.parent.mkdir(parents=True, exist_ok=True)
+                    _ = pcap_path.write_bytes(
+                        struct.pack(
+                            "<IHHIIII",
+                            0xA1B2C3D4,
+                            2,
+                            4,
+                            0,
+                            0,
+                            65535,
+                            1,
+                        )
+                    )
             return dv.CommandResult(
                 argv=argv,
                 returncode=0,
@@ -328,3 +346,29 @@ def test_run_subset_dynamic_validation_writes_stage_and_report_section(
     dv_report = cast(dict[str, object], dv_report_any)
     assert dv_report.get("status") in {"ok", "partial"}
     assert dv_report.get("dynamic_scope") in {"full_system", "single_binary"}
+
+
+def test_dynamic_validation_placeholder_pcap_has_valid_header(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _ctx(tmp_path)
+    firmae_root = tmp_path / "FirmAE"
+    firmae_root.mkdir(parents=True, exist_ok=True)
+
+    def fake_which(name: str) -> str | None:
+        if name == "git":
+            return "/usr/bin/git"
+        return None
+
+    monkeypatch.setattr("aiedge.dynamic_validation.shutil.which", fake_which)
+
+    out = DynamicValidationStage(firmae_root=str(firmae_root), max_retries=1).run(ctx)
+    assert out.status == "partial"
+
+    pcap_path = ctx.run_dir / "stages" / "dynamic_validation" / "pcap" / "dynamic_validation.pcap"
+    assert pcap_path.is_file()
+    raw = pcap_path.read_bytes()
+    assert len(raw) >= 24
+    magic = struct.unpack_from("<I", raw, 0)[0]
+    assert magic in (0xA1B2C3D4, 0xD4C3B2A1)

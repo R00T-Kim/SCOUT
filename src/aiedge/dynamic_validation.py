@@ -8,6 +8,7 @@ import shutil
 import socket
 import ssl
 import stat
+import struct
 import subprocess
 from dataclasses import dataclass
 from http.client import HTTPResponse
@@ -34,6 +35,25 @@ _QEMU_ATTEMPT_ARGS: tuple[tuple[str, ...], ...] = (
 _QEMU_MAX_BINARY_CANDIDATES = 12
 _QEMU_MAX_ATTEMPTS = 18
 _QEMU_MAX_SCAN_FILES = 800
+
+
+def _write_minimal_pcap(path: Path, *, linktype: int = 1) -> None:
+    """Write a valid pcap global header with zero packets.
+
+    This keeps downstream network-isolation parsers deterministic even when
+    capture tooling is unavailable.
+    """
+    header = struct.pack(
+        "<IHHIIII",
+        0xA1B2C3D4,  # magic
+        2,  # major
+        4,  # minor
+        0,  # thiszone
+        0,  # sigfigs
+        65535,  # snaplen
+        int(linktype),  # network linktype (1=Ethernet)
+    )
+    _ = path.write_bytes(header)
 
 
 def _iter_sorted_stable(values: Iterable[str]) -> list[str]:
@@ -503,7 +523,7 @@ def _capture_pcap(
     sudo_bin = shutil.which("sudo")
 
     if not tcpdump_bin or not sudo_bin:
-        _ = pcap_path.write_bytes(b"")
+        _write_minimal_pcap(pcap_path, linktype=1)
         limitations.append("pcap_placeholder")
         if not sudo_bin:
             limitations.append("sudo_nopasswd_required")
@@ -530,7 +550,14 @@ def _capture_pcap(
     if res.returncode != 0:
         limitations.append("sudo_nopasswd_required")
     if res.returncode != 0 and not pcap_path.exists():
-        _ = pcap_path.write_bytes(b"")
+        _write_minimal_pcap(pcap_path, linktype=1)
+        limitations.append("pcap_placeholder")
+
+    if (
+        (not pcap_path.exists())
+        or (pcap_path.is_file() and pcap_path.stat().st_size < 24)
+    ):
+        _write_minimal_pcap(pcap_path, linktype=1)
         limitations.append("pcap_placeholder")
 
     status = (

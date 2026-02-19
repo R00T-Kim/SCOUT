@@ -63,6 +63,19 @@ def _pcap_with_ipv4_destinations(destinations: list[str]) -> bytes:
     return global_header + b"".join(packets)
 
 
+def _pcap_header_only() -> bytes:
+    return struct.pack(
+        "<IHHIIII",
+        0xA1B2C3D4,
+        2,
+        4,
+        0,
+        0,
+        65535,
+        1,
+    )
+
+
 def _write_run_dir_fixture(tmp_path: Path, *, destinations: list[str]) -> Path:
     run_dir = tmp_path / "run"
     stage_dir = run_dir / "stages" / "dynamic_validation"
@@ -131,3 +144,14 @@ def test_verify_network_isolation_fails_when_required_artifacts_missing(
     res = _run_verifier(run_dir)
     assert res.returncode != 0
     assert "[FAIL] missing_required_artifact:" in res.stdout
+
+
+def test_verify_network_isolation_accepts_header_only_pcap(tmp_path: Path) -> None:
+    run_dir = _write_run_dir_fixture(tmp_path, destinations=[])
+    _ = (
+        run_dir / "stages" / "dynamic_validation" / "pcap" / "dynamic_validation.pcap"
+    ).write_bytes(_pcap_header_only())
+
+    res = _run_verifier(run_dir)
+    assert res.returncode == 0
+    assert res.stdout.startswith("[OK] network isolation verified:")

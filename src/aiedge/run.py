@@ -3566,6 +3566,7 @@ def analyze_run(
         }
 
     for exploit_stage_name in (
+        "dynamic_validation",
         "exploit_gate",
         "exploit_chain",
         "poc_validation",
