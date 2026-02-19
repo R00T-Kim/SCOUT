@@ -10,8 +10,7 @@ PYTHONPATH=src python3 -m aiedge analyze /path/to/ER-e50.v3.0.1.bin \
   --profile exploit \
   --exploit-flag lab \
   --exploit-attestation authorized \
-  --exploit-scope lab-only \
-  --no-llm
+  --exploit-scope lab-only
 ```
 
 The analyze command prints the generated run_dir path. Use that value as `<run_dir>` in all commands below.
@@ -31,8 +30,7 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 
 ```bash
 PYTHONPATH=src python3 -m aiedge stages <run_dir> \
-  --stages dynamic_validation \
-  --no-llm
+  --stages dynamic_validation
 ```
 
 ### Dynamic validation privileged runner (flagless hardening)
@@ -55,12 +53,14 @@ PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages dynamic_validation,ex
 
 - Default path: LLM codegen (`codex exec`) creates plugin code from candidate context, then runner executes it.
 - Fail-safe path: if LLM CLI is unavailable/invalid, SCOUT falls back to deterministic template plugin and still executes.
+- LLM chain synthesis is re-run after findings generation, so `exploit_candidates.json` and LLM chain hypotheses are reflected in the final report/autopoc input.
+- If chain-backed candidates are missing, SCOUT uses LLM-chain seeds first and then promotes strong non-chain candidates into synthetic chain IDs for best-effort PoC execution.
 - Both paths remain evidence-only (lab-only, authorized gate required) and do not emit weaponized payloads.
 
 Re-run only this step when needed:
 
 ```bash
-PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages exploit_autopoc --no-llm
+PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages exploit_autopoc
 ```
 
 Use manual/private plugin injection only when you want to override with your own exploit logic:

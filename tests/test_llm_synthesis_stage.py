@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from aiedge.llm_synthesis import LLMSynthesisStage
-from aiedge.run import create_run, run_subset
+from aiedge.run import analyze_run, create_run, run_subset
 from aiedge.stage import StageContext
 
 
@@ -28,7 +31,9 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
     )
 
 
-def _seed_sources(run_dir: Path, *, include_uncited_claim: bool = False) -> None:
+def _seed_sources(
+    run_dir: Path, *, include_uncited_claim: bool = False, include_chain_candidates: bool = False
+) -> None:
     valid_ref = run_dir / "stages" / "inventory" / "svc" / "vendor.conf"
     valid_ref.parent.mkdir(parents=True, exist_ok=True)
     _ = valid_ref.write_text("vendor=Acme\n", encoding="utf-8")
@@ -113,6 +118,29 @@ def _seed_sources(run_dir: Path, *, include_uncited_claim: bool = False) -> None
             "functional_spec": [],
         },
     )
+    if include_chain_candidates:
+        _write_json(
+            run_dir / "stages" / "findings" / "exploit_candidates.json",
+            {
+                "status": "ok",
+                "summary": {"candidate_count": 1, "high": 0, "medium": 1, "low": 0},
+                "candidates": [
+                    {
+                        "candidate_id": "candidate:test-chain",
+                        "chain_id": "chain:test",
+                        "priority": "medium",
+                        "score": 0.81,
+                        "families": ["cmd_exec_injection_risk"],
+                        "path": "stages/inventory/svc/vendor.conf",
+                        "summary": "candidate summary",
+                        "attack_hypothesis": "hypothesis",
+                        "expected_impact": ["impact"],
+                        "validation_plan": ["step"],
+                        "evidence_refs": ["stages/inventory/svc/vendor.conf"],
+                    }
+                ],
+            },
+        )
 
 
 def _read_json(path: Path) -> dict[str, object]:
@@ -189,6 +217,165 @@ def test_llm_synthesis_stage_no_llm_emits_deterministic_skip(tmp_path: Path) -> 
     assert payload.get("reason") == "disabled by --no-llm"
 
 
+def test_llm_synthesis_exploit_profile_uses_llm_chain_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_sources(ctx.run_dir, include_chain_candidates=True)
+    _write_json(ctx.run_dir / "manifest.json", {"profile": "exploit"})
+
+    def fake_llm_chain_builder(**kwargs: object) -> dict[str, object]:
+        _ = kwargs
+        return {
+            "status": "ok",
+            "stdout": json.dumps(
+                {
+                    "chains": [
+                        {
+                            "chain_id": "chain-cmd-web",
+                            "hypothesis": "web input reaches command sink in service script",
+                            "preconditions": ["reachable admin endpoint"],
+                            "attack_steps": [
+                                "send crafted parameter",
+                                "observe command execution side effect",
+                            ],
+                            "impact": "remote command execution in service context",
+                            "confidence": 0.81,
+                            "evidence_refs": ["stages/inventory/svc/vendor.conf"],
+                        }
+                    ]
+                },
+                sort_keys=True,
+            ),
+            "stderr": "",
+            "argv": ["codex", "exec"],
+            "attempts": [],
+            "returncode": 0,
+        }
+
+    monkeypatch.setattr(
+        "aiedge.llm_synthesis._run_codex_chain_builder_exec",
+        fake_llm_chain_builder,
+    )
+
+    out = LLMSynthesisStage(no_llm=False).run(ctx)
+    assert out.status == "ok"
+
+    payload = _read_json(
+        ctx.run_dir / "stages" / "llm_synthesis" / "llm_synthesis.json"
+    )
+    summary = cast(dict[str, object], payload["summary"])
+    assert summary.get("llm_chain_attempted") is True
+    assert summary.get("llm_chain_status") == "ok"
+    assert cast(int, summary.get("llm_chain_claims", 0)) >= 1
+
+    claims_any = payload.get("claims")
+    assert isinstance(claims_any, list)
+    claim_types = {
+        cast(str, cast(dict[str, object], c).get("claim_type"))
+        for c in cast(list[object], claims_any)
+        if isinstance(c, dict)
+    }
+    assert any(ct.startswith("llm_chain.") for ct in claim_types)
+
+
+def test_llm_synthesis_exploit_profile_fallback_on_llm_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_sources(ctx.run_dir, include_chain_candidates=True)
+    _write_json(ctx.run_dir / "manifest.json", {"profile": "exploit"})
+
+    def fake_llm_chain_builder(**kwargs: object) -> dict[str, object]:
+        _ = kwargs
+        return {
+            "status": "missing_cli",
+            "stdout": "",
+            "stderr": "codex executable not found",
+            "argv": [],
+            "attempts": [],
+            "returncode": -1,
+        }
+
+    monkeypatch.setattr(
+        "aiedge.llm_synthesis._run_codex_chain_builder_exec",
+        fake_llm_chain_builder,
+    )
+
+    out = LLMSynthesisStage(no_llm=False).run(ctx)
+    assert out.status == "partial"
+    assert any("llm_chain_builder_exec_failed:missing_cli" in x for x in out.limitations)
+
+    payload = _read_json(
+        ctx.run_dir / "stages" / "llm_synthesis" / "llm_synthesis.json"
+    )
+    summary = cast(dict[str, object], payload["summary"])
+    assert summary.get("llm_chain_attempted") is True
+    assert summary.get("llm_chain_status") == "missing_cli"
+    assert summary.get("llm_chain_claims") == 0
+    claims_any = payload.get("claims")
+    assert isinstance(claims_any, list) and claims_any
+    claim_types = {
+        cast(str, cast(dict[str, object], c).get("claim_type"))
+        for c in cast(list[object], claims_any)
+        if isinstance(c, dict)
+    }
+    assert "attribution.vendor" in claim_types
+
+
+def test_llm_synthesis_accepts_nonzero_exec_payload_when_json_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_sources(ctx.run_dir, include_chain_candidates=True)
+    _write_json(ctx.run_dir / "manifest.json", {"profile": "exploit"})
+
+    def fake_llm_chain_builder(**kwargs: object) -> dict[str, object]:
+        _ = kwargs
+        return {
+            "status": "nonzero_exit",
+            "stdout": json.dumps(
+                {
+                    "chains": [
+                        {
+                            "chain_id": "chain-from-nonzero",
+                            "hypothesis": "payload still emitted despite nonzero exit",
+                            "preconditions": ["precondition-1"],
+                            "attack_steps": ["step-1"],
+                            "impact": "impact",
+                            "confidence": 0.74,
+                            "evidence_refs": ["stages/inventory/svc/vendor.conf"],
+                        }
+                    ]
+                },
+                sort_keys=True,
+            ),
+            "stderr": "transient transport error",
+            "argv": ["codex", "exec"],
+            "attempts": [],
+            "returncode": 1,
+        }
+
+    monkeypatch.setattr(
+        "aiedge.llm_synthesis._run_codex_chain_builder_exec",
+        fake_llm_chain_builder,
+    )
+
+    out = LLMSynthesisStage(no_llm=False).run(ctx)
+    assert out.status == "partial"
+    assert any(
+        "llm_chain_builder_exec_nonzero_used_payload:nonzero_exit" in x
+        for x in out.limitations
+    )
+
+    payload = _read_json(
+        ctx.run_dir / "stages" / "llm_synthesis" / "llm_synthesis.json"
+    )
+    summary = cast(dict[str, object], payload["summary"])
+    assert summary.get("llm_chain_status") == "nonzero_exit"
+    assert cast(int, summary.get("llm_chain_claims", 0)) >= 1
+
+
 def test_run_subset_with_llm_synthesis_populates_report(tmp_path: Path) -> None:
     fw = tmp_path / "firmware.bin"
     _ = fw.write_bytes(b"llm-synthesis-subset")
@@ -211,3 +398,77 @@ def test_run_subset_with_llm_synthesis_populates_report(tmp_path: Path) -> None:
     claims_any = section.get("claims")
     assert isinstance(claims_any, list)
     assert claims_any
+
+
+def test_analyze_run_reruns_llm_synthesis_after_findings_for_exploit_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fw = tmp_path / "firmware.bin"
+    _ = fw.write_bytes(b"llm-synthesis-rerun")
+    info = create_run(
+        str(fw),
+        case_id="case-llm-synthesis-rerun",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+    manifest = cast(
+        dict[str, object],
+        json.loads(info.manifest_path.read_text(encoding="utf-8")),
+    )
+    manifest["profile"] = "exploit"
+    _ = info.manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_findings(ctx: StageContext, *, firmware_name: str = "firmware.bin") -> SimpleNamespace:
+        _ = firmware_name
+        _seed_sources(ctx.run_dir, include_chain_candidates=True)
+        return SimpleNamespace(findings=[])
+
+    def fake_apply_llm_exec_step(*, info: object, report: object, no_llm: bool) -> dict[str, object]:
+        _ = info, report, no_llm
+        return {"status": "skipped", "reason": "test_stub"}
+
+    def fake_llm_chain_builder(**kwargs: object) -> dict[str, object]:
+        _ = kwargs
+        return {
+            "status": "ok",
+            "stdout": json.dumps(
+                {
+                    "chains": [
+                        {
+                            "chain_id": "rerun-chain",
+                            "hypothesis": "rerun should consume findings candidates",
+                            "preconditions": ["reachable service"],
+                            "attack_steps": ["probe"],
+                            "impact": "impact",
+                            "confidence": 0.77,
+                            "evidence_refs": ["stages/inventory/svc/vendor.conf"],
+                        }
+                    ]
+                },
+                sort_keys=True,
+            ),
+            "stderr": "",
+            "argv": ["codex", "exec"],
+            "attempts": [],
+            "returncode": 0,
+        }
+
+    monkeypatch.setattr("aiedge.run.run_findings", fake_run_findings)
+    monkeypatch.setattr("aiedge.run._apply_llm_exec_step", fake_apply_llm_exec_step)
+    monkeypatch.setattr(
+        "aiedge.llm_synthesis._run_codex_chain_builder_exec",
+        fake_llm_chain_builder,
+    )
+
+    _ = analyze_run(info, time_budget_s=0, no_llm=False)
+
+    payload = _read_json(
+        info.run_dir / "stages" / "llm_synthesis" / "llm_synthesis.json"
+    )
+    summary = cast(dict[str, object], payload["summary"])
+    assert summary.get("llm_chain_attempted") is True
+    assert summary.get("llm_chain_status") == "ok"
+    assert cast(int, summary.get("llm_chain_claims", 0)) >= 1

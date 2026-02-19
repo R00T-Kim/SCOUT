@@ -1839,6 +1839,29 @@ def _apply_stage_result_to_report(
         }
 
 
+def _rerun_llm_synthesis_after_findings(
+    *,
+    ctx: StageContext,
+    report: dict[str, JsonValue],
+    budget_s: int,
+    no_llm: bool,
+) -> list[str]:
+    llm_stage: Stage = LLMSynthesisStage(no_llm=no_llm)
+    try:
+        llm_rep = run_stages([llm_stage], ctx)
+        _write_stage_manifests(ctx=ctx, stages=[llm_stage], report=llm_rep)
+    except Exception as exc:
+        return [
+            "llm_synthesis post-findings rerun failed: "
+            + f"{type(exc).__name__}: {exc}"
+        ]
+
+    for stage_result in llm_rep.stage_results:
+        _apply_stage_result_to_report(report, stage_result, budget_s=budget_s)
+
+    return sorted(set(llm_rep.limitations))
+
+
 def _resolve_subset_stages(
     info: RunInfo,
     stage_names: list[str],
@@ -2781,6 +2804,21 @@ def analyze_run(
         report["findings"] = cast(
             list[JsonValue], cast(list[object], deduped_findings_early)
         )
+        llm_synthesis_limits_early = _rerun_llm_synthesis_after_findings(
+            ctx=ctx,
+            report=report,
+            budget_s=budget_s,
+            no_llm=no_llm,
+        )
+        if llm_synthesis_limits_early:
+            existing_limits_post_llm_early = normalize_limitations_list(
+                report.get("limitations")
+            )
+            report["limitations"] = cast(
+                list[JsonValue],
+                list(existing_limits_post_llm_early)
+                + list(llm_synthesis_limits_early),
+            )
         report["llm"] = _apply_llm_exec_step(info=info, report=report, no_llm=no_llm)
         _set_report_completion(
             report,
@@ -3612,6 +3650,18 @@ def analyze_run(
         force_retriage=force_retriage,
     )
     report["findings"] = cast(list[JsonValue], cast(list[object], deduped_findings))
+    llm_synthesis_limits = _rerun_llm_synthesis_after_findings(
+        ctx=ctx,
+        report=report,
+        budget_s=budget_s,
+        no_llm=no_llm,
+    )
+    if llm_synthesis_limits:
+        existing_limits_after_llm = normalize_limitations_list(report.get("limitations"))
+        report["limitations"] = cast(
+            list[JsonValue],
+            list(existing_limits_after_llm) + list(llm_synthesis_limits),
+        )
 
     if manifest_profile == "exploit":
         try:
