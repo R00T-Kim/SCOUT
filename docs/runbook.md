@@ -36,12 +36,15 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 You can tune first-pass port probing with:
 
 ```bash
-export AIEDGE_PORTSCAN_TOP_K=1000    # first N priority/hinted ports before full range
+export AIEDGE_PORTSCAN_TOP_K=1000    # first N priority/hinted ports per host
 export AIEDGE_PORTSCAN_START=1
 export AIEDGE_PORTSCAN_END=65535
 export AIEDGE_PORTSCAN_WORKERS=256
 export AIEDGE_PORTSCAN_BUDGET_S=120
-# optionally: export AIEDGE_PORTSCAN_TOP_K=0   # disable hint-first top-k pass
+export AIEDGE_PORTSCAN_FULL_RANGE=0  # 1: enable full range; 0(default): top-k pass only
+
+# If you need complete coverage (slower but deterministic), enable full-range mode:
+# export AIEDGE_PORTSCAN_FULL_RANGE=1
 ```
 
 If Codex responses are slow/intermittent, increase LLM timeouts/retries for stage runs:

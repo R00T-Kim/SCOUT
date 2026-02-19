@@ -580,12 +580,15 @@ def _collect_static_port_hints(*, run_dir: Path) -> tuple[list[int], list[str]]:
     return ordered_hints, ordered_sources
 
 
-def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int, int, int]:
+def _derive_portscan_config(
+    *, timeout_s: float
+) -> tuple[float, int, float, int, int, int, bool]:
     connect_timeout = min(0.35, max(0.08, float(timeout_s) / 12.0))
     workers_default = 384
     budget_default_s = 90.0
     range_start_default = 1
     range_end_default = 65535
+    full_range_default = False
 
     workers_env = os.environ.get("AIEDGE_PORTSCAN_WORKERS", "").strip()
     budget_env = os.environ.get("AIEDGE_PORTSCAN_BUDGET_S", "").strip()
@@ -593,6 +596,7 @@ def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int
     range_end_env = os.environ.get("AIEDGE_PORTSCAN_END", "").strip()
     timeout_env = os.environ.get("AIEDGE_PORTSCAN_CONNECT_TIMEOUT_S", "").strip()
     top_k_env = os.environ.get("AIEDGE_PORTSCAN_TOP_K", "").strip()
+    full_range_env = os.environ.get("AIEDGE_PORTSCAN_FULL_RANGE", "").strip().lower()
 
     workers = workers_default
     if workers_env.isdigit():
@@ -618,6 +622,12 @@ def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int
         except Exception:
             top_k = 1000
 
+    full_range = full_range_default
+    if full_range_env in {"1", "true", "yes", "on", "enabled"}:
+        full_range = True
+    elif full_range_env in {"0", "false", "no", "off", "disabled"}:
+        full_range = False
+
     range_start = range_start_default
     range_end = range_end_default
     if range_start_env.isdigit():
@@ -627,7 +637,15 @@ def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int
     if range_start > range_end:
         range_start, range_end = range_end, range_start
 
-    return connect_timeout, workers, budget_s, range_start, range_end, int(top_k)
+    return (
+        connect_timeout,
+        workers,
+        budget_s,
+        range_start,
+        range_end,
+        int(top_k),
+        bool(full_range),
+    )
 
 
 def _iter_port_scan_plan(
@@ -636,8 +654,10 @@ def _iter_port_scan_plan(
     top_k_ports: int,
     range_start: int,
     range_end: int,
+    full_range: bool,
 ) -> Iterable[int]:
     seen: set[int] = set()
+    extra_count = 0
     for port in prioritized:
         if not (range_start <= int(port) <= range_end):
             continue
@@ -652,10 +672,14 @@ def _iter_port_scan_plan(
         for port in range(range_start, range_end + 1):
             if port in seen:
                 continue
-            if len(seen) - len(prioritized) >= top_limit:
+            if extra_count >= top_limit:
                 break
             seen.add(port)
+            extra_count += 1
             yield port
+
+    if not full_range:
+        return
 
     for port in range(range_start, range_end + 1):
         if port in seen:
@@ -721,7 +745,7 @@ def _probe_target_ports(
         }, limitations
 
     hint_ports, hint_sources = _collect_static_port_hints(run_dir=run_dir)
-    connect_timeout_s, workers, budget_s, range_start, range_end, top_k_ports = (
+    connect_timeout_s, workers, budget_s, range_start, range_end, top_k_ports, full_range = (
         _derive_portscan_config(
         timeout_s=timeout_s
     )
@@ -731,6 +755,7 @@ def _probe_target_ports(
         top_k_ports=top_k_ports,
         range_start=range_start,
         range_end=range_end,
+        full_range=full_range,
     )
 
     scan_started = time.monotonic()
@@ -818,6 +843,9 @@ def _probe_target_ports(
     if budget_hit and not plan_exhausted:
         limitations.append("port_scan_budget_exceeded")
 
+    if not full_range and not plan_exhausted:
+        limitations.append("port_scan_limited_by_top_k")
+
     serialized_ports = open_rows + sample_rows[:32]
     open_unique = sorted({int(p) for p in open_ports if int(p) > 0})
     status = "ok" if (not limitations and plan_exhausted) else "partial"
@@ -825,9 +853,10 @@ def _probe_target_ports(
     payload: dict[str, JsonValue] = {
         "status": status,
         "target_ip": target_ip,
-        "scan_strategy": "adaptive_full_range_tcp",
+        "scan_strategy": "adaptive_top_k_tcp" if not full_range else "adaptive_full_range_tcp",
         "scan_range": cast(list[JsonValue], cast(list[object], [int(range_start), int(range_end)])),
         "scan_top_k": int(top_k_ports),
+        "scan_full_range": bool(full_range),
         "scan_connect_timeout_s": float(connect_timeout_s),
         "scan_budget_s": float(budget_s),
         "scan_workers": int(workers),
@@ -850,7 +879,9 @@ def _probe_target_ports(
             },
         ),
     }
-    if budget_hit and not plan_exhausted:
+    if not full_range and not plan_exhausted:
+        payload["reason"] = "scan_top_k_limited_by_configuration"
+    elif budget_hit and not plan_exhausted:
         payload["reason"] = "scan_budget_reached_before_full_range_complete"
     return payload, limitations
 

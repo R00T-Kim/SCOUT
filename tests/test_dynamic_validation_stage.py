@@ -198,6 +198,56 @@ def test_dynamic_validation_uses_firmae_target_ip_and_sanitized_summary(
     assert "192.0.2.10" in summary_text
 
 
+def test_port_scan_plan_respects_top_k_without_full_range() -> None:
+    ports = list(
+        dv._iter_port_scan_plan(
+            prioritized=[4, 443],
+            top_k_ports=5,
+            range_start=1,
+            range_end=20,
+            full_range=False,
+        )
+    )
+
+    assert ports[0] == 4
+    assert len(ports) == 6
+    assert ports == [4, 1, 2, 3, 5, 6]
+    assert 7 not in ports
+
+
+def test_port_scan_plan_scans_full_range_when_full_range_enabled() -> None:
+    ports = list(
+        dv._iter_port_scan_plan(
+            prioritized=[22],
+            top_k_ports=2,
+            range_start=1,
+            range_end=5,
+            full_range=True,
+        )
+    )
+
+    assert ports == [1, 2, 3, 4, 5]
+
+
+def test_derive_portscan_config_supports_top_k_only_toggle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AIEDGE_PORTSCAN_FULL_RANGE", raising=False)
+    connect_timeout_s, workers, budget_s, start, end, top_k, full_range = dv._derive_portscan_config(
+        timeout_s=2.4,
+    )
+    assert workers > 0
+    assert budget_s > 0.0
+    assert start == 1
+    assert end == 65535
+    assert top_k == 1000
+    assert full_range is False
+
+    monkeypatch.setenv("AIEDGE_PORTSCAN_FULL_RANGE", "1")
+    _, _, _, _, _, _, full_range_true = dv._derive_portscan_config(timeout_s=2.4)
+    assert full_range_true is True
+
+
 def test_dynamic_validation_marks_sudo_nopasswd_required(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

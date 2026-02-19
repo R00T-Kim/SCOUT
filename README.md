@@ -484,12 +484,14 @@ export AIEDGE_AUTOPOC_LLM_MAX_ATTEMPTS=4
 export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
 ./scout stages aiedge-runs/<run_id> --stages dynamic_validation,exploit_autopoc
 
-# Port probing defaults (runtime validation): scan top-k hints first, then range
+# Port probing defaults (runtime validation): scan priority + top-k first, then stop by default
+# Set AIEDGE_PORTSCAN_FULL_RANGE=1 to continue full-range scan when you need complete coverage.
 export AIEDGE_PORTSCAN_TOP_K=1000
 export AIEDGE_PORTSCAN_START=1
 export AIEDGE_PORTSCAN_END=65535
 export AIEDGE_PORTSCAN_WORKERS=128
 export AIEDGE_PORTSCAN_BUDGET_S=120
+export AIEDGE_PORTSCAN_FULL_RANGE=0
 ```
 
 ### With Terminator Orchestration (Full Pipeline)

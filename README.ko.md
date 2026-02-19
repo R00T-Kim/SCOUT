@@ -104,11 +104,15 @@ export AIEDGE_LLM_CHAIN_MAX_ATTEMPTS=5
 export AIEDGE_AUTOPOC_LLM_TIMEOUT_S=180
 export AIEDGE_AUTOPOC_LLM_MAX_ATTEMPTS=4
 
-export AIEDGE_PORTSCAN_TOP_K=1000    # 힌트 포트 우선 스캔 개수
+export AIEDGE_PORTSCAN_TOP_K=1000    # 힌트/우선 포트 + top-k 스캔 개수
 export AIEDGE_PORTSCAN_START=1
 export AIEDGE_PORTSCAN_END=65535
 export AIEDGE_PORTSCAN_WORKERS=128
 export AIEDGE_PORTSCAN_BUDGET_S=120
+export AIEDGE_PORTSCAN_FULL_RANGE=0  # 1: 전체 포트 범위 스캔, 0(기본): top-k 중심 우선 스캔
+
+# 전체 범위 스캔이 필요한 경우:
+# export AIEDGE_PORTSCAN_FULL_RANGE=1
 ```
 
 ### no-new-privileges 환경에서 동적 단계 실행
