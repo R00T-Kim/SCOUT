@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import json
 import re
 import shutil
 import socket
 import ssl
+import stat
 import subprocess
 from dataclasses import dataclass
 from http.client import HTTPResponse
@@ -20,6 +23,21 @@ from .stage import StageContext, StageOutcome
 _ABS_PATH_TOKEN_RE = re.compile(r"(?P<path>/[^\s\"'`]+)")
 _IID_RE = re.compile(r"\[IID\]\s*([0-9]+)")
 _ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+_QEMU_ATTEMPT_ARGS: tuple[tuple[str, ...], ...] = (
+    ("--help",),
+    ("-h",),
+    ("-V",),
+    ("--version",),
+    ("help",),
+    ("-v",),
+)
+_QEMU_MAX_BINARY_CANDIDATES = 12
+_QEMU_MAX_ATTEMPTS = 18
+_QEMU_MAX_SCAN_FILES = 800
+
+
+def _iter_sorted_stable(values: Iterable[str]) -> list[str]:
+    return sorted(set(values), key=lambda item: item.lower())
 
 
 def _assert_under_dir(base_dir: Path, target: Path) -> None:
@@ -74,6 +92,26 @@ def _sanitize_argv_for_output(argv: list[str], *, run_dir: Path) -> list[str]:
         else:
             out.append(token)
     return out
+
+
+def _looks_like_qemu_success_output(stdout: str, stderr: str, code: int) -> bool:
+    if code == 0:
+        return True
+
+    text = (stdout or "").lower() + "\n" + (stderr or "").lower()
+    if "command not found" in text or "no such file" in text:
+        return False
+    if "invalid option" in text or "unknown option" in text:
+        return False
+    if "not enough arguments" in text:
+        return False
+    return (
+        "usage:" in text
+        or "options:" in text
+        or "help:" in text
+        or "help options" in text
+        or "qemu" in text
+    )
 
 
 def _write_json(path: Path, payload: dict[str, JsonValue]) -> None:
@@ -507,21 +545,156 @@ def _capture_pcap(
     return sorted(set(limitations)), details
 
 
+def _is_executable_file(path: Path) -> bool:
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) and (mode & stat.S_IXUSR != 0)
+
+
+def _looks_like_binary_file(path: Path) -> bool:
+    if _is_executable_file(path):
+        return True
+    return path.suffix.lower() in {".bin", ".elf", ".out", ".exe", ".so", ".a", ".o"}
+
+
 def _scan_roots_for_binary(
-    roots: list[Path], max_candidates: int = 2000
-) -> Path | None:
-    wanted_names = {"busybox", "sh", "lighttpd", "httpd", "boa", "cgi-bin"}
+    roots: list[Path],
+    max_candidates: int = _QEMU_MAX_BINARY_CANDIDATES,
+    max_scan_files: int = _QEMU_MAX_SCAN_FILES,
+) -> list[Path]:
+    max_binary_candidates = max(1, int(max_candidates))
+    wanted_names = {
+        "busybox",
+        "sh",
+        "bash",
+        "ash",
+        "dash",
+        "dropbear",
+        "sshd",
+        "lighttpd",
+        "httpd",
+        "boa",
+        "nginx",
+        "dnsmasq",
+        "curl",
+        "wget",
+        "curl",
+        "uci",
+        "ubnt",  # ubnt-specific helper naming
+        "cgi-bin",
+    }
+    priority_suffixes = {".cgi"}
+    executable_names = {
+        "dropbear",
+        "sshd",
+        "lighttpd",
+        "httpd",
+        "boa",
+        "nginx",
+        "dnsmasq",
+        "busybox",
+        "curl",
+        "wget",
+        "nc",
+        "ncat",
+        "tmux",
+        "iptables",
+        "ip",
+        "ip6tables",
+    }
+
+    ranked: list[tuple[int, Path]] = []
+    fallback_paths: list[tuple[int, Path]] = []
+    seen: set[str] = set()
     inspected = 0
+
     for root in roots:
+        if not root.is_dir():
+            continue
         for path in sorted(root.rglob("*")):
+            if inspected >= max_scan_files:
+                break
             if not path.is_file():
                 continue
             inspected += 1
-            if inspected > max_candidates:
-                return None
-            if path.name in wanted_names or path.name.endswith(".cgi"):
-                return path
-    return None
+
+            try:
+                rel = str(path.resolve().relative_to(root.resolve()))
+            except Exception:
+                rel = path.name
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+
+            if not _looks_like_binary_file(path):
+                continue
+
+            name = path.name
+            name_low = name.lower()
+            score = 0
+            if name_low in wanted_names:
+                score += 260
+            if any(name_low.endswith(suffix) for suffix in priority_suffixes):
+                score += 220
+            if any(segment in rel.lower() for segment in ("/sbin/", "/bin/", "/usr/sbin/", "/usr/bin/")):
+                score += 90
+            if name_low in executable_names:
+                score += 110
+            if name_low.startswith(("ubnt-", "vyatta-", "wireguard")):
+                score += 100
+            if name_low.startswith(("dhcp", "http", "ssh", "dropbear", "nginx", "lighttpd")):
+                score += 80
+            if path.suffix.lower() == ".cgi":
+                score += 70
+
+            target = path.resolve()
+            if score > 0:
+                ranked.append((score, target))
+            else:
+                fallback_paths.append((10, target))
+
+    ranked.sort(key=lambda item: (item[0], str(item[1])), reverse=True)
+    final_candidates: list[Path] = []
+    for _, candidate in ranked:
+        if len(final_candidates) >= _QEMU_MAX_BINARY_CANDIDATES:
+            break
+        if candidate in final_candidates:
+            continue
+        final_candidates.append(candidate)
+
+    if len(final_candidates) < _QEMU_MAX_BINARY_CANDIDATES and fallback_paths:
+        fallback_paths.sort(key=lambda item: (item[0], str(item[1])), reverse=True)
+        for _, fallback in fallback_paths:
+            if len(final_candidates) >= _QEMU_MAX_BINARY_CANDIDATES:
+                break
+            if fallback in final_candidates:
+                continue
+            final_candidates.append(fallback)
+
+    return final_candidates
+
+
+def _qemu_dynamic_scope(candidate_count: int) -> str:
+    if candidate_count <= 1:
+        return "single_binary"
+    return "single_binary_multi_binary"
+
+
+def _safe_rel_path(path: Path, *, base: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(base.resolve()))
+    except Exception:
+        return path.as_posix()
+
+
+def _extract_binary_stem(path: Path) -> str:
+    stem = path.name
+    if not stem:
+        return "<unknown>"
+    return stem
 
 
 def _resolve_run_relative_dir(run_dir: Path, rel_path: str) -> Path | None:
@@ -614,22 +787,27 @@ def _run_qemu_user_fallback(
     limitations: list[str] = []
     arch = _read_profile_arch(run_dir)
     qemu_bin = _qemu_binary_for_arch(arch)
-    selected = _scan_roots_for_binary(roots)
+    candidates = _scan_roots_for_binary(roots)
+
+    attempt_limit = max(1, int(_QEMU_MAX_ATTEMPTS))
 
     log_path = fallback_dir / "qemu_user.log"
     proof_path = fallback_dir / "proof.json"
     argv_path = fallback_dir / "argv.json"
 
-    run_result: dict[str, JsonValue]
-    if not qemu_bin or not selected:
-        msg = "fallback unavailable: qemu binary or target binary missing"
-        _ = log_path.write_text(msg + "\n", encoding="utf-8")
+    attempt_records: list[dict[str, JsonValue]] = []
+    dynamic_scope = _qemu_dynamic_scope(len(candidates))
+    if not qemu_bin:
+        missing_reason = "qemu user-static binary missing for firmware architecture"
+        _ = log_path.write_text(f"{missing_reason}\n", encoding="utf-8")
         _write_json(
             proof_path,
             {
                 "status": "partial",
-                "reason": msg,
-                "dynamic_scope": "single_binary",
+                "reason": missing_reason,
+                "dynamic_scope": dynamic_scope,
+                "candidate_count": int(len(candidates)),
+                "attempts": cast(list[JsonValue], cast(list[object], [])),
             },
         )
         _write_json(
@@ -640,65 +818,194 @@ def _run_qemu_user_fallback(
             },
         )
         limitations.append("qemu_user_fallback_unavailable")
-        run_result = {
-            "status": "partial",
-            "reason": msg,
-            "argv": cast(list[JsonValue], cast(list[object], [])),
-        }
-    else:
-        argv = [qemu_bin, str(selected), "--help"]
-        res = _run_command(argv, timeout_s=timeout_s)
-        safe_argv = _sanitize_argv_for_output(argv, run_dir=run_dir)
-        _ = log_path.write_text(
-            "\n".join(
-                [
-                    "command: " + " ".join(safe_argv),
-                    f"returncode: {res.returncode}",
-                    "--- stdout ---",
-                    _sanitize_string_paths(res.stdout, run_dir=run_dir),
-                    "--- stderr ---",
-                    _sanitize_string_paths(res.stderr, run_dir=run_dir),
-                    f"error: {_sanitize_string_paths(res.error or '', run_dir=run_dir)}",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
+        return {
+            "dynamic_scope": dynamic_scope,
+            "log": _rel_to_run_dir(run_dir, log_path),
+            "proof": _rel_to_run_dir(run_dir, proof_path),
+            "argv": _rel_to_run_dir(run_dir, argv_path),
+            "result": {
+                "status": "partial",
+                "reason": missing_reason,
+                "argv": cast(list[JsonValue], cast(list[object], [])),
+            },
+        }, limitations
+
+    if not candidates:
+        missing_reason = "fallback target binary candidates unavailable"
+        _ = log_path.write_text(f"{missing_reason}\n", encoding="utf-8")
         _write_json(
             proof_path,
             {
-                "status": "ok" if res.returncode == 0 else "partial",
-                "dynamic_scope": "single_binary",
-                "returncode": int(res.returncode),
-                "timed_out": bool(res.timed_out),
-                "stdout_sample": _sanitize_string_paths(
-                    (res.stdout or "")[:512], run_dir=run_dir
-                ),
-                "stderr_sample": _sanitize_string_paths(
-                    (res.stderr or "")[:512], run_dir=run_dir
-                ),
-                "error": _sanitize_string_paths(res.error or "", run_dir=run_dir),
+                "status": "partial",
+                "reason": missing_reason,
+                "dynamic_scope": dynamic_scope,
+                "candidate_count": 0,
+                "attempts": cast(list[JsonValue], cast(list[object], [])),
             },
         )
         _write_json(
             argv_path,
             {
-                "argv": cast(list[JsonValue], cast(list[object], safe_argv)),
-                "input_mode": "argv_help",
+                "argv": cast(list[JsonValue], cast(list[object], [])),
+                "input_mode": "none",
             },
         )
-        if res.returncode != 0:
-            limitations.append("qemu_user_fallback_failed")
-        run_result = {
-            "status": "ok" if res.returncode == 0 else "partial",
-            "argv": cast(list[JsonValue], cast(list[object], safe_argv)),
-            "returncode": int(res.returncode),
-            "timed_out": bool(res.timed_out),
-            "error": _sanitize_string_paths(res.error or "", run_dir=run_dir),
+        limitations.append("qemu_user_fallback_unavailable")
+        return {
+            "dynamic_scope": dynamic_scope,
+            "log": _rel_to_run_dir(run_dir, log_path),
+            "proof": _rel_to_run_dir(run_dir, proof_path),
+            "argv": _rel_to_run_dir(run_dir, argv_path),
+            "result": {
+                "status": "partial",
+                "reason": missing_reason,
+                "argv": cast(list[JsonValue], cast(list[object], [])),
+            },
+        }, limitations
+
+    best_attempt: dict[str, JsonValue] | None = None
+    fallback_succeeded = False
+
+    for candidate_index, selected in enumerate(candidates, start=1):
+        if len(attempt_records) >= attempt_limit:
+            break
+        candidate_rel = _safe_rel_path(selected, base=run_dir)
+        for attempt_args in _QEMU_ATTEMPT_ARGS:
+            if len(attempt_records) >= attempt_limit:
+                break
+            argv = [qemu_bin, str(selected)] + list(attempt_args)
+            res = _run_command(argv, timeout_s=timeout_s)
+            safe_argv = _sanitize_argv_for_output(argv, run_dir=run_dir)
+            attempt_record: dict[str, JsonValue] = {
+                "index": len(attempt_records) + 1,
+                "candidate": candidate_index,
+                "candidate_path": candidate_rel,
+                "argv": cast(list[JsonValue], cast(list[object], safe_argv)),
+                "attempt_args": cast(list[JsonValue], cast(list[object], list(attempt_args))),
+                "returncode": int(res.returncode),
+                "timed_out": bool(res.timed_out),
+                "success": _looks_like_qemu_success_output(
+                    res.stdout, res.stderr, int(res.returncode)
+                ),
+                "stdout_sample": _sanitize_string_paths(
+                    (res.stdout or "")[:380], run_dir=run_dir
+                ),
+                "stderr_sample": _sanitize_string_paths(
+                    (res.stderr or "")[:380], run_dir=run_dir
+                ),
+                "error": _sanitize_string_paths(res.error or "", run_dir=run_dir),
+            }
+            attempt_records.append(attempt_record)
+
+            if bool(attempt_record["success"]):
+                fallback_succeeded = True
+                best_attempt = attempt_record
+                break
+
+            if not res.timed_out and int(res.returncode) in {126, 127}:
+                limitations.append("qemu_user_fallback_binary_exec_failed")
+
+        if fallback_succeeded:
+            break
+
+    proof_status = "ok" if fallback_succeeded else "partial"
+    if best_attempt is None and attempt_records:
+        best_attempt = cast(dict[str, JsonValue], attempt_records[0])
+
+    log_lines: list[str] = ["qemu_user_fallback attempts:"]
+    for entry in attempt_records:
+        entry_argv = cast(
+            list[object],
+            entry.get("argv", cast(list[JsonValue], cast(list[object], []))),
+        )
+        entry_attempt_args = cast(
+            list[object],
+            entry.get("attempt_args", cast(list[JsonValue], cast(list[object], []))),
+        )
+        log_lines.extend(
+            [
+                f"[#{entry.get('index', '')}] candidate={entry.get('candidate', '')} "
+                f"args={entry_attempt_args} rc={entry.get('returncode', 'unknown')} "
+                f"success={entry.get('success', False)}",
+                "  command: "
+                + " ".join(cast(list[str], entry_argv))
+                if isinstance(entry_argv, list)
+                else "  command: <missing>",
+                "  stdout: " + cast(str, entry.get("stdout_sample", "")),
+                "  stderr: " + cast(str, entry.get("stderr_sample", "")),
+                "",
+            ]
+        )
+    _ = log_path.write_text("\n".join(log_lines), encoding="utf-8")
+
+    _write_json(
+        proof_path,
+        {
+            "status": proof_status,
+            "reason": "qemu_user_fallback_attempted" if fallback_succeeded else "qemu_user_fallback_failed",
+            "dynamic_scope": dynamic_scope,
+            "candidate_count": int(len(candidates)),
+            "attempts": cast(list[JsonValue], cast(list[object], attempt_records)),
+            "best_attempt": cast(
+                dict[str, JsonValue],
+                best_attempt if isinstance(best_attempt, dict) else {},
+            ),
+        },
+    )
+    if isinstance(best_attempt, dict):
+        best_argv = cast(
+            list[object],
+            best_attempt.get("argv", cast(list[JsonValue], cast(list[object], []))),
+        )
+        argv_path_payload = {
+            "argv": cast(
+                list[JsonValue],
+                best_argv if isinstance(best_argv, list) else cast(list[object], []),
+            )
         }
+        argv_input_mode = "argv_probe"
+    else:
+        argv_path_payload = {"argv": cast(list[JsonValue], cast(list[object], []))}
+        argv_input_mode = "none"
+    _write_json(
+        argv_path,
+        {
+            **argv_path_payload,
+            "input_mode": argv_input_mode,
+        },
+    )
+    if not fallback_succeeded:
+        limitations.append("qemu_user_fallback_failed")
+
+    best_attempt_argv = cast(
+        list[object],
+        best_attempt.get("argv", cast(list[JsonValue], cast(list[object], [])))
+        if isinstance(best_attempt, dict)
+        else cast(list[JsonValue], cast(list[object], [])),
+    )
+    run_result = {
+        "status": proof_status,
+        "argv": cast(
+            list[JsonValue],
+            cast(
+                list[object],
+                best_attempt_argv if isinstance(best_attempt_argv, list) else [],
+            ),
+        ),
+        "returncode": int(best_attempt.get("returncode", -1))
+        if isinstance(best_attempt, dict)
+        else -1,
+        "timed_out": bool(best_attempt.get("timed_out", False))
+        if isinstance(best_attempt, dict)
+        else False,
+        "error": _sanitize_string_paths(
+            str(best_attempt.get("error", "")) if isinstance(best_attempt, dict) else "",
+            run_dir=run_dir,
+        ),
+    }
 
     return {
-        "dynamic_scope": "single_binary",
+        "dynamic_scope": dynamic_scope,
         "log": _rel_to_run_dir(run_dir, log_path),
         "proof": _rel_to_run_dir(run_dir, proof_path),
         "argv": _rel_to_run_dir(run_dir, argv_path),
@@ -968,7 +1275,12 @@ class DynamicValidationStage:
                 timeout_s=float(self.capture_timeout_s),
             )
             limitations.extend(fallback_limits)
-            dynamic_scope = "single_binary"
+            dynamic_scope = cast(
+                str,
+                fallback_payload.get("dynamic_scope", "single_binary"),
+            )
+            if not dynamic_scope:
+                dynamic_scope = "single_binary"
             evidence.append(
                 {
                     "path": cast(str, fallback_payload.get("log", "")),

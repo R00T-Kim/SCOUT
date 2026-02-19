@@ -103,6 +103,10 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     communication_nodes_csv = graph_dir / "communication_graph.nodes.csv"
     communication_edges_csv = graph_dir / "communication_graph.edges.csv"
     communication_cypher = graph_dir / "communication_graph.cypher"
+    communication_schema_cypher = graph_dir / "communication_graph.schema.cypher"
+    communication_queries_cypher = graph_dir / "communication_graph.queries.cypher"
+    communication_matrix_json = graph_dir / "communication_matrix.json"
+    communication_matrix_csv = graph_dir / "communication_matrix.csv"
     assert graph_json.is_file()
     assert graph_dot.is_file()
     assert graph_mmd.is_file()
@@ -111,6 +115,10 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     assert communication_nodes_csv.is_file()
     assert communication_edges_csv.is_file()
     assert communication_cypher.is_file()
+    assert communication_schema_cypher.is_file()
+    assert communication_queries_cypher.is_file()
+    assert communication_matrix_json.is_file()
+    assert communication_matrix_csv.is_file()
 
     text_json_1 = graph_json.read_text(encoding="utf-8")
     text_dot_1 = graph_dot.read_text(encoding="utf-8")
@@ -120,6 +128,10 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     nodes_csv_text_1 = communication_nodes_csv.read_text(encoding="utf-8")
     edges_csv_text_1 = communication_edges_csv.read_text(encoding="utf-8")
     cypher_text_1 = communication_cypher.read_text(encoding="utf-8")
+    schema_cypher_text_1 = communication_schema_cypher.read_text(encoding="utf-8")
+    queries_cypher_text_1 = communication_queries_cypher.read_text(encoding="utf-8")
+    matrix_json_text_1 = communication_matrix_json.read_text(encoding="utf-8")
+    matrix_csv_text_1 = communication_matrix_csv.read_text(encoding="utf-8")
 
     out2 = stage.run(ctx)
     assert out2.status == "ok"
@@ -131,10 +143,15 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     assert nodes_csv_text_1 == communication_nodes_csv.read_text(encoding="utf-8")
     assert edges_csv_text_1 == communication_edges_csv.read_text(encoding="utf-8")
     assert cypher_text_1 == communication_cypher.read_text(encoding="utf-8")
+    assert schema_cypher_text_1 == communication_schema_cypher.read_text(encoding="utf-8")
+    assert queries_cypher_text_1 == communication_queries_cypher.read_text(encoding="utf-8")
+    assert matrix_json_text_1 == communication_matrix_json.read_text(encoding="utf-8")
+    assert matrix_csv_text_1 == communication_matrix_csv.read_text(encoding="utf-8")
 
     payload = _read_json_obj(graph_json)
     reference_payload = _read_json_obj(reference_graph_json)
     communication_payload = _read_json_obj(communication_graph_json)
+    communication_matrix_payload = _read_json_obj(communication_matrix_json)
     assert payload.get("status") == "ok"
     assert payload == reference_payload
     nodes_any = payload.get("nodes")
@@ -206,11 +223,32 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     assert comm_summary.get("observation") == "runtime_communication"
     assert comm_summary.get("nodes") == 0
     assert comm_summary.get("edges") == 0
+    assert comm_summary.get("neo4j_schema_version") == "neo4j-comm-v2"
+    assert isinstance(communication_matrix_payload.get("status"), str)
+    assert isinstance(communication_matrix_payload.get("rows"), list)
+    matrix_summary_any = communication_matrix_payload.get("summary")
+    assert isinstance(matrix_summary_any, dict)
+    matrix_summary = cast(dict[str, object], matrix_summary_any)
+    assert matrix_summary.get("classification") == "candidate"
+    assert matrix_summary.get("rows_dynamic") == 0
+    assert matrix_summary.get("rows_exploit") == 0
+    assert matrix_summary.get("rows_dynamic_exploit") == 0
+    comm_matrix_summary_any = comm_summary.get("matrix")
+    assert isinstance(comm_matrix_summary_any, dict)
+    comm_matrix_summary = cast(dict[str, object], comm_matrix_summary_any)
+    assert comm_matrix_summary.get("path_json") == "stages/graph/communication_matrix.json"
+    assert comm_matrix_summary.get("path_csv") == "stages/graph/communication_matrix.csv"
     assert nodes_csv_text_1.startswith("id,type,label,evidence_refs\n")
     assert edges_csv_text_1.startswith(
-        "src,dst,edge_type,confidence,confidence_calibrated,evidence_level,observation,evidence_refs\n"
+        "src,dst,edge_type,confidence,confidence_calibrated,evidence_level,observation,evidence_badge,evidence_signals,dynamic_evidence_count,exploit_evidence_count,verified_chain_evidence_count,static_evidence_count,dynamic_exploit_chain,evidence_refs\n"
+    )
+    assert matrix_csv_text_1.startswith(
+        "component_id,component_label,host,service_host,service_port,protocol,confidence,evidence_level,observation,evidence_badge,evidence_signals,dynamic_evidence_count,exploit_evidence_count,verified_chain_evidence_count,static_evidence_count,dynamic_exploit_chain,evidence_refs\n"
     )
     assert "communication" in cypher_text_1.lower()
+    assert "neo4j-comm-v2" in schema_cypher_text_1
+    assert "Query 0: one-click priority view" in queries_cypher_text_1
+    assert "Query 1: dynamic+exploit evidence backed service paths" in queries_cypher_text_1
 
     assert text_dot_1.startswith("digraph comm_graph {")
     assert text_mmd_1.startswith("flowchart TD\n")

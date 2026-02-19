@@ -115,6 +115,8 @@ PYTHONPATH=src python3 -m aiedge serve <run_dir>
 Terminal-only workflow (no browser required):
 
 ```bash
+# shortest launcher (repo root)
+./scout tui <run_dir>
 # default best-mode: picks interactive when TTY, static once otherwise
 PYTHONPATH=src python3 -m aiedge tui <run_dir>
 # explicit live refresh
@@ -136,9 +138,15 @@ Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `r` to refresh
 
 - **Runtime Communication Model**: after `graph` stage, run `stages/graph/communication_graph.json` and `stages/graph/communication_graph.cypher` are produced for runtime/service mapping.
 - **Neo4j import (one-shot)**:
-  1. `cypher-shell -u <user> -p <pass> < run_dir/stages/graph/communication_graph.cypher`
-  2. or use any Cypher runner that loads `comm_node`/`COMM_FLOW` tuples from that file.
-- `CSV` exports (`communication_graph.nodes.csv`, `communication_graph.edges.csv`) can also be imported directly to BI tooling for a lightweight matrix view.
+  - short form:
+    - `NEO4J_PASS=<pass> ./scripts/neo4j_comm_import.sh <run_dir>`
+  1. `cypher-shell -u <user> -p <pass> < run_dir/stages/graph/communication_graph.schema.cypher`
+  2. `cypher-shell -u <user> -p <pass> < run_dir/stages/graph/communication_graph.cypher`
+  3. `cypher-shell -u <user> -p <pass> < run_dir/stages/graph/communication_graph.queries.cypher` (saved query bundle, includes Query 0 = Top D+E+V / D+E chains)
+- `CSV` exports (`communication_graph.nodes.csv`, `communication_graph.edges.csv`) can be imported directly to BI tooling, and the new `communication_matrix.json` / `communication_matrix.csv` provides a one-step host-service matrix:
+  - rows are grouped as `component -> host -> service(port/protocol)` with evidence/confidence hints
+  - `evidence_badge` legend: `D`(dynamic), `E`(exploit), `V`(verified_chain), `S`(static); `D+E` and `D+E+V` rows are strongest live-triage priority
+  - useful for quick operator triage when no graph DB is available.
 
 - **Executive Verdict**: current digest verdict (`state`, `reason_codes`, `next_actions`); if digest data is missing/incomplete, treat as blocked/unknown (fail-closed).
 - **Attack Surface Scale**: high-level counts (endpoints/surfaces/unknowns/non-promoted) to estimate analysis scope; these counts are context, not proof.

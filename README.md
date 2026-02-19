@@ -422,15 +422,17 @@ firmware_handoff.json (index only)
 
 ```bash
 cd /path/to/SCOUT
+# optional short launcher (no PYTHONPATH typing)
+./scout --help
 
 # Full deterministic analysis
-PYTHONPATH=src python3 -m aiedge analyze firmware.bin \
+./scout analyze firmware.bin \
   --ack-authorization --no-llm \
   --case-id my-analysis \
   --stages tooling,extraction,structure,carving,firmware_profile,inventory
 
 # Rerun specific stages on existing run
-PYTHONPATH=src python3 -m aiedge stages aiedge-runs/<run_id> \
+./scout stages aiedge-runs/<run_id> \
   --ack-authorization --no-llm \
   --stages inventory
 ```
@@ -476,26 +478,34 @@ python3 bridge/validate_confirmed_policy.py --report-dir reports/<report_id>
 
 ```bash
 # Serve a run report directory and print viewer URL
-PYTHONPATH=src python3 -m aiedge serve aiedge-runs/<run_id>
+./scout serve aiedge-runs/<run_id>
 
 # Example (automation): bind ephemeral port, serve one request, then exit
-PYTHONPATH=src python3 -m aiedge serve aiedge-runs/<run_id> --port 0 --once
+./scout serve aiedge-runs/<run_id> --port 0 --once
 ```
 
 ### Terminal UI (TUI) Dashboard
 
 ```bash
 # One-shot terminal dashboard
-PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id>
+./scout tui aiedge-runs/<run_id>
 
 # Live-refresh mode (Ctrl+C to exit)
-PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id> --watch --interval-s 2
+./scout tui aiedge-runs/<run_id> --watch --interval-s 2
 
 # Interactive mode (j/k/arrow navigation, q to quit)
-PYTHONPATH=src python3 -m aiedge tui aiedge-runs/<run_id> --interactive --limit 30
+./scout tui aiedge-runs/<run_id> --interactive --limit 30
 ```
 
 Interactive keys: `j/k` or `↑/↓` move, `g/G` top/bottom, `r` refresh, `q` quit.
+
+### Neo4j Communication Graph Import (short)
+
+```bash
+NEO4J_PASS=<pass> ./scripts/neo4j_comm_import.sh aiedge-runs/<run_id>
+```
+
+This applies schema + data + saved query bundle (`neo4j-comm-v2`, including Query 0: Top `D+E+V` / `D+E` chains).
 
 Analyst workflow cockpit (additive, offline-safe):
 

@@ -877,6 +877,215 @@ def _parse_targets_from_proof_text(proof: str) -> list[tuple[str, int | None, st
     return found
 
 
+def _normalized_host_from_node_label(label: str) -> str:
+    text = label.strip()
+    if text.startswith("host:"):
+        text = text[len("host:") :].strip()
+    if not text:
+        return "unresolved_host"
+    return text
+
+
+def _evidence_signal_profile(
+    refs: tuple[str, ...] | list[str],
+) -> tuple[list[str], str, dict[str, int], bool]:
+    normalized_refs = [
+        x
+        for x in _sorted_unique_refs([str(v) for v in refs if isinstance(v, str)])
+        if x
+    ]
+    dynamic_count = sum(
+        1 for ref in normalized_refs if ref.startswith("stages/dynamic_validation/")
+    )
+    exploit_count = sum(1 for ref in normalized_refs if ref.startswith("exploits/"))
+    verified_count = sum(
+        1 for ref in normalized_refs if ref.startswith("verified_chain/")
+    )
+    static_count = max(
+        0, len(normalized_refs) - dynamic_count - exploit_count - verified_count
+    )
+
+    signals: list[str] = []
+    if dynamic_count > 0:
+        signals.append("dynamic_validation")
+    if exploit_count > 0:
+        signals.append("exploit")
+    if verified_count > 0:
+        signals.append("verified_chain")
+    if static_count > 0:
+        signals.append("static")
+
+    if dynamic_count > 0 and exploit_count > 0 and verified_count > 0:
+        badge = "D+E+V"
+    elif dynamic_count > 0 and exploit_count > 0:
+        badge = "D+E"
+    elif dynamic_count > 0 and verified_count > 0:
+        badge = "D+V"
+    elif exploit_count > 0 and verified_count > 0:
+        badge = "E+V"
+    elif dynamic_count > 0:
+        badge = "D"
+    elif exploit_count > 0:
+        badge = "E"
+    elif verified_count > 0:
+        badge = "V"
+    else:
+        badge = "S"
+
+    return (
+        signals,
+        badge,
+        {
+            "dynamic": dynamic_count,
+            "exploit": exploit_count,
+            "verified_chain": verified_count,
+            "static": static_count,
+        },
+        dynamic_count > 0 and exploit_count > 0,
+    )
+
+
+def _communication_matrix_payload(
+    comm_nodes: dict[str, _Node],
+    comm_edges: list[_RuntimeEdge],
+) -> dict[str, JsonValue]:
+    host_to_components: dict[str, set[str]] = {}
+    host_to_service_edges: dict[str, list[_RuntimeEdge]] = {}
+
+    for edge in comm_edges:
+        src_node = comm_nodes.get(edge.src)
+        dst_node = comm_nodes.get(edge.dst)
+        if src_node is None or dst_node is None:
+            continue
+        if edge.edge_type == "runtime_host_flow" and src_node.node_type == "component" and dst_node.node_type == "host":
+            host_to_components.setdefault(dst_node.node_id, set()).add(src_node.node_id)
+        if edge.edge_type == "runtime_service_binding" and src_node.node_type == "host" and dst_node.node_type == "service":
+            host_to_service_edges.setdefault(src_node.node_id, []).append(edge)
+
+    matrix_rows: list[dict[str, JsonValue]] = []
+    seen_rows: set[tuple[str, str, str, int, str]] = set()
+    for host_node_id, service_edges in sorted(host_to_service_edges.items()):
+        host_node = comm_nodes.get(host_node_id)
+        if host_node is None:
+            continue
+        host_value = _normalized_host_from_node_label(host_node.label)
+        components_for_host = sorted(
+            host_to_components.get(host_node_id, set()) or {"component:unknown"}
+        )
+        for service_edge in sorted(
+            service_edges,
+            key=lambda item: item.dst,
+        ):
+            service_node = comm_nodes.get(service_edge.dst)
+            if service_node is None:
+                continue
+            service_host, service_port, protocol = _parse_service_label(
+                service_node.label
+            )
+            service_host = service_host or host_value
+            service_port = int(service_port)
+            protocol = _normalize_protocol(protocol) or "tcp"
+            for component_id in components_for_host:
+                row_key = (
+                    component_id,
+                    host_value,
+                    service_host,
+                    service_port,
+                    protocol,
+                )
+                if row_key in seen_rows:
+                    continue
+                seen_rows.add(row_key)
+                component_node = comm_nodes.get(component_id)
+                component_label = (
+                    component_node.label if component_node else _safe_ascii_label(component_id)
+                )
+                evidence_signals, evidence_badge, evidence_counts, dynamic_exploit_chain = (
+                    _evidence_signal_profile(service_edge.evidence_refs)
+                )
+                matrix_rows.append(
+                    {
+                        "component_id": component_id,
+                        "component_label": component_label,
+                        "host": host_value,
+                        "service_host": service_host,
+                        "service_port": service_port,
+                        "protocol": protocol,
+                        "confidence": service_edge.confidence,
+                        "evidence_level": service_edge.evidence_level,
+                        "observation": service_edge.observation,
+                        "evidence_signals": cast(
+                            list[JsonValue], cast(list[object], list(evidence_signals))
+                        ),
+                        "evidence_badge": evidence_badge,
+                        "dynamic_evidence_count": int(evidence_counts["dynamic"]),
+                        "exploit_evidence_count": int(evidence_counts["exploit"]),
+                        "verified_chain_evidence_count": int(
+                            evidence_counts["verified_chain"]
+                        ),
+                        "static_evidence_count": int(evidence_counts["static"]),
+                        "dynamic_exploit_chain": bool(dynamic_exploit_chain),
+                        "evidence_refs": cast(
+                            list[JsonValue],
+                            cast(list[object], list(service_edge.evidence_refs)),
+                        ),
+                    }
+                )
+
+    matrix_rows = sorted(
+        matrix_rows,
+        key=lambda row: (
+            str(row.get("component_id", "")),
+            str(row.get("host", "")),
+            int(row.get("service_port", 0)),
+            str(row.get("protocol", "")),
+        ),
+    )
+    matrix_payload: dict[str, JsonValue] = {
+        "status": "ok" if matrix_rows else "partial",
+        "rows": cast(list[JsonValue], cast(list[object], matrix_rows)),
+        "summary": {
+            "components": len({row.get("component_id") for row in matrix_rows}),
+            "hosts": len({row.get("host") for row in matrix_rows}),
+            "services": len(
+                {
+                    (row.get("service_host"), row.get("service_port"), row.get("protocol"))
+                    for row in matrix_rows
+                }
+            ),
+            "observations": sorted(
+                {row.get("observation", "") for row in matrix_rows}
+            ),
+            "rows_dynamic": sum(
+                1
+                for row in matrix_rows
+                if _as_int(row.get("dynamic_evidence_count")) is not None
+                and int(cast(int, row.get("dynamic_evidence_count"))) > 0
+            ),
+            "rows_exploit": sum(
+                1
+                for row in matrix_rows
+                if _as_int(row.get("exploit_evidence_count")) is not None
+                and int(cast(int, row.get("exploit_evidence_count"))) > 0
+            ),
+            "rows_verified_chain": sum(
+                1
+                for row in matrix_rows
+                if _as_int(row.get("verified_chain_evidence_count")) is not None
+                and int(cast(int, row.get("verified_chain_evidence_count"))) > 0
+            ),
+            "rows_dynamic_exploit": sum(
+                1 for row in matrix_rows if bool(row.get("dynamic_exploit_chain"))
+            ),
+            "evidence_badges": sorted(
+                {str(row.get("evidence_badge", "S")) for row in matrix_rows}
+            ),
+            "classification": "candidate",
+        },
+    }
+    return matrix_payload
+
+
 def _as_jsonable_exploit_runtime(bundle_obj: dict[str, object]) -> dict[str, object]:
     attempts_any = bundle_obj.get("attempts")
     runtime_obj = bundle_obj.get("runtime")
@@ -1064,6 +1273,10 @@ class GraphStage:
         out_comm_nodes_csv = stage_dir / "communication_graph.nodes.csv"
         out_comm_edges_csv = stage_dir / "communication_graph.edges.csv"
         out_comm_cypher = stage_dir / "communication_graph.cypher"
+        out_comm_schema_cypher = stage_dir / "communication_graph.schema.cypher"
+        out_comm_queries_cypher = stage_dir / "communication_graph.queries.cypher"
+        out_matrix_json = stage_dir / "communication_matrix.json"
+        out_matrix_csv = stage_dir / "communication_matrix.csv"
 
         _assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
@@ -1075,6 +1288,10 @@ class GraphStage:
         _assert_under_dir(stage_dir, out_comm_nodes_csv)
         _assert_under_dir(stage_dir, out_comm_edges_csv)
         _assert_under_dir(stage_dir, out_comm_cypher)
+        _assert_under_dir(stage_dir, out_comm_schema_cypher)
+        _assert_under_dir(stage_dir, out_comm_queries_cypher)
+        _assert_under_dir(stage_dir, out_matrix_json)
+        _assert_under_dir(stage_dir, out_matrix_csv)
 
         surfaces_path = run_dir / "stages" / "surfaces" / "surfaces.json"
         endpoints_path = run_dir / "stages" / "endpoints" / "endpoints.json"
@@ -1091,6 +1308,10 @@ class GraphStage:
             _rel_to_run_dir(run_dir, out_comm_nodes_csv),
             _rel_to_run_dir(run_dir, out_comm_edges_csv),
             _rel_to_run_dir(run_dir, out_comm_cypher),
+            _rel_to_run_dir(run_dir, out_comm_schema_cypher),
+            _rel_to_run_dir(run_dir, out_comm_queries_cypher),
+            _rel_to_run_dir(run_dir, out_matrix_json),
+            _rel_to_run_dir(run_dir, out_matrix_csv),
         ]
 
         for dep in (surfaces_path, endpoints_path, attribution_path, inventory_path):
@@ -1996,21 +2217,88 @@ class GraphStage:
             }
             for node in comm_node_items
         ]
-        communication_edge_payload: list[dict[str, JsonValue]] = [
-            {
-                "src": edge.src,
-                "dst": edge.dst,
-                "edge_type": edge.edge_type,
-                "confidence": _clamp01(edge.confidence),
-                "confidence_calibrated": edge.confidence_calibrated,
-                "evidence_level": edge.evidence_level,
-                "observation": edge.observation,
-                "evidence_refs": cast(
-                    list[JsonValue], cast(list[object], list(edge.evidence_refs))
-                ),
-            }
-            for edge in comm_edge_items
+        communication_edge_payload: list[dict[str, JsonValue]] = []
+        for edge in comm_edge_items:
+            edge_signals, edge_badge, edge_counts, dynamic_exploit_chain = (
+                _evidence_signal_profile(edge.evidence_refs)
+            )
+            communication_edge_payload.append(
+                {
+                    "src": edge.src,
+                    "dst": edge.dst,
+                    "edge_type": edge.edge_type,
+                    "confidence": _clamp01(edge.confidence),
+                    "confidence_calibrated": edge.confidence_calibrated,
+                    "evidence_level": edge.evidence_level,
+                    "observation": edge.observation,
+                    "evidence_badge": edge_badge,
+                    "evidence_signals": cast(
+                        list[JsonValue], cast(list[object], list(edge_signals))
+                    ),
+                    "dynamic_evidence_count": int(edge_counts["dynamic"]),
+                    "exploit_evidence_count": int(edge_counts["exploit"]),
+                    "verified_chain_evidence_count": int(
+                        edge_counts["verified_chain"]
+                    ),
+                    "static_evidence_count": int(edge_counts["static"]),
+                    "dynamic_exploit_chain": bool(dynamic_exploit_chain),
+                    "evidence_refs": cast(
+                        list[JsonValue], cast(list[object], list(edge.evidence_refs))
+                    ),
+                }
+            )
+
+        communication_matrix_payload = _communication_matrix_payload(
+            {n.node_id: n for n in comm_node_items},
+            comm_edge_items,
+        )
+        communication_matrix_rows = cast(
+            list[dict[str, JsonValue]],
+            cast(list[object], communication_matrix_payload.get("rows", [])),
+        )
+        matrix_headers = [
+            "component_id",
+            "component_label",
+            "host",
+            "service_host",
+            "service_port",
+            "protocol",
+            "confidence",
+            "evidence_level",
+            "observation",
+            "evidence_badge",
+            "evidence_signals",
+            "dynamic_evidence_count",
+            "exploit_evidence_count",
+            "verified_chain_evidence_count",
+            "static_evidence_count",
+            "dynamic_exploit_chain",
+            "evidence_refs",
         ]
+        matrix_csv_rows: list[list[str]] = []
+        for matrix_row_any in communication_matrix_rows:
+            matrix_row = cast(dict[str, object], matrix_row_any)
+            matrix_csv_rows.append(
+                [
+                    _safe_csv_field(matrix_row.get("component_id")),
+                    _safe_csv_field(matrix_row.get("component_label")),
+                    _safe_csv_field(matrix_row.get("host")),
+                    _safe_csv_field(matrix_row.get("service_host")),
+                    _safe_csv_field(matrix_row.get("service_port")),
+                    _safe_csv_field(matrix_row.get("protocol")),
+                    _safe_csv_field(matrix_row.get("confidence")),
+                    _safe_csv_field(matrix_row.get("evidence_level")),
+                    _safe_csv_field(matrix_row.get("observation")),
+                    _safe_csv_field(matrix_row.get("evidence_badge")),
+                    _safe_csv_field(matrix_row.get("evidence_signals")),
+                    _safe_csv_field(matrix_row.get("dynamic_evidence_count")),
+                    _safe_csv_field(matrix_row.get("exploit_evidence_count")),
+                    _safe_csv_field(matrix_row.get("verified_chain_evidence_count")),
+                    _safe_csv_field(matrix_row.get("static_evidence_count")),
+                    _safe_csv_field(matrix_row.get("dynamic_exploit_chain")),
+                    _safe_csv_field(matrix_row.get("evidence_refs")),
+                ]
+            )
 
         comm_summary = {
             "nodes": len(communication_node_payload),
@@ -2023,8 +2311,21 @@ class GraphStage:
             "hosts": len([n for n in comm_node_items if n.node_type == "host"]),
             "source_artifacts": cast(
                 list[JsonValue],
-                cast(list[object], communication_source_artifacts),
+                cast(list[object], sorted(set(communication_source_artifacts))),
             ),
+            "matrix": {
+                "path_json": _rel_to_run_dir(run_dir, out_matrix_json),
+                "path_csv": _rel_to_run_dir(run_dir, out_matrix_csv),
+                "rows": cast(
+                    list[JsonValue],
+                    cast(list[object], communication_matrix_rows),
+                ),
+                "summary": cast(
+                    dict[str, JsonValue],
+                    cast(dict[str, object], communication_matrix_payload.get("summary", {})),
+                ),
+            },
+            "neo4j_schema_version": "neo4j-comm-v2",
             "classification": "candidate",
             "observation": "runtime_communication",
         }
@@ -2067,6 +2368,16 @@ class GraphStage:
             + "\n",
             encoding="utf-8",
         )
+        _ = out_matrix_json.write_text(
+            json.dumps(communication_matrix_payload, indent=2, sort_keys=True, ensure_ascii=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        _export_csv(
+            out_matrix_csv,
+            matrix_headers,
+            matrix_csv_rows,
+        )
         _export_csv(
             out_comm_nodes_csv,
             ["id", "type", "label", "evidence_refs"],
@@ -2084,7 +2395,23 @@ class GraphStage:
         )
         _export_csv(
             out_comm_edges_csv,
-            ["src", "dst", "edge_type", "confidence", "confidence_calibrated", "evidence_level", "observation", "evidence_refs"],
+            [
+                "src",
+                "dst",
+                "edge_type",
+                "confidence",
+                "confidence_calibrated",
+                "evidence_level",
+                "observation",
+                "evidence_badge",
+                "evidence_signals",
+                "dynamic_evidence_count",
+                "exploit_evidence_count",
+                "verified_chain_evidence_count",
+                "static_evidence_count",
+                "dynamic_exploit_chain",
+                "evidence_refs",
+            ],
             [
                 [
                     row.get("src", ""),
@@ -2094,21 +2421,103 @@ class GraphStage:
                     _safe_csv_field(row.get("confidence_calibrated")),
                     row.get("evidence_level", ""),
                     row.get("observation", ""),
+                    _safe_csv_field(row.get("evidence_badge")),
+                    _safe_csv_field(row.get("evidence_signals")),
+                    _safe_csv_field(row.get("dynamic_evidence_count")),
+                    _safe_csv_field(row.get("exploit_evidence_count")),
+                    _safe_csv_field(row.get("verified_chain_evidence_count")),
+                    _safe_csv_field(row.get("static_evidence_count")),
+                    _safe_csv_field(row.get("dynamic_exploit_chain")),
                     _safe_csv_field(row.get("evidence_refs", "")),
                 ]
                 for row in communication_edge_payload
             ],
         )
 
+        neo4j_schema_version = "neo4j-comm-v2"
+        comm_schema_lines: list[str] = [
+            f"// {neo4j_schema_version}",
+            "// Neo4j schema for communication graph import",
+            "CREATE CONSTRAINT comm_node_id_v2 IF NOT EXISTS FOR (n:CommNode) REQUIRE n.id IS UNIQUE;",
+            "CREATE INDEX comm_node_type_v2 IF NOT EXISTS FOR (n:CommNode) ON (n.type);",
+            "CREATE INDEX comm_node_label_v2 IF NOT EXISTS FOR (n:CommNode) ON (n.label);",
+            "CREATE INDEX comm_node_schema_version_v2 IF NOT EXISTS FOR (n:CommNode) ON (n.schema_version);",
+            "CREATE INDEX comm_flow_edge_type_v2 IF NOT EXISTS FOR ()-[r:COMM_FLOW]-() ON (r.edge_type);",
+            "CREATE INDEX comm_flow_observation_v2 IF NOT EXISTS FOR ()-[r:COMM_FLOW]-() ON (r.observation);",
+            "CREATE INDEX comm_flow_evidence_level_v2 IF NOT EXISTS FOR ()-[r:COMM_FLOW]-() ON (r.evidence_level);",
+            "CREATE INDEX comm_flow_evidence_badge_v2 IF NOT EXISTS FOR ()-[r:COMM_FLOW]-() ON (r.evidence_badge);",
+            "CREATE INDEX comm_flow_dynexp_v2 IF NOT EXISTS FOR ()-[r:COMM_FLOW]-() ON (r.dynamic_exploit_chain);",
+        ]
+        _ = out_comm_schema_cypher.write_text(
+            "\n".join(comm_schema_lines) + "\n", encoding="utf-8"
+        )
+
+        comm_queries_lines: list[str] = [
+            f"// {neo4j_schema_version}",
+            "// Query 0: one-click priority view (Top D+E+V / D+E chains)",
+            "MATCH (comp:CommComponent)-[:COMM_FLOW {edge_type:'runtime_host_flow'}]->(host:CommHost)-[s:COMM_FLOW {edge_type:'runtime_service_binding'}]->(svc:CommService)",
+            "WITH comp, host, svc, s,",
+            "CASE s.evidence_badge",
+            "  WHEN 'D+E+V' THEN 3",
+            "  WHEN 'D+E' THEN 2",
+            "  WHEN 'E+V' THEN 1",
+            "  WHEN 'D+V' THEN 1",
+            "  ELSE 0",
+            "END AS badge_priority",
+            "WHERE badge_priority > 0",
+            "RETURN badge_priority, s.evidence_badge AS evidence_badge, comp.id AS component_id, comp.label AS component, host.label AS host, svc.label AS service, s.confidence_calibrated AS confidence, s.dynamic_evidence_count AS dyn_refs, s.exploit_evidence_count AS exp_refs, s.verified_chain_evidence_count AS v_refs",
+            "ORDER BY badge_priority DESC, confidence DESC, component_id ASC",
+            "LIMIT 50;",
+            "",
+            "// Query 1: dynamic+exploit evidence backed service paths (high-value triage)",
+            "MATCH (comp:CommComponent)-[h:COMM_FLOW {edge_type:'runtime_host_flow'}]->(host:CommHost)-[s:COMM_FLOW {edge_type:'runtime_service_binding'}]->(svc:CommService)",
+            "WHERE s.dynamic_exploit_chain = true",
+            "RETURN comp.id AS component_id, comp.label AS component, host.label AS host, svc.label AS service, s.evidence_badge AS evidence_badge, s.confidence_calibrated AS confidence",
+            "ORDER BY s.confidence_calibrated DESC, comp.id ASC;",
+            "",
+            "// Query 2: evidence badge distribution",
+            "MATCH ()-[r:COMM_FLOW]->()",
+            "RETURN r.evidence_badge AS evidence_badge, count(*) AS edge_count, avg(r.confidence_calibrated) AS avg_confidence",
+            "ORDER BY edge_count DESC, evidence_badge ASC;",
+            "",
+            "// Query 3: components with unresolved runtime discovery (no endpoint mapping)",
+            "MATCH (comp:CommComponent)-[r:COMM_FLOW {edge_type:'runtime_discovery'}]->(host:CommHost)",
+            "RETURN comp.id AS component_id, comp.label AS component, host.label AS host, r.confidence_calibrated AS confidence, r.evidence_refs AS evidence_refs",
+            "ORDER BY r.confidence_calibrated DESC, component_id ASC;",
+            "",
+            "// Query 4: host->service inventory for operational threat modeling",
+            "MATCH (host:CommHost)-[r:COMM_FLOW {edge_type:'runtime_service_binding'}]->(svc:CommService)",
+            "RETURN host.label AS host, svc.label AS service, r.evidence_badge AS evidence_badge, r.dynamic_evidence_count AS dynamic_refs, r.exploit_evidence_count AS exploit_refs, r.verified_chain_evidence_count AS verified_refs",
+            "ORDER BY host ASC, service ASC;",
+        ]
+        _ = out_comm_queries_cypher.write_text(
+            "\n".join(comm_queries_lines) + "\n", encoding="utf-8"
+        )
+
         comm_cypher_lines: list[str] = [
             "// Communication graph export (runtime + evidence-backed flows)",
+            f"// schema_version={neo4j_schema_version}",
             "CREATE CONSTRAINT comm_node_id IF NOT EXISTS FOR (n:CommNode) REQUIRE n.id IS UNIQUE;",
-            "UNWIND ["
+            "UNWIND [",
         ]
         node_payload_lines: list[str] = []
         for node in comm_node_items:
             node_id = _safe_node_value(cast(str, node.node_id))
             node_refs = cast(tuple[str, ...], node.evidence_refs)
+            if node.node_type == "component":
+                neo4j_label = "CommComponent"
+            elif node.node_type == "host":
+                neo4j_label = "CommHost"
+            elif node.node_type == "service":
+                neo4j_label = "CommService"
+            elif node.node_type == "endpoint":
+                neo4j_label = "CommEndpoint"
+            elif node.node_type == "surface":
+                neo4j_label = "CommSurface"
+            elif node.node_type == "vendor":
+                neo4j_label = "CommVendor"
+            else:
+                neo4j_label = "CommUnknown"
             node_payload_lines.append(
                 "  {id:'"
                 + _escape_cypher_string(node_id)
@@ -2118,6 +2527,9 @@ class GraphStage:
                 + _escape_cypher_string(_safe_node_value(node.label))
                 + "', evidence_refs:"
                 + _format_cypher_string_list(node_refs)
+                + ", neo4j_label:'"
+                + _escape_cypher_string(neo4j_label)
+                + "'"
                 + "}"
             )
         comm_cypher_lines.append(",\n".join(node_payload_lines))
@@ -2125,15 +2537,24 @@ class GraphStage:
             [
                 "] AS row",
                 "MERGE (n:CommNode {id: row.id})",
-                "SET n.type = row.type, n.label = row.label, n.evidence_refs = row.evidence_refs",
+                "SET n.type = row.type, n.label = row.label, n.evidence_refs = row.evidence_refs, n.schema_version = '" + neo4j_schema_version + "'",
+                "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommComponent' THEN [1] ELSE [] END | SET n:CommComponent)",
+                "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommHost' THEN [1] ELSE [] END | SET n:CommHost)",
+                "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommService' THEN [1] ELSE [] END | SET n:CommService)",
+                "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommEndpoint' THEN [1] ELSE [] END | SET n:CommEndpoint)",
+                "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommSurface' THEN [1] ELSE [] END | SET n:CommSurface)",
+                "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommVendor' THEN [1] ELSE [] END | SET n:CommVendor)",
                 "",
-                "UNWIND ["
+                "UNWIND [",
             ]
         )
 
         edge_payload_lines: list[str] = []
         for edge in comm_edge_items:
             edge_refs = cast(tuple[str, ...], edge.evidence_refs)
+            edge_signals, edge_badge, edge_counts, dynamic_exploit_chain = (
+                _evidence_signal_profile(edge_refs)
+            )
             edge_payload_lines.append(
                 "{src:'"
                 + _escape_cypher_string(_safe_node_value(edge.src))
@@ -2149,7 +2570,21 @@ class GraphStage:
                 + _escape_cypher_string(_safe_node_value(edge.evidence_level))
                 + "', observation:'"
                 + _escape_cypher_string(_safe_node_value(edge.observation))
-                + "', evidence_refs:"
+                + "', evidence_badge:'"
+                + _escape_cypher_string(edge_badge)
+                + "', evidence_signals:"
+                + _format_cypher_string_list(tuple(edge_signals))
+                + ", dynamic_evidence_count:"
+                + str(int(edge_counts["dynamic"]))
+                + ", exploit_evidence_count:"
+                + str(int(edge_counts["exploit"]))
+                + ", verified_chain_evidence_count:"
+                + str(int(edge_counts["verified_chain"]))
+                + ", static_evidence_count:"
+                + str(int(edge_counts["static"]))
+                + ", dynamic_exploit_chain:"
+                + ("true" if dynamic_exploit_chain else "false")
+                + ", evidence_refs:"
                 + _format_cypher_string_list(edge_refs)
                 + "}"
             )
@@ -2160,7 +2595,7 @@ class GraphStage:
                 "] AS row",
                 "MATCH (src:CommNode {id: row.src}), (dst:CommNode {id: row.dst})",
                 "MERGE (src)-[r:COMM_FLOW {edge_type: row.edge_type, src: row.src, dst: row.dst}]->(dst)",
-                "SET r.confidence = row.confidence, r.confidence_calibrated = row.confidence_calibrated, r.evidence_level = row.evidence_level, r.observation = row.observation, r.evidence_refs = row.evidence_refs",
+                "SET r.confidence = row.confidence, r.confidence_calibrated = row.confidence_calibrated, r.evidence_level = row.evidence_level, r.observation = row.observation, r.evidence_refs = row.evidence_refs, r.evidence_badge = row.evidence_badge, r.evidence_signals = row.evidence_signals, r.dynamic_evidence_count = row.dynamic_evidence_count, r.exploit_evidence_count = row.exploit_evidence_count, r.verified_chain_evidence_count = row.verified_chain_evidence_count, r.static_evidence_count = row.static_evidence_count, r.dynamic_exploit_chain = row.dynamic_exploit_chain, r.schema_version = '" + neo4j_schema_version + "'",
             ]
         )
         if not comm_cypher_lines:
@@ -2211,6 +2646,15 @@ class GraphStage:
             "communication_graph_nodes_csv": _rel_to_run_dir(run_dir, out_comm_nodes_csv),
             "communication_graph_edges_csv": _rel_to_run_dir(run_dir, out_comm_edges_csv),
             "communication_graph_cypher": _rel_to_run_dir(run_dir, out_comm_cypher),
+            "communication_graph_schema_cypher": _rel_to_run_dir(
+                run_dir, out_comm_schema_cypher
+            ),
+            "communication_graph_queries_cypher": _rel_to_run_dir(
+                run_dir, out_comm_queries_cypher
+            ),
+            "communication_matrix_json": _rel_to_run_dir(run_dir, out_matrix_json),
+            "communication_matrix_csv": _rel_to_run_dir(run_dir, out_matrix_csv),
+            "neo4j_schema_version": neo4j_schema_version,
             "evidence": cast(
                 list[JsonValue],
                 cast(

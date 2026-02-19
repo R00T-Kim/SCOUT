@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHONPATH_VALUE="${ROOT_DIR}/src"
+if [[ -n "${PYTHONPATH:-}" ]]; then
+  PYTHONPATH_VALUE="${PYTHONPATH_VALUE}:${PYTHONPATH}"
+fi
+
+if [[ "${1:-}" == "" ]]; then
+  cat <<'EOF'
+Usage: ./scout <aiedge-args...>
+
+Examples
+  ./scout tui aiedge-runs/<run_id> --watch --interval-s 2 --limit 20
+  ./scout run firmware.bin --profile exploit
+  ./scout report aiedge-runs/<run_id>
+EOF
+  exit 0
+fi
+
+exec env PYTHONPATH="${PYTHONPATH_VALUE}" python3 -m aiedge "$@"

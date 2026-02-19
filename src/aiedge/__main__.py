@@ -396,11 +396,13 @@ def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
     priority = _short_text(item.get("priority"), max_len=16) or "unknown"
     source = _short_text(item.get("source"), max_len=16) or "unknown"
     path = item.get("path")
+    path_signature = _path_tail(path, max_segments=2, max_len=60)
     candidate_id = item.get("candidate_id")
     return {
         "family": family_text,
         "source": source,
         "path": path,
+        "path_signature": path_signature,
         "score": score,
         "priority": priority,
         "hypothesis": attack,
@@ -419,7 +421,7 @@ def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
 def _collect_tui_candidate_groups(
     candidates: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    groups: dict[tuple[str, str, str, str], dict[str, object]] = {}
+    groups: dict[tuple[str, str, str, str, str], dict[str, object]] = {}
     for item in candidates:
         payload = _candidate_group_payload(item)
         group_key = (
@@ -427,6 +429,7 @@ def _collect_tui_candidate_groups(
             cast(str, payload["family"]),
             cast(str, payload["hypothesis"]),
             cast(str, payload["impact"]),
+            cast(str, payload["path_signature"]),
         )
         group = groups.get(group_key)
         if group is None:
@@ -469,6 +472,7 @@ def _collect_tui_candidate_groups(
             _short_text(g.get("priority"), max_len=16) or "unknown",
             _short_text(g.get("family"), max_len=24) or "",
             _short_text(g.get("hypothesis"), max_len=240) or "",
+            _short_text(g.get("path_signature"), max_len=80) or "",
         ),
     )
     return ordered
@@ -502,9 +506,127 @@ def _extract_service_node_value(value: str) -> tuple[str, int, str]:
 def _collect_runtime_communication_summary(
     *, run_dir: Path
 ) -> dict[str, object]:
+    matrix_path = run_dir / "stages" / "graph" / "communication_matrix.json"
+    if matrix_path.is_file():
+        matrix_payload = _safe_load_json_object(matrix_path)
+        if matrix_payload:
+            matrix_rows_any = matrix_payload.get("rows")
+            summary_any = matrix_payload.get("summary")
+            if isinstance(matrix_rows_any, list):
+                matrix_rows: list[dict[str, object]] = []
+                for row_any in matrix_rows_any:
+                    if not isinstance(row_any, dict):
+                        continue
+                    row = cast(dict[str, object], row_any)
+                    host = _safe_node_value(
+                        _short_text(row.get("host"), max_len=220)
+                    )
+                    service_host = _safe_node_value(
+                        _short_text(row.get("service_host"), max_len=220)
+                    )
+                    if not service_host:
+                        service_host = host
+                    component_label = _short_text(
+                        row.get("component_label"), max_len=80
+                    ) or _short_text(row.get("component_id"), max_len=80)
+                    service_port = _as_int(row.get("service_port"))
+                    protocol = _short_text(row.get("protocol"), max_len=12) or "tcp"
+                    if not host or not service_host:
+                        continue
+                    if not component_label:
+                        component_label = "unmapped"
+                    evidence_badge = _short_text(row.get("evidence_badge"), max_len=20) or "S"
+                    evidence_signals_any = row.get("evidence_signals")
+                    evidence_signals = (
+                        [
+                            _short_text(x, max_len=32)
+                            for x in cast(list[object], evidence_signals_any)
+                            if isinstance(x, str) and _short_text(x, max_len=32)
+                        ]
+                        if isinstance(evidence_signals_any, list)
+                        else []
+                    )
+                    dynamic_exploit_chain = bool(row.get("dynamic_exploit_chain", False))
+                    matrix_rows.append(
+                        {
+                            "host": host,
+                            "service_host": service_host,
+                            "port": service_port,
+                            "protocol": protocol,
+                            "components": [component_label],
+                            "component": component_label,
+                            "confidence": row.get("confidence"),
+                            "observation": row.get("observation", "runtime_communication"),
+                            "evidence_badge": evidence_badge,
+                            "evidence_signals": evidence_signals,
+                            "dynamic_evidence_count": _as_int(
+                                row.get("dynamic_evidence_count"), default=0
+                            ),
+                            "exploit_evidence_count": _as_int(
+                                row.get("exploit_evidence_count"), default=0
+                            ),
+                            "verified_chain_evidence_count": _as_int(
+                                row.get("verified_chain_evidence_count"), default=0
+                            ),
+                            "dynamic_exploit_chain": dynamic_exploit_chain,
+                        }
+                    )
+
+                if matrix_rows:
+                    summary = {
+                        "hosts": 0,
+                        "services": 0,
+                        "components": 0,
+                        "artifacts": [
+                            _path_tail(str(matrix_path), max_segments=4, max_len=90),
+                        ],
+                    }
+                    if isinstance(summary_any, dict):
+                        summary.update(
+                            {
+                                "hosts": _as_int(summary_any.get("hosts"), default=0),
+                                "services": _as_int(summary_any.get("services"), default=0),
+                                "components": _as_int(summary_any.get("components"), default=0),
+                                "rows_dynamic": _as_int(summary_any.get("rows_dynamic"), default=0),
+                                "rows_exploit": _as_int(summary_any.get("rows_exploit"), default=0),
+                                "rows_verified_chain": _as_int(
+                                    summary_any.get("rows_verified_chain"), default=0
+                                ),
+                                "rows_dynamic_exploit": _as_int(
+                                    summary_any.get("rows_dynamic_exploit"), default=0
+                                ),
+                            }
+                        )
+                    return {
+                        "available": True,
+                        "status": _short_text(
+                            matrix_payload.get("status"), max_len=16
+                        ) or "partial",
+                        "rows": cast(list[object], matrix_rows),
+                        "summary": summary,
+                    }
+
+            return {
+                "available": True,
+                "status": _short_text(matrix_payload.get("status"), max_len=16) or "partial",
+                "reason": "communication matrix empty",
+                "rows": cast(list[object], []),
+                "summary": {
+                    "hosts": 0,
+                    "services": 0,
+                    "components": 0,
+                    "rows_dynamic": 0,
+                    "rows_exploit": 0,
+                    "rows_verified_chain": 0,
+                    "rows_dynamic_exploit": 0,
+                    "artifacts": [_path_tail(str(matrix_path), max_segments=4, max_len=90)],
+                },
+            }
+
     comm_path = run_dir / "stages" / "graph" / "communication_graph.json"
     if not comm_path.is_file():
         return {"available": False, "reason": "missing communication graph"}
+
     payload_any = _safe_load_json_object(comm_path)
     if not payload_any:
         return {"available": False, "reason": "communication graph invalid"}
@@ -575,7 +697,9 @@ def _collect_runtime_communication_summary(
     ):
         comp_names = sorted(host_components.get(host, set())) or ["unmapped"]
         seen: set[tuple[str, int, str]] = set()
-        for service_host, service_port, service_proto in sorted(set(services), key=lambda s: (s[0], s[1], s[2])):
+        for service_host, service_port, service_proto in sorted(
+            set(services), key=lambda s: (s[0], s[1], s[2])
+        ):
             if (service_host, service_port, service_proto) in seen:
                 continue
             seen.add((service_host, service_port, service_proto))
@@ -599,6 +723,10 @@ def _collect_runtime_communication_summary(
             "hosts": len(host_services),
             "services": len(service_rows),
             "components": len(component_hosts),
+            "rows_dynamic": 0,
+            "rows_exploit": 0,
+            "rows_verified_chain": 0,
+            "rows_dynamic_exploit": 0,
             "artifacts": [
                 _path_tail(str(comm_path), max_segments=4, max_len=90),
             ],
@@ -788,6 +916,9 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
             f"hosts={_as_int(runtime_summary.get('hosts'))} | "
             f"services={_as_int(runtime_summary.get('services'))} | "
             f"components={_as_int(runtime_summary.get('components'))} | "
+            f"D={_as_int(runtime_summary.get('rows_dynamic'))} "
+            f"E={_as_int(runtime_summary.get('rows_exploit'))} "
+            f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))} | "
             f"status={_short_text(runtime_model.get('status'), max_len=16) or 'partial'}"
         )
         if rows:
@@ -804,10 +935,17 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
                 components = ", ".join(
                     _short_text(v, max_len=24) for v in cast(list[str], row_components[:2])
                 )
+                evidence_badge = (
+                    _short_text(row.get("evidence_badge"), max_len=16) or "S"
+                )
+                dynamic_exploit = bool(row.get("dynamic_exploit_chain", False))
+                evidence_mark = " !!" if dynamic_exploit else ""
                 lines.append(
                     f"    {row_host} -> {row_service_host}:{row_port}/{row_protocol} "
-                    f"({components if components else 'components=unmapped'})"
+                    f"({components if components else 'components=unmapped'}) "
+                    f"[{evidence_badge}]{evidence_mark}"
                 )
+            lines.append("  legend: D=dynamic, E=exploit, V=verified_chain, S=static, !!=D+E")
     else:
         lines.append("Runtime exposure model: unavailable")
 
@@ -841,9 +979,11 @@ def _build_tui_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
         count = _as_int(group.get("path_count"))
         max_score = _as_float(group.get("max_score"))
         source = _short_text(group.get("source", ""), max_len=16) or "unknown"
+        path_signature = _short_text(group.get("path_signature"), max_len=72) or "(unspecified)"
         lines.append(
             f"G{idx:02d} [{priority_tag}] family={family} source={source} count={count} max_score={max_score:.3f}"
         )
+        lines.append(f"    path: {path_signature}")
         hypothesis = _short_text(group.get("hypothesis"), max_len=140)
         impact = _short_text(group.get("impact"), max_len=140)
         next_step = _short_text(group.get("next_step"), max_len=140)
@@ -1038,7 +1178,8 @@ def _draw_interactive_tui_frame(
             f"runtime: {'on' if runtime_available else 'off'} | "
             f"hosts={_as_int(runtime_summary.get('hosts'))} "
             f"services={_as_int(runtime_summary.get('services'))} "
-            f"components={_as_int(runtime_summary.get('components'))}"
+            f"components={_as_int(runtime_summary.get('components'))} "
+            f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
         ),
     )
 
@@ -1101,10 +1242,13 @@ def _draw_interactive_tui_frame(
             signals = ",".join(signal_items)
             sample_paths = cast(list[str], group.get("sample_paths"))
             path = sample_paths[0] if sample_paths else "sample-path-unavailable"
+            path_signature = _short_text(group.get("path_signature"), max_len=72)
             line = (
                 f"{idx + 1:02d} [{pr_tag}] {score:.3f} x{path_count} {family} | "
                 f"{path or '(none)'}"
             )
+            if path_signature and len(path_signature) > 10:
+                line = f"{line} | {path_signature}"
             max_line_width = max(18, left_width - 3)
             suffix = f" [{signals}]"
             if len(line) + len(suffix) <= max_line_width:
@@ -1123,6 +1267,7 @@ def _draw_interactive_tui_frame(
                 if _short_text(item.get("candidate_id"), max_len=120) == representative_id:
                     representative = item
                     break
+        path_signature = _short_text(selected.get("path_signature"), max_len=72)
 
         details: list[str] = []
         details.append(
@@ -1130,6 +1275,8 @@ def _draw_interactive_tui_frame(
             f"{_short_text(selected.get('priority'), max_len=10)} / "
             f"{_short_text(selected.get('family'), max_len=28)}"
         )
+        if path_signature:
+            details.append(f"path: {path_signature}")
         details.append(
             f"hits: {_as_int(selected.get('path_count'))} | score={_as_float(selected.get('max_score')):.3f}"
         )
