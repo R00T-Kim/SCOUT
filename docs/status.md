@@ -4,12 +4,14 @@
 
 ## 현재 구현됨
 
-- AIEdge CLI: `python3 -m aiedge analyze`, `python3 -m aiedge stages`
+- AIEdge CLI: `./scout analyze`, `./scout stages` (래퍼 권장)
+- 동일 기능은 `python3 -m aiedge analyze`, `python3 -m aiedge stages`로 직접 실행 가능
 - Stage evidence store(run_dir): StageFactory stage는 `stages/<name>/stage.json` 기반 artifact hashing을 사용하고, findings는 `run_findings()`가 `stages/findings/*.json`을 직접 생성
 - `firmware_profile` stage:
   - `stages/firmware_profile/stage.json`과 `stages/firmware_profile/firmware_profile.json` 생성이 확인됨
   - `firmware_profile.json` 누락을 전제로 한 과거 run_dir 예시는 stale 상태이므로 문서에서 제거하거나 최신 run으로 갱신해야 함
 - Inventory stage는 "죽지 않고" `inventory.json`/`string_hits.json`을 남김
+- TUI/뷰어 진입 가이드는 `./scout tui` 단축키(`ti/tw/to`) 및 `./scout serve`를 기준으로 정렬되어 최신 상태입니다.
 
 ## Known Issues (중요)
 

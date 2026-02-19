@@ -117,6 +117,28 @@ Suggested default evidence shortcuts (run-relative):
 - `report/report.json`
 - `report/viewer.html`
 
+## Card 5: Runtime Communication Model
+
+Purpose: Answer "어떤 런타임 통신 관계가 관측됐고, 어떤 근거로 연결되었는가?"  
+
+| Field | Primary source | Fallback | JSON key paths | Empty state |
+|------|-----------------|----------|----------------|------------|
+| Status | `report/analyst_overview.json` | `report/report.json` | `summary.runtime_model.status` / `runtime_model.status` | `blocked` |
+| Hosts | `report/analyst_overview.json` | none | `summary.runtime_model.summary.hosts` | `0` |
+| Services | `report/analyst_overview.json` | none | `summary.runtime_model.summary.services` | `0` |
+| Components | `report/analyst_overview.json` | none | `summary.runtime_model.summary.components` | `0` |
+| D+E rows | `report/analyst_overview.json` | `report/report.json` | `summary.runtime_model.summary.rows_dynamic_exploit` | `0` |
+| Evidence matrix | `stages/graph/communication_matrix.json` (from `graph` stage) | none | `rows[].host`, `rows[].service`, `rows[].observation`, `rows[].evidence_badge` | `[]` |
+
+Copy/link behavior:
+
+- 권장 확인 경로: `stages/graph/communication_graph.json`, `stages/graph/communication_matrix.json`, `stages/graph/communication_matrix.csv`
+- 근거 결합이 필요한 경우 `stages/graph/communication_graph.cypher` 또는 `stages/graph/communication_graph.queries.cypher`로 상관성 검증 가능
+
+신뢰 규칙:
+- `runtime` 근거가 있는 항목은 `evidence`/`runtime` 태그가 함께 있어야 하며, `D+E` 또는 `D+E+V`가 포함된 행은 우선도 높음.
+- 관측 증거 없는 값은 `blocked/unknown`로 남겨야 하며 verifier 결과를 대신하지 않음.
+
 ---
 
 ## Real ER Run Example (Concrete Values)

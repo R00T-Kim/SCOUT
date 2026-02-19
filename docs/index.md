@@ -18,7 +18,8 @@
 ## 3) 실행/검증 런북
 
 - `docs/runbook.md`
-  - `python3 -m aiedge analyze` / `python3 -m aiedge stages`
+  - `./scout analyze` / `./scout stages`
+  - (원하면) `python3 -m aiedge analyze` / `python3 -m aiedge stages`도 직접 실행 가능
   - 결정론/계약 검증 스크립트
   - Terminator 연동 E2E(있는 경우)
 

@@ -12,8 +12,16 @@ This runbook describes the canonical 8MB firmware track used for deterministic e
 ## Analysis (8MB Track)
 
 ```bash
-PYTHONPATH=/home/rootk1m/SCOUT/src \
-python3 -m aiedge analyze-8mb \
+./scout analyze-8mb \
+  /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
+  --case-id 8mb-analysis \
+  --ack-authorization \
+  --no-llm
+```
+또는 직접 실행:
+
+```bash
+PYTHONPATH=/home/rootk1m/SCOUT/src python3 -m aiedge analyze-8mb \
   /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
   --case-id 8mb-analysis \
   --ack-authorization \
@@ -41,6 +49,20 @@ python3 -m pip install ubidump
 ## Exploit Profile (Lab-Gated)
 
 Exploit profile requires explicit gate fields.
+
+```bash
+./scout analyze-8mb \
+  /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
+  --case-id 8mb-exploit \
+  --ack-authorization \
+  --no-llm \
+  --profile exploit \
+  --exploit-flag flag \
+  --exploit-attestation authorized \
+  --exploit-scope lab-only \
+  --stages exploit_gate,exploit_chain,exploit_policy
+```
+또는 직접 실행:
 
 ```bash
 PYTHONPATH=/home/rootk1m/SCOUT/src \
@@ -161,6 +183,14 @@ PYTHONPATH=src python3 -m aiedge release-quality-gate \
 # End-to-end release gate with fixture passthrough
 PYTHONPATH=src scripts/release_gate.sh --run-dir <run-dir> --llm-fixture <path-to-llm-fixture.json>
 ```
+또는 wrapper 기반:
+
+```bash
+./scout quality-metrics --manifest benchmarks/corpus/manifest.json --out <run-dir>/metrics.json
+./scout release-quality-gate --metrics <run-dir>/metrics.json --report <run-dir>/report/report.json --llm-primary --llm-fixture <path-to-llm-fixture.json> --out <run-dir>/quality_gate.json
+```
+
+(CI/스크립트 환경에서는 `PYTHONPATH=src` 직접 실행이 여전히 유효함)
 
 ## Failure Triage Flow
 
