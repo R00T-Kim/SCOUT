@@ -2,9 +2,10 @@
 
 ## 1) Analyze firmware and create run_dir
 
+Use the bundled launcher to run commands with short flags:
+
 ```bash
-cd /home/rootk1m/SCOUT
-PYTHONPATH=src python3 -m aiedge analyze /path/to/ER-e50.v3.0.1.bin \
+./scout analyze /path/to/ER-e50.v3.0.1.bin \
   --case-id er-e50-v3.0.1-verified-chain \
   --ack-authorization \
   --profile exploit \
@@ -29,8 +30,18 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 ## 2) Run dynamic validation stage (if not already included)
 
 ```bash
-PYTHONPATH=src python3 -m aiedge stages <run_dir> \
-  --stages dynamic_validation
+./scout stages <run_dir> --stages dynamic_validation
+```
+
+You can tune first-pass port probing with:
+
+```bash
+export AIEDGE_PORTSCAN_TOP_K=1000    # first N priority/hinted ports before full range
+export AIEDGE_PORTSCAN_START=1
+export AIEDGE_PORTSCAN_END=65535
+export AIEDGE_PORTSCAN_WORKERS=256
+export AIEDGE_PORTSCAN_BUDGET_S=120
+# optionally: export AIEDGE_PORTSCAN_TOP_K=0   # disable hint-first top-k pass
 ```
 
 If Codex responses are slow/intermittent, increase LLM timeouts/retries for stage runs:
@@ -48,7 +59,7 @@ When container/runtime policy blocks `sudo` (`no new privileges`), set one env v
 
 ```bash
 export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
-PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages dynamic_validation,exploit_autopoc
+./scout stages <run_dir> --stages dynamic_validation,exploit_autopoc
 ```
 
 - `AIEDGE_PRIV_RUNNER` is a command prefix used for privileged actions (FirmAE boot, firewall snapshot, pcap capture).
@@ -69,7 +80,7 @@ PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages dynamic_validation,ex
 Re-run only this step when needed:
 
 ```bash
-PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages exploit_autopoc
+./scout stages <run_dir> --stages exploit_autopoc
 ```
 
 Use manual/private plugin injection only when you want to override with your own exploit logic:
@@ -146,7 +157,7 @@ PY
 - Recommended local serving flow (avoids `file://` fetch limitations):
 
 ```bash
-PYTHONPATH=src python3 -m aiedge serve <run_dir>
+./scout serve <run_dir>
 ```
 
 Terminal-only workflow (no browser required):
@@ -155,11 +166,11 @@ Terminal-only workflow (no browser required):
 # shortest launcher (repo root)
 ./scout tui <run_dir>
 # default best-mode: picks interactive when TTY, static once otherwise
-PYTHONPATH=src python3 -m aiedge tui <run_dir>
+./scout tui <run_dir>
 # explicit live refresh
-PYTHONPATH=src python3 -m aiedge tui <run_dir> --mode watch --interval-s 2
+./scout tw <run_dir> -t 2
 # explicit interactive mode (q to quit)
-PYTHONPATH=src python3 -m aiedge tui <run_dir> --mode interactive --limit 30
+./scout ti <run_dir> -n 30
 ```
 
 Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `t` threat panel, `c` candidate panel, `r` refresh, `q` quit.

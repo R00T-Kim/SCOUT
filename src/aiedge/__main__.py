@@ -1499,25 +1499,29 @@ def _build_tui_snapshot_lines(
         )
         rows = cast(list[object], runtime_model.get("rows", []))
         lines.append(
-            f"Runtime exposure model: available | "
-            f"hosts={_as_int(runtime_summary.get('hosts'))} | "
+            f"runtime: hosts={_as_int(runtime_summary.get('hosts'))} | "
             f"services={_as_int(runtime_summary.get('services'))} | "
             f"components={_as_int(runtime_summary.get('components'))} | "
             f"D={_as_int(runtime_summary.get('rows_dynamic'))} "
             f"E={_as_int(runtime_summary.get('rows_exploit'))} "
+            f"V={_as_int(runtime_summary.get('rows_verified_chain'))} "
             f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))} | "
             f"status={_short_text(runtime_model.get('status'), max_len=16) or 'partial'}"
         )
+        lines.append(
+            _ansi("Runtime Exposure Model", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+        )
+        lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
         if rows:
-            lines.append(
-                _ansi("  service_edges:", _ANSI_BOLD, _ANSI_BLUE, enabled=use_ansi)
-            )
+            lines.append("service_protocol_component map:")
             for row_any in rows[: min(limit, len(rows))]:
                 row = cast(dict[str, object], row_any)
-                row_host = _short_text(row.get("host"), max_len=42)
-                row_service_host = _short_text(row.get("service_host"), max_len=42)
+                row_host = _short_text(row.get("host"), max_len=24)
+                row_service_host = _short_text(row.get("service_host"), max_len=24)
                 row_port = _as_int(row.get("port"))
-                row_protocol = _short_text(row.get("protocol"), max_len=10)
+                row_protocol = (
+                    _short_text(row.get("protocol"), max_len=10) or "tcp"
+                ).upper()
                 row_components = row.get("components", [])
                 if not isinstance(row_components, list):
                     row_components = []
@@ -1528,21 +1532,37 @@ def _build_tui_snapshot_lines(
                     _short_text(row.get("evidence_badge"), max_len=16) or "S"
                 )
                 dynamic_exploit = bool(row.get("dynamic_exploit_chain", False))
-                evidence_mark = " !!" if dynamic_exploit else ""
                 badge_style = (_ANSI_BOLD, _ANSI_RED) if dynamic_exploit else (_ANSI_BOLD, _ANSI_YELLOW)
                 rendered_badge = _ansi(
-                    f"[{evidence_badge}]{evidence_mark}",
+                    evidence_badge,
                     *badge_style,
                     enabled=use_ansi,
                 )
-                lines.append(
-                    f"    {row_host} -> {row_service_host}:{row_port}/{row_protocol} "
-                    f"({components if components else 'components=unmapped'}) "
-                    f"{rendered_badge}"
+                evidence_signals = row.get("evidence_signals")
+                if not isinstance(evidence_signals, list):
+                    evidence_signals = []
+                evidence_text = ",".join(
+                    sorted(
+                        str(x)
+                        for x in cast(list[object], evidence_signals)
+                        if isinstance(x, str)
+                    )
                 )
-            lines.append("  legend: D=dynamic, E=exploit, V=verified_chain, S=static, !!=D+E")
+                if not evidence_text:
+                    evidence_text = evidence_badge
+                service_endpoint = f"{row_service_host}:{row_port}/{row_protocol}"
+                lines.append(
+                    f"  {row_host: <24} | {service_endpoint: <18} | "
+                    f"{(components if components else 'unmapped'): <24} "
+                    f"[{rendered_badge}] ({evidence_text})"
+                )
+            lines.append(
+                "  legend: D=dynamic, E=exploit, V=verified_chain, S=static, D+E=D+E"
+            )
+        else:
+            lines.append("service_protocol_component map: (no mapped host->service rows)")
     else:
-        lines.append("Runtime exposure model: unavailable")
+        lines.append("Runtime Exposure Model: unavailable")
 
     threat_model = cast(dict[str, object], snapshot.get("threat_model", {}))
     if threat_model:

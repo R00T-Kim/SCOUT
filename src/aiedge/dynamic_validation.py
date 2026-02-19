@@ -549,7 +549,7 @@ def _collect_static_port_hints(*, run_dir: Path) -> tuple[list[int], list[str]]:
     return ordered_hints, ordered_sources
 
 
-def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int, int]:
+def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int, int, int]:
     connect_timeout = min(0.35, max(0.08, float(timeout_s) / 12.0))
     workers_default = 384
     budget_default_s = 90.0
@@ -561,6 +561,7 @@ def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int
     range_start_env = os.environ.get("AIEDGE_PORTSCAN_START", "").strip()
     range_end_env = os.environ.get("AIEDGE_PORTSCAN_END", "").strip()
     timeout_env = os.environ.get("AIEDGE_PORTSCAN_CONNECT_TIMEOUT_S", "").strip()
+    top_k_env = os.environ.get("AIEDGE_PORTSCAN_TOP_K", "").strip()
 
     workers = workers_default
     if workers_env.isdigit():
@@ -579,6 +580,13 @@ def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int
     except Exception:
         pass
 
+    top_k = 1000
+    if top_k_env:
+        try:
+            top_k = max(0, min(65_535, int(top_k_env)))
+        except Exception:
+            top_k = 1000
+
     range_start = range_start_default
     range_end = range_end_default
     if range_start_env.isdigit():
@@ -588,12 +596,13 @@ def _derive_portscan_config(*, timeout_s: float) -> tuple[float, int, float, int
     if range_start > range_end:
         range_start, range_end = range_end, range_start
 
-    return connect_timeout, workers, budget_s, range_start, range_end
+    return connect_timeout, workers, budget_s, range_start, range_end, int(top_k)
 
 
 def _iter_port_scan_plan(
     *,
     prioritized: list[int],
+    top_k_ports: int,
     range_start: int,
     range_end: int,
 ) -> Iterable[int]:
@@ -606,6 +615,17 @@ def _iter_port_scan_plan(
             continue
         seen.add(p)
         yield p
+
+    top_limit = max(0, int(top_k_ports))
+    if top_limit > 0:
+        for port in range(range_start, range_end + 1):
+            if port in seen:
+                continue
+            if len(seen) - len(prioritized) >= top_limit:
+                break
+            seen.add(port)
+            yield port
+
     for port in range(range_start, range_end + 1):
         if port in seen:
             continue
@@ -670,11 +690,14 @@ def _probe_target_ports(
         }, limitations
 
     hint_ports, hint_sources = _collect_static_port_hints(run_dir=run_dir)
-    connect_timeout_s, workers, budget_s, range_start, range_end = _derive_portscan_config(
+    connect_timeout_s, workers, budget_s, range_start, range_end, top_k_ports = (
+        _derive_portscan_config(
         timeout_s=timeout_s
+    )
     )
     plan_iter = _iter_port_scan_plan(
         prioritized=hint_ports,
+        top_k_ports=top_k_ports,
         range_start=range_start,
         range_end=range_end,
     )
@@ -773,6 +796,7 @@ def _probe_target_ports(
         "target_ip": target_ip,
         "scan_strategy": "adaptive_full_range_tcp",
         "scan_range": cast(list[JsonValue], cast(list[object], [int(range_start), int(range_end)])),
+        "scan_top_k": int(top_k_ports),
         "scan_connect_timeout_s": float(connect_timeout_s),
         "scan_budget_s": float(budget_s),
         "scan_workers": int(workers),
