@@ -700,6 +700,25 @@ def _coverage_metrics(
     }
 
 
+def _entry_count_from_coverage(coverage_metrics: dict[str, JsonValue]) -> int:
+    files_seen_any = coverage_metrics.get("files_seen")
+    if isinstance(files_seen_any, int) and not isinstance(files_seen_any, bool):
+        return int(max(0, files_seen_any))
+    return 0
+
+
+def _inject_entry_count_aliases(
+    payload: dict[str, JsonValue],
+    *,
+    coverage_metrics: dict[str, JsonValue],
+) -> None:
+    entry_count = _entry_count_from_coverage(coverage_metrics)
+    payload["entry_count"] = int(entry_count)
+    # Backward-compatible alias for consumers that historically read `entries`
+    # as a scalar count. Prefer summary.files or coverage_metrics.files_seen.
+    payload["entries"] = int(entry_count)
+
+
 def _empty_string_hits_payload() -> dict[str, JsonValue]:
     counts: dict[str, int] = {k: 0 for k in _STRING_PATTERNS}
     return {
@@ -719,6 +738,7 @@ def _write_inventory_payload(
 ) -> bool:
     payload["errors"] = cast(JsonValue, _sorted_errors(errors))
     payload["coverage_metrics"] = coverage_metrics
+    _inject_entry_count_aliases(payload, coverage_metrics=coverage_metrics)
     if _safe_write_json(
         run_dir=run_dir,
         path=inventory_path,
@@ -751,6 +771,7 @@ def _write_inventory_payload(
         "errors": cast(JsonValue, _sorted_errors(errors)),
         "coverage_metrics": coverage_metrics,
     }
+    _inject_entry_count_aliases(minimal_payload, coverage_metrics=coverage_metrics)
     if "reason" in payload:
         minimal_payload["reason"] = payload["reason"]
     if "extracted_dir" in payload:
@@ -967,6 +988,8 @@ class InventoryStage:
                             "reason": reason,
                             "errors": _sorted_errors(errors),
                             "coverage_metrics": coverage_metrics,
+                            "entry_count": _entry_count_from_coverage(coverage_metrics),
+                            "entries": _entry_count_from_coverage(coverage_metrics),
                         },
                     ),
                     limitations=limitations,
@@ -1109,6 +1132,8 @@ class InventoryStage:
                         ),
                         "errors": _sorted_errors(errors),
                         "coverage_metrics": coverage_metrics,
+                        "entry_count": _entry_count_from_coverage(coverage_metrics),
+                        "entries": _entry_count_from_coverage(coverage_metrics),
                     },
                 ),
                 limitations=limitations,
@@ -1182,6 +1207,8 @@ class InventoryStage:
                         "extracted_dir": extracted_rel,
                         "errors": _sorted_errors(errors),
                         "coverage_metrics": coverage_metrics,
+                        "entry_count": _entry_count_from_coverage(coverage_metrics),
+                        "entries": _entry_count_from_coverage(coverage_metrics),
                     },
                 ),
                 limitations=limitations,

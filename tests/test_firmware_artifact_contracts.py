@@ -133,6 +133,11 @@ def test_inventory_json_contract_required_and_optional_shapes(tmp_path: Path) ->
     ):
         assert isinstance(coverage.get(key), int)
 
+    assert isinstance(payload.get("entry_count"), int)
+    assert isinstance(payload.get("entries"), int)
+    assert payload.get("entry_count") == coverage.get("files_seen")
+    assert payload.get("entries") == coverage.get("files_seen")
+
     roots_obj = payload.get("roots")
     if isinstance(roots_obj, list):
         for root in cast(list[object], roots_obj):

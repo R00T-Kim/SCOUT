@@ -1880,6 +1880,12 @@ def _resolve_subset_stages(
             raise ValueError("stage_name must be a non-empty, non-whitespace string")
         factory = factories.get(stage_name)
         if factory is None:
+            if stage_name == "findings":
+                raise ValueError(
+                    "Unknown stage 'findings'. "
+                    "findings are produced by the integrated run_findings() step during full analyze/analyze-8mb execution "
+                    "(artifacts: stages/findings/*.json)."
+                )
             raise ValueError(
                 f"Unknown stage '{stage_name}'. Valid stage names: {valid_names}"
             )

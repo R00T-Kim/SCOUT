@@ -87,6 +87,8 @@ Optional fields (present depending on run conditions):
 - `extracted_dir`: run-relative extraction directory path.
 - `artifacts.string_hits`: run-relative path to `stages/inventory/string_hits.json`.
 - `reason`: explanatory reason for fallback/recovery payloads.
+- `entry_count`: compatibility count alias for `coverage_metrics.files_seen`.
+- `entries`: deprecated scalar compatibility alias for `entry_count` (legacy consumers only; prefer `summary.files` or `coverage_metrics.files_seen`).
 
 Minimal v1 example:
 

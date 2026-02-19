@@ -217,6 +217,40 @@ def test_analyze_cli_stages_unknown_name_returns_clean_error(
     assert captured.err.strip() == "Unknown stage 'nope'. Valid stage names: tooling"
 
 
+def test_analyze_cli_stages_findings_name_returns_integrated_step_hint(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fw = _write_firmware(tmp_path)
+
+    def fake_run_subset(*_args: object, **_kwargs: object) -> object:
+        raise ValueError(
+            "Unknown stage 'findings'. findings are produced by the integrated run_findings() step during full analyze/analyze-8mb execution (artifacts: stages/findings/*.json)."
+        )
+
+    monkeypatch.setattr(run_mod, "run_subset", fake_run_subset)
+
+    rc = main(
+        [
+            "analyze",
+            str(fw),
+            "--case-id",
+            "case-findings-stage",
+            "--ack-authorization",
+            "--stages",
+            "findings",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert captured.out == ""
+    assert "Unknown stage 'findings'." in captured.err
+    assert "integrated run_findings() step" in captured.err
+
+
 def test_analyze_cli_stages_partial_status_returns_10(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

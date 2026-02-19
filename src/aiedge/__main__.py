@@ -3405,7 +3405,10 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = analyze.add_argument(
         "--stages",
         default=None,
-        help=("Comma-separated subset of stages to run (example: tooling,structure)."),
+        help=(
+            "Comma-separated subset of stage names to run (example: tooling,structure). "
+            "Note: findings is an integrated step in full analyze/analyze-8mb runs and is not a selectable stage."
+        ),
     )
     _ = analyze.add_argument(
         "--ref-md",
@@ -3496,7 +3499,10 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = analyze_8mb.add_argument(
         "--stages",
         default=None,
-        help=("Comma-separated subset of stages to run (example: tooling,structure)."),
+        help=(
+            "Comma-separated subset of stage names to run (example: tooling,structure). "
+            "Note: findings is an integrated step in full analyze/analyze-8mb runs and is not a selectable stage."
+        ),
     )
     _ = analyze_8mb.add_argument(
         "--ref-md",
@@ -3529,7 +3535,10 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = stages.add_argument(
         "--stages",
         required=True,
-        help=("Comma-separated subset of stages to run (example: tooling,structure)."),
+        help=(
+            "Comma-separated subset of stage names to run (example: tooling,structure). "
+            "Note: findings is an integrated step in full analyze/analyze-8mb runs and is not a selectable stage."
+        ),
     )
     _ = stages.add_argument(
         "--time-budget-s",

@@ -750,7 +750,7 @@ def _derive_items_from_graph(
 @dataclass(frozen=True)
 class AttackSurfaceStage:
     max_items: int = 500
-    max_unknowns: int = 200
+    max_unknowns: int = 400
 
     @property
     def name(self) -> str:

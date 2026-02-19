@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol, cast
@@ -35,6 +36,21 @@ StageFactory = Callable[[_RunInfoLike, str | None, Callable[[], float], bool], S
 
 def _quantize_remaining_budget_s(remaining_budget_s: float) -> int:
     return max(0, int(float(remaining_budget_s)))
+
+
+def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    if value < int(min_value):
+        return int(min_value)
+    if value > int(max_value):
+        return int(max_value)
+    return int(value)
 
 
 def _make_emulation_stage(
@@ -297,7 +313,19 @@ def _make_attack_surface_stage(
     no_llm: bool,
 ) -> Stage:
     _ = info, source_input_path, remaining_s, no_llm
-    return AttackSurfaceStage()
+    max_items = _env_int(
+        "AIEDGE_ATTACK_SURFACE_MAX_ITEMS",
+        default=500,
+        min_value=50,
+        max_value=5000,
+    )
+    max_unknowns = _env_int(
+        "AIEDGE_ATTACK_SURFACE_MAX_UNKNOWNS",
+        default=400,
+        min_value=50,
+        max_value=10000,
+    )
+    return AttackSurfaceStage(max_items=max_items, max_unknowns=max_unknowns)
 
 
 def _make_functional_spec_stage(
