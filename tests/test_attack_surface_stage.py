@@ -404,6 +404,201 @@ def test_run_subset_with_attack_surface_populates_report(tmp_path: Path) -> None
     assert items_any
 
 
+def test_attack_surface_aggregates_duplicate_edge_evidence_refs(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    run_dir = ctx.run_dir
+    _write_json(
+        run_dir / "stages" / "surfaces" / "surfaces.json",
+        {
+            "status": "ok",
+            "surfaces": [
+                {
+                    "surface_type": "web",
+                    "component": "httpd",
+                    "confidence": 0.9,
+                    "evidence_refs": ["stages/inventory/svc/httpd.conf"],
+                }
+            ],
+        },
+    )
+    _write_json(
+        run_dir / "stages" / "endpoints" / "endpoints.json",
+        {
+            "status": "ok",
+            "endpoints": [
+                {
+                    "type": "url",
+                    "value": "http://192.0.2.10/admin",
+                    "confidence": 0.9,
+                    "evidence_refs": ["stages/endpoints/httpd_url.txt"],
+                }
+            ],
+        },
+    )
+    _write_json(run_dir / "stages" / "attribution" / "attribution.json", {"claims": []})
+    _write_json(
+        run_dir / "stages" / "graph" / "communication_graph.json",
+        {
+            "status": "ok",
+            "nodes": [
+                {"id": "component:httpd", "type": "component", "label": "httpd"},
+                {"id": "surface:web:httpd", "type": "surface", "label": "web:httpd"},
+                {
+                    "id": "endpoint:url:http://192.0.2.10/admin",
+                    "type": "endpoint",
+                    "label": "url:http://192.0.2.10/admin",
+                },
+            ],
+            "edges": [
+                {
+                    "src": "component:httpd",
+                    "dst": "surface:web:httpd",
+                    "edge_type": "exposes",
+                    "evidence_refs": ["stages/graph/exposes_ref.txt"],
+                },
+                {
+                    "src": "component:httpd",
+                    "dst": "endpoint:url:http://192.0.2.10/admin",
+                    "edge_type": "runtime_flow",
+                    "evidence_refs": ["stages/graph/runtime_ref_a.txt"],
+                },
+                {
+                    "src": "component:httpd",
+                    "dst": "endpoint:url:http://192.0.2.10/admin",
+                    "edge_type": "runtime_flow",
+                    "evidence_refs": ["stages/graph/runtime_ref_b.txt"],
+                },
+            ],
+        },
+    )
+    _write_json(
+        run_dir / "stages" / "graph" / "reference_graph.json",
+        {"status": "ok", "nodes": [], "edges": []},
+    )
+    _write_json(
+        run_dir / "stages" / "graph" / "comm_graph.json",
+        {"status": "ok", "nodes": [], "edges": []},
+    )
+
+    outcome = AttackSurfaceStage().run(ctx)
+    assert outcome.status == "ok"
+    payload = _read_json_obj(run_dir / "stages" / "attack_surface" / "attack_surface.json")
+    items = cast(list[object], payload["attack_surface"])
+    assert items
+    first = cast(dict[str, object], items[0])
+    refs = cast(list[object], first["evidence_refs"])
+    ref_set = {cast(str, x) for x in refs if isinstance(x, str)}
+    assert "stages/graph/runtime_ref_a.txt" in ref_set
+    assert "stages/graph/runtime_ref_b.txt" in ref_set
+
+
+def test_attack_surface_promotes_reference_fallback_when_runtime_empty(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    run_dir = ctx.run_dir
+    _seed_attack_surface_inputs(run_dir)
+
+    # runtime communication graph has no endpoint linkage
+    _write_json(
+        run_dir / "stages" / "graph" / "communication_graph.json",
+        {
+            "status": "ok",
+            "nodes": [
+                {"id": "component:httpd", "type": "component", "label": "httpd"},
+                {"id": "surface:web:httpd", "type": "surface", "label": "web:httpd"},
+            ],
+            "edges": [
+                {
+                    "src": "component:httpd",
+                    "dst": "surface:web:httpd",
+                    "edge_type": "exposes",
+                    "evidence_refs": ["stages/inventory/svc/httpd.conf"],
+                }
+            ],
+        },
+    )
+
+    outcome = AttackSurfaceStage().run(ctx)
+    payload = _read_json_obj(run_dir / "stages" / "attack_surface" / "attack_surface.json")
+    summary = cast(dict[str, object], payload["summary"])
+    items = cast(list[object], payload["attack_surface"])
+    limits = cast(list[object], payload["limitations"])
+
+    assert outcome.status == "ok"
+    assert items
+    first = cast(dict[str, object], items[0])
+    assert first.get("promotion_status") == "promoted_fallback_reference"
+    assert cast(int, summary.get("fallback_promoted")) >= 1
+    assert any(
+        isinstance(x, str) and "promoted reference-only attack_surface fallback" in x
+        for x in limits
+    )
+
+
+def test_attack_surface_unknowns_prioritize_actionable_endpoints(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    run_dir = ctx.run_dir
+    _write_json(
+        run_dir / "stages" / "surfaces" / "surfaces.json",
+        {
+            "status": "ok",
+            "surfaces": [
+                {
+                    "surface_type": "web",
+                    "component": "httpd",
+                    "confidence": 0.9,
+                    "evidence_refs": ["stages/inventory/svc/httpd.conf"],
+                }
+            ],
+        },
+    )
+    _write_json(
+        run_dir / "stages" / "endpoints" / "endpoints.json",
+        {
+            "status": "ok",
+            "endpoints": [
+                {
+                    "type": "domain",
+                    "value": "example.org",
+                    "confidence": 0.65,
+                    "evidence_refs": ["stages/endpoints/domain_example.txt"],
+                },
+                {
+                    "type": "domain",
+                    "value": "admin.example.org",
+                    "confidence": 0.65,
+                    "evidence_refs": ["stages/endpoints/domain_admin.txt"],
+                },
+            ],
+        },
+    )
+    _write_json(run_dir / "stages" / "attribution" / "attribution.json", {"claims": []})
+    _write_json(
+        run_dir / "stages" / "graph" / "communication_graph.json",
+        {"status": "ok", "nodes": [], "edges": []},
+    )
+    _write_json(
+        run_dir / "stages" / "graph" / "reference_graph.json",
+        {"status": "ok", "nodes": [], "edges": []},
+    )
+    _write_json(
+        run_dir / "stages" / "graph" / "comm_graph.json",
+        {"status": "ok", "nodes": [], "edges": []},
+    )
+
+    outcome = AttackSurfaceStage().run(ctx)
+    assert outcome.status == "partial"
+
+    payload = _read_json_obj(run_dir / "stages" / "attack_surface" / "attack_surface.json")
+    unknowns = cast(list[object], payload["unknowns"])
+    endpoint_values = []
+    for item_any in unknowns:
+        item = cast(dict[str, object], item_any)
+        endpoint = cast(dict[str, object], item["endpoint"])
+        endpoint_values.append(cast(str, endpoint["value"]))
+    assert "admin.example.org" in endpoint_values
+    assert "example.org" not in endpoint_values
+
+
 def test_attack_surface_metrics_non_regression_gate(tmp_path: Path) -> None:
     benchmark = _load_benchmark_module()
     fixture = benchmark.load_attack_surface_benchmark_fixture()

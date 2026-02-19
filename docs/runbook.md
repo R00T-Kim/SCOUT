@@ -153,7 +153,26 @@ PYTHONPATH=src python3 -m aiedge tui <run_dir> --mode watch --interval-s 2
 PYTHONPATH=src python3 -m aiedge tui <run_dir> --mode interactive --limit 30
 ```
 
-Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `r` to refresh, `q` to quit.
+Interactive keys: `j/k` or arrow keys to navigate, `g/G` to jump, `t` threat panel, `c` candidate panel, `r` refresh, `q` quit.
+
+### 8.1) 2026-02-19 pipeline hardening snapshot (audited + fixed)
+
+The following weaknesses were found during full pipeline audit and patched:
+
+1. **Attack-surface edge evidence loss on duplicate graph edges**
+   - Fix: accumulate `evidence_refs` per `(src,dst,edge_type)` instead of overwrite.
+2. **Attack-surface cap sorted lexicographically (risk-blind truncation)**
+   - Fix: rank `attack_surface/non_promoted/unknowns` by risk-aware priority before cap.
+3. **Component over-linking by label when explicit `exposes` links exist**
+   - Fix: prefer explicit surface↔component graph linkage; only label-fallback when missing.
+4. **Runtime-empty attack surface produced 0 promoted items despite static evidence**
+   - Fix: promote top reference-only candidates as explicit fallback with traceable reason.
+5. **Threat model ignored `non_promoted` fallback**
+   - Fix: when runtime-linked attack surface is empty, infer threats from reference-only items.
+6. **Threat model dropped actionable unknown endpoints into manual-only bucket**
+   - Fix: risk-score unknowns, infer threat candidates for actionable unknown endpoints, track truncation count.
+7. **Interactive TUI hid threat model context**
+   - Fix: threat detail pane toggle (`t/c`), reason overflow indicator, and detail truncation indicator.
 
 - Open `<run_dir>/report/viewer.html` for the single-pane operator overview.
 - The viewer consumes `<run_dir>/report/analyst_overview.json` (`schema_version="analyst_overview-v1"`), which is a derived additive payload for navigation/summary and does not replace contract artifacts.

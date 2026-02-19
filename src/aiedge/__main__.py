@@ -2099,6 +2099,7 @@ def _draw_interactive_tui_frame(
             f"verdict {verdict_state}"
             + (
                 f"  |  reason: {', '.join(reason_codes[:2])}"
+                + (f" (+{len(reason_codes) - 2})" if len(reason_codes) > 2 else "")
                 if reason_codes
                 else "  |  reason: -"
             )
@@ -2530,7 +2531,9 @@ def _draw_interactive_tui_frame(
     else:
         details.append("No candidate groups available.")
 
-    for i, line in enumerate(details[:list_height]):
+    truncated_detail_lines = max(0, len(details) - list_height)
+    visible_detail_rows = list_height if truncated_detail_lines == 0 else max(1, list_height - 1)
+    for i, line in enumerate(details[:visible_detail_rows]):
         detail_attr = 0
         if line.startswith("attack:") or line.startswith("impact:"):
             detail_attr = _attr("warning", bold=True)
@@ -2554,6 +2557,14 @@ def _draw_interactive_tui_frame(
             x=right_x,
             text=line,
             attr=detail_attr,
+        )
+    if truncated_detail_lines > 0:
+        _safe_curses_addstr(
+            win,
+            y=list_top + visible_detail_rows,
+            x=right_x,
+            text=f"... (+{truncated_detail_lines} more lines)",
+            attr=_attr("meta"),
         )
 
     _safe_curses_addstr(

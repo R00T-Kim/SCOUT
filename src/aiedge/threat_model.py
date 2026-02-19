@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -149,6 +150,54 @@ def _infer_category(
     return "repudiation"
 
 
+_HIGH_RISK_UNKNOWN_RE = re.compile(
+    r"(admin|login|auth|token|session|debug|diag|shell|cgi|api|rpc|update|upgrade|firmware|ota|config|backup|restore|ssh|telnet|dropbear|ftp|mqtt|coap)",
+    re.IGNORECASE,
+)
+
+
+def _unknown_risk_score(
+    *,
+    endpoint_type: str,
+    endpoint_value: str,
+    reason: str,
+) -> float:
+    et = endpoint_type.lower()
+    ev = endpoint_value.lower()
+    reason_l = reason.lower()
+    score = 0.2
+    if et in {"url", "uri", "ipv4", "ipv6", "ip", "host", "hostname"}:
+        score += 0.45
+    elif et == "domain":
+        score += 0.25
+    if _HIGH_RISK_UNKNOWN_RE.search(ev):
+        score += 0.35
+    if "no communication-graph" in reason_l or "no deterministic mapping" in reason_l:
+        score += 0.1
+    if ev.startswith("http://") or ev.startswith("https://"):
+        score += 0.1
+    return max(0.0, min(1.0, score))
+
+
+def _is_actionable_unknown(
+    *,
+    endpoint_type: str,
+    endpoint_value: str,
+    reason: str,
+) -> bool:
+    score = _unknown_risk_score(
+        endpoint_type=endpoint_type,
+        endpoint_value=endpoint_value,
+        reason=reason,
+    )
+    et = endpoint_type.lower()
+    if et in {"url", "uri", "ipv4", "ipv6", "ip", "host", "hostname"}:
+        return score >= 0.5
+    if et == "domain":
+        return bool(_HIGH_RISK_UNKNOWN_RE.search(endpoint_value)) or score >= 0.75
+    return score >= 0.8
+
+
 @dataclass(frozen=True)
 class ThreatModelStage:
     max_threats: int = 1000
@@ -188,6 +237,9 @@ class ThreatModelStage:
             if attack_surface_obj is None
             else attack_surface_obj.get("attack_surface")
         )
+        non_promoted_any = (
+            None if attack_surface_obj is None else attack_surface_obj.get("non_promoted")
+        )
         unknowns_any = (
             None if attack_surface_obj is None else attack_surface_obj.get("unknowns")
         )
@@ -202,6 +254,14 @@ class ThreatModelStage:
                 "Attack-surface output missing list field: attack_surface"
             )
 
+        source_non_promoted: list[dict[str, object]] = []
+        if isinstance(non_promoted_any, list):
+            for item_any in cast(list[object], non_promoted_any):
+                if isinstance(item_any, dict):
+                    source_non_promoted.append(cast(dict[str, object], item_any))
+        elif attack_surface_obj is not None:
+            limitations.append("Attack-surface output missing list field: non_promoted")
+
         source_unknowns: list[dict[str, object]] = []
         if isinstance(unknowns_any, list):
             for item_any in cast(list[object], unknowns_any):
@@ -212,8 +272,22 @@ class ThreatModelStage:
 
         threats: list[dict[str, JsonValue]] = []
         category_refs: dict[str, list[str]] = {name: [] for name in _TAXONOMY_ORDER}
-
+        threat_source_entries: list[tuple[str, dict[str, object]]] = []
         for source in source_items:
+            threat_source_entries.append(("attack_surface", source))
+
+        non_promoted_used = 0
+        if not source_items and source_non_promoted:
+            limitations.append(
+                "Attack-surface runtime-linked items empty; falling back to non_promoted reference-only items"
+            )
+            for source in source_non_promoted:
+                threat_source_entries.append(("non_promoted", source))
+            non_promoted_used = len(source_non_promoted)
+
+        threat_keys_seen: set[tuple[str, str, str, str]] = set()
+
+        for source_kind, source in threat_source_entries:
             surface_any = source.get("surface")
             endpoint_any = source.get("endpoint")
             refs_any = source.get("evidence_refs")
@@ -233,6 +307,14 @@ class ThreatModelStage:
             if not isinstance(endpoint_type_any, str) or not endpoint_type_any:
                 continue
             if not isinstance(endpoint_value_any, str) or not endpoint_value_any:
+                continue
+            threat_key = (
+                surface_type_any,
+                component_any,
+                endpoint_type_any,
+                endpoint_value_any,
+            )
+            if threat_key in threat_keys_seen:
                 continue
 
             threat_refs: list[str] = []
@@ -255,6 +337,12 @@ class ThreatModelStage:
                 endpoint_value=endpoint_value_any,
             )
             category_refs[category].extend(threat_refs)
+            threat_keys_seen.add(threat_key)
+            source_note = (
+                "derived from runtime-linked attack_surface item"
+                if source_kind == "attack_surface"
+                else "derived from non_promoted static-reference fallback item"
+            )
 
             threats.append(
                 {
@@ -264,6 +352,8 @@ class ThreatModelStage:
                         "Static attack-surface evidence indicates this endpoint may be abused "
                         "without additional runtime controls."
                     ),
+                    "source": source_kind,
+                    "source_note": source_note,
                     "surface": {
                         "surface_type": surface_type_any,
                         "component": component_any,
@@ -278,24 +368,8 @@ class ThreatModelStage:
                 }
             )
 
-        threats = sorted(
-            threats,
-            key=lambda t: (
-                _TAXONOMY_RANK.get(str(t.get("category", "")), len(_TAXONOMY_ORDER)),
-                _threat_sort_key(t),
-            ),
-        )
-        if len(threats) > int(self.max_threats):
-            limitations.append(
-                f"Threat-model extraction reached max_threats cap ({int(self.max_threats)}); additional threats were skipped"
-            )
-            threats = threats[: int(self.max_threats)]
-
-        for i, threat in enumerate(threats, start=1):
-            category = str(threat.get("category", "repudiation"))
-            threat["threat_id"] = f"tm.{category}.{i:04d}"
-
-        unknowns: list[dict[str, JsonValue]] = []
+        unknowns_all: list[dict[str, JsonValue]] = []
+        inferred_unknown_threats = 0
         for item in source_unknowns:
             endpoint_any = item.get("endpoint")
             refs_any = item.get("evidence_refs")
@@ -325,25 +399,107 @@ class ThreatModelStage:
                 if isinstance(reason_any, str) and reason_any
                 else "Attack-surface unknown mapping requires manual review"
             )
-            unknowns.append(
-                {
-                    "reason": reason,
-                    "endpoint": {
-                        "type": endpoint_type_any,
-                        "value": endpoint_value_any,
-                    },
-                    "evidence_refs": cast(
-                        list[JsonValue], cast(list[object], unknown_refs)
-                    ),
-                }
+            risk_score = _unknown_risk_score(
+                endpoint_type=endpoint_type_any,
+                endpoint_value=endpoint_value_any,
+                reason=reason,
+            )
+            unknown_item: dict[str, JsonValue] = {
+                "reason": reason,
+                "endpoint": {
+                    "type": endpoint_type_any,
+                    "value": endpoint_value_any,
+                },
+                "risk_score": round(float(risk_score), 4),
+                "evidence_refs": cast(
+                    list[JsonValue], cast(list[object], unknown_refs)
+                ),
+            }
+            unknowns_all.append(unknown_item)
+
+            if (
+                len(threats) < int(self.max_threats)
+                and _is_actionable_unknown(
+                    endpoint_type=endpoint_type_any,
+                    endpoint_value=endpoint_value_any,
+                    reason=reason,
+                )
+            ):
+                category = _infer_category(
+                    surface_type="unknown_surface",
+                    endpoint_type=endpoint_type_any,
+                    endpoint_value=endpoint_value_any,
+                )
+                threat_key = (
+                    "unknown_surface",
+                    "unmapped_endpoint",
+                    endpoint_type_any,
+                    endpoint_value_any,
+                )
+                if threat_key not in threat_keys_seen:
+                    threat_keys_seen.add(threat_key)
+                    category_refs[category].extend(unknown_refs)
+                    threats.append(
+                        {
+                            "category": category,
+                            "title": (
+                                f"{category.replace('_', ' ').title()} risk on "
+                                "unknown_surface:unmapped_endpoint"
+                            ),
+                            "description": (
+                                "Unknown endpoint has no deterministic component mapping; "
+                                "treated as suspicious exposed surface candidate."
+                            ),
+                            "source": "unknown_inference",
+                            "source_note": "derived from attack_surface unknown endpoint",
+                            "surface": {
+                                "surface_type": "unknown_surface",
+                                "component": "unmapped_endpoint",
+                            },
+                            "endpoint": {
+                                "type": endpoint_type_any,
+                                "value": endpoint_value_any,
+                            },
+                            "evidence_refs": cast(
+                                list[JsonValue], cast(list[object], unknown_refs)
+                            ),
+                        }
+                    )
+                    inferred_unknown_threats += 1
+
+        unknowns_all = sorted(
+            unknowns_all,
+            key=lambda item: (
+                -float(item.get("risk_score", 0.0))
+                if isinstance(item.get("risk_score"), (int, float))
+                else 0.0,
+                _unknown_sort_key(item),
+            ),
+        )
+        unknowns_truncated = max(0, len(unknowns_all) - int(self.max_unknowns))
+        unknowns = unknowns_all[: int(self.max_unknowns)]
+        if unknowns_truncated > 0:
+            limitations.append(
+                f"Threat-model extraction reached max_unknowns cap ({int(self.max_unknowns)}); {unknowns_truncated} unknown entries were skipped"
             )
 
-        unknowns = sorted(unknowns, key=_unknown_sort_key)
-        if len(unknowns) > int(self.max_unknowns):
+        threats = sorted(
+            threats,
+            key=lambda t: (
+                _TAXONOMY_RANK.get(str(t.get("category", "")), len(_TAXONOMY_ORDER)),
+                _threat_sort_key(t),
+            ),
+        )
+        if len(threats) > int(self.max_threats):
+            skipped = len(threats) - int(self.max_threats)
             limitations.append(
-                f"Threat-model extraction reached max_unknowns cap ({int(self.max_unknowns)}); additional unknown entries were skipped"
+                f"Threat-model extraction reached max_threats cap ({int(self.max_threats)}); {skipped} threats were skipped"
             )
-            unknowns = unknowns[: int(self.max_unknowns)]
+            threats = threats[: int(self.max_threats)]
+
+        for i, threat in enumerate(threats, start=1):
+            category = str(threat.get("category", "repudiation"))
+            threat["threat_id"] = f"tm.{category}.{i:04d}"
 
         assumptions: list[dict[str, JsonValue]] = [
             {
@@ -372,7 +528,7 @@ class ThreatModelStage:
                 }
             )
 
-        if not source_items:
+        if (not source_items) and non_promoted_used == 0:
             limitations.append(
                 "No attack-surface items available for deterministic threat modeling"
             )
@@ -386,6 +542,11 @@ class ThreatModelStage:
                 list[JsonValue], cast(list[object], list(_TAXONOMY_ORDER))
             ),
             "attack_surface_items": len(source_items),
+            "non_promoted_items": len(source_non_promoted),
+            "non_promoted_used_for_threats": int(non_promoted_used),
+            "unknowns_input": len(source_unknowns),
+            "unknowns_truncated": int(unknowns_truncated),
+            "unknown_inferred_threats": int(inferred_unknown_threats),
             "threats": len(threats),
             "assumptions": len(assumptions),
             "mitigations": len(mitigations),
@@ -408,7 +569,10 @@ class ThreatModelStage:
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
             ),
-            "note": "Threat model uses deterministic STRIDE-like categorization from attack_surface evidence only.",
+            "note": (
+                "Threat model uses deterministic STRIDE-like categorization from attack_surface "
+                "evidence with optional non_promoted fallback and unknown-endpoint inference."
+            ),
         }
         _ = out_json.write_text(
             json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",

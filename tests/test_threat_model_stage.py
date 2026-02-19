@@ -165,7 +165,7 @@ def test_threat_model_stage_compatible_with_empty_promoted_attack_surface(
     outcome = ThreatModelStage().run(ctx)
     assert outcome.status == "partial"
     assert any(
-        "No attack-surface items available for deterministic threat modeling" in x
+        "falling back to non_promoted reference-only items" in x
         for x in outcome.limitations
     )
 
@@ -176,9 +176,56 @@ def test_threat_model_stage_compatible_with_empty_promoted_attack_surface(
     assert isinstance(summary_any, dict)
     summary = cast(dict[str, object], summary_any)
     assert summary.get("attack_surface_items") == 0
+    assert cast(int, summary.get("non_promoted_used_for_threats", 0)) >= 1
     threats_any = payload.get("threats")
     assert isinstance(threats_any, list)
-    assert not cast(list[object], threats_any)
+    assert cast(list[object], threats_any)
+
+
+def test_threat_model_stage_infers_threats_from_actionable_unknowns(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write_json(
+        ctx.run_dir / "stages" / "attack_surface" / "attack_surface.json",
+        {
+            "status": "partial",
+            "summary": {"attack_surface_items": 0, "unknowns": 2, "non_promoted": 0},
+            "attack_surface": [],
+            "non_promoted": [],
+            "unknowns": [
+                {
+                    "reason": "Endpoint exists but no communication-graph mapping path was found",
+                    "endpoint": {"type": "url", "value": "http://192.0.2.10/admin"},
+                    "evidence_refs": ["stages/attack_surface/unknown_admin.txt"],
+                },
+                {
+                    "reason": "Endpoint exists but no deterministic mapping path was found",
+                    "endpoint": {"type": "domain", "value": "example.org"},
+                    "evidence_refs": ["stages/attack_surface/unknown_example.txt"],
+                },
+            ],
+        },
+    )
+
+    outcome = ThreatModelStage().run(ctx)
+    assert outcome.status == "partial"
+
+    out_path = ctx.run_dir / "stages" / "threat_model" / "threat_model.json"
+    payload = _read_json_obj(out_path)
+    summary_any = payload.get("summary")
+    assert isinstance(summary_any, dict)
+    summary = cast(dict[str, object], summary_any)
+    assert cast(int, summary.get("unknown_inferred_threats", 0)) >= 1
+    threats_any = payload.get("threats")
+    assert isinstance(threats_any, list)
+    threats = cast(list[object], threats_any)
+    assert threats
+    assert any(
+        isinstance(t, dict)
+        and cast(dict[str, object], t).get("source") == "unknown_inference"
+        for t in threats
+    )
 
 
 def test_run_subset_with_threat_model_populates_report(tmp_path: Path) -> None:

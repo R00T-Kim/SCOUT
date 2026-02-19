@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -301,6 +302,12 @@ def _unknown_item_sort_key(item: dict[str, JsonValue]) -> tuple[str, str]:
     return (str(endpoint.get("type", "")), str(endpoint.get("value", "")))
 
 
+_HIGH_RISK_ENDPOINT_TOKEN_RE = re.compile(
+    r"(admin|login|auth|token|session|debug|diag|shell|cgi|api|rpc|soap|update|upgrade|firmware|ota|config|backup|restore|ssh|telnet|dropbear|ftp|mqtt|coap)",
+    re.IGNORECASE,
+)
+
+
 @dataclass(frozen=True)
 class _SurfaceRecord:
     surface_type: str
@@ -331,6 +338,130 @@ class _GraphEdge:
     dst: str
     edge_type: str
     refs: tuple[str, ...]
+
+
+def _endpoint_risk_score(
+    *,
+    endpoint_type: str,
+    endpoint_value: str,
+    confidence: float,
+    evidence_count: int,
+) -> float:
+    score = 0.1 + (max(0.0, min(1.0, float(confidence))) * 0.3)
+    et = endpoint_type.lower()
+    ev = endpoint_value.lower()
+
+    if et in {"url", "uri", "ipv4", "ipv6", "ip", "host", "hostname"}:
+        score += 0.35
+    elif et == "domain":
+        score += 0.1
+    else:
+        score += 0.05
+
+    if _HIGH_RISK_ENDPOINT_TOKEN_RE.search(ev):
+        score += 0.4
+
+    if ev.startswith("http://") or ev.startswith("https://"):
+        score += 0.1
+
+    if evidence_count >= 3:
+        score += 0.1
+    elif evidence_count >= 1:
+        score += 0.04
+
+    return max(0.0, min(1.0, score))
+
+
+def _is_actionable_unknown_endpoint(
+    *,
+    endpoint_type: str,
+    endpoint_value: str,
+    confidence: float,
+    evidence_count: int,
+) -> bool:
+    score = _endpoint_risk_score(
+        endpoint_type=endpoint_type,
+        endpoint_value=endpoint_value,
+        confidence=confidence,
+        evidence_count=evidence_count,
+    )
+    et = endpoint_type.lower()
+    ev = endpoint_value.lower()
+    if et in {"url", "uri", "ipv4", "ipv6", "ip", "host", "hostname"}:
+        return score >= 0.45
+    if et == "domain":
+        return bool(_HIGH_RISK_ENDPOINT_TOKEN_RE.search(ev)) or score >= 0.78
+    return score >= 0.75
+
+
+def _item_priority_score(item: dict[str, JsonValue]) -> float:
+    endpoint_any = item.get("endpoint")
+    endpoint_type = ""
+    endpoint_value = ""
+    if isinstance(endpoint_any, dict):
+        endpoint = cast(dict[str, object], endpoint_any)
+        endpoint_type = str(endpoint.get("type", ""))
+        endpoint_value = str(endpoint.get("value", ""))
+
+    confidence_any = item.get("confidence_calibrated")
+    confidence = float(confidence_any) if isinstance(confidence_any, (int, float)) else 0.5
+
+    refs_any = item.get("evidence_refs")
+    refs_count = (
+        len([x for x in cast(list[object], refs_any) if isinstance(x, str)])
+        if isinstance(refs_any, list)
+        else 0
+    )
+    score = _endpoint_risk_score(
+        endpoint_type=endpoint_type,
+        endpoint_value=endpoint_value,
+        confidence=confidence,
+        evidence_count=refs_count,
+    )
+    observation = str(item.get("observation", ""))
+    if observation == "runtime_communication":
+        score += 0.15
+    elif observation == "static_reference":
+        score += 0.05
+    return max(0.0, min(1.0, score))
+
+
+def _attack_surface_priority_sort_key(
+    item: dict[str, JsonValue],
+) -> tuple[float, tuple[str, str, str, str]]:
+    return (
+        -_item_priority_score(item),
+        _attack_surface_item_sort_key(item),
+    )
+
+
+def _unknown_priority_sort_key(
+    item: dict[str, JsonValue],
+) -> tuple[float, tuple[str, str]]:
+    endpoint_any = item.get("endpoint")
+    endpoint_type = ""
+    endpoint_value = ""
+    if isinstance(endpoint_any, dict):
+        endpoint = cast(dict[str, object], endpoint_any)
+        endpoint_type = str(endpoint.get("type", ""))
+        endpoint_value = str(endpoint.get("value", ""))
+
+    confidence_any = item.get("confidence")
+    confidence = float(confidence_any) if isinstance(confidence_any, (int, float)) else 0.5
+
+    refs_any = item.get("evidence_refs")
+    refs_count = (
+        len([x for x in cast(list[object], refs_any) if isinstance(x, str)])
+        if isinstance(refs_any, list)
+        else 0
+    )
+    score = _endpoint_risk_score(
+        endpoint_type=endpoint_type,
+        endpoint_value=endpoint_value,
+        confidence=confidence,
+        evidence_count=refs_count,
+    )
+    return (-score, _unknown_item_sort_key(item))
 
 
 def _extract_graph_records(
@@ -447,12 +578,13 @@ def _derive_items_from_graph(
     component_ids_by_surface_id: dict[str, set[str]] = {}
     endpoint_ids_by_component_id: dict[str, set[str]] = {}
     endpoint_ids_by_surface_id: dict[str, set[str]] = {}
-    edge_refs_by_key: dict[tuple[str, str, str], tuple[str, ...]] = {}
+    edge_refs_by_key: dict[tuple[str, str, str], list[str]] = {}
     for edge in sorted(
         graph_edges,
         key=lambda e: (e.edge_type, e.src, e.dst, e.refs),
     ):
-        edge_refs_by_key[(edge.src, edge.dst, edge.edge_type)] = edge.refs
+        key = (edge.src, edge.dst, edge.edge_type)
+        edge_refs_by_key.setdefault(key, []).extend(list(edge.refs))
         src_node = graph_nodes.get(edge.src)
         dst_node = graph_nodes.get(edge.dst)
         if src_node is None or dst_node is None:
@@ -488,14 +620,20 @@ def _derive_items_from_graph(
         surface_node_ids = sorted(
             surface_node_ids_by_label.get(surface_node_label, set())
         )
-        component_node_ids = sorted(
-            component_node_ids_by_label.get(surface.component, set())
-        )
+        component_node_ids_from_exposes: set[str] = set()
         for surface_node_id in surface_node_ids:
-            component_node_ids.extend(
-                sorted(component_ids_by_surface_id.get(surface_node_id, set()))
+            component_node_ids_from_exposes.update(
+                component_ids_by_surface_id.get(surface_node_id, set())
             )
-        component_node_ids = sorted(set(component_node_ids))
+
+        # Prefer explicit graph linkage (surface<->component via exposes).
+        # Fallback to label matching only when exposes linkage is unavailable.
+        if component_node_ids_from_exposes:
+            component_node_ids = sorted(component_node_ids_from_exposes)
+        else:
+            component_node_ids = sorted(
+                component_node_ids_by_label.get(surface.component, set())
+            )
 
         endpoint_node_ids: set[str] = set()
         for component_node_id in component_node_ids:
@@ -873,6 +1011,28 @@ class AttackSurfaceStage:
             source_graph=str(_rel_to_run_dir(run_dir, reference_graph_source)),
         )
 
+        fallback_promoted = 0
+        if not attack_surface and reference_candidates:
+            ranked_reference = sorted(
+                reference_candidates,
+                key=_attack_surface_priority_sort_key,
+            )
+            fallback_limit = min(int(self.max_items), 80)
+            promoted_fallback: list[dict[str, JsonValue]] = []
+            for candidate in ranked_reference[:fallback_limit]:
+                promoted = dict(candidate)
+                promoted["promotion_status"] = "promoted_fallback_reference"
+                promoted["reason"] = (
+                    "Promoted from reference-only linkage because runtime communication mapping was unavailable"
+                )
+                promoted_fallback.append(promoted)
+            if promoted_fallback:
+                attack_surface = promoted_fallback
+                fallback_promoted = len(promoted_fallback)
+                limitations.append(
+                    "Runtime communication mapping empty; promoted reference-only attack_surface fallback"
+                )
+
         promoted_keys = {_attack_surface_item_sort_key(item) for item in attack_surface}
         non_promoted: list[dict[str, JsonValue]] = []
         for candidate in reference_candidates:
@@ -933,10 +1093,28 @@ class AttackSurfaceStage:
             evidence_refs = _sorted_unique_refs(unknown_refs)
             if not evidence_refs:
                 continue
+            endpoint_confidence = (
+                endpoint_record.confidence if endpoint_record is not None else 0.5
+            )
+            if not _is_actionable_unknown_endpoint(
+                endpoint_type=endpoint_type,
+                endpoint_value=endpoint_value,
+                confidence=endpoint_confidence,
+                evidence_count=len(evidence_refs),
+            ):
+                continue
+            risk_score = _endpoint_risk_score(
+                endpoint_type=endpoint_type,
+                endpoint_value=endpoint_value,
+                confidence=endpoint_confidence,
+                evidence_count=len(evidence_refs),
+            )
             unknowns.append(
                 {
                     "reason": "Endpoint exists but no communication-graph or reference-graph mapping path was found",
                     "endpoint": {"type": endpoint_type, "value": endpoint_value},
+                    "confidence": round(float(endpoint_confidence), 4),
+                    "risk_score": round(float(risk_score), 4),
                     "evidence_refs": cast(
                         list[JsonValue], cast(list[object], evidence_refs)
                     ),
@@ -945,9 +1123,9 @@ class AttackSurfaceStage:
                 }
             )
 
-        attack_surface = sorted(attack_surface, key=_attack_surface_item_sort_key)
-        non_promoted = sorted(non_promoted, key=_attack_surface_item_sort_key)
-        unknowns = sorted(unknowns, key=_unknown_item_sort_key)
+        attack_surface = sorted(attack_surface, key=_attack_surface_priority_sort_key)
+        non_promoted = sorted(non_promoted, key=_attack_surface_priority_sort_key)
+        unknowns = sorted(unknowns, key=_unknown_priority_sort_key)
 
         if len(attack_surface) > int(self.max_items):
             limitations.append(
@@ -1000,6 +1178,7 @@ class AttackSurfaceStage:
             "attack_surface_items": len(attack_surface),
             "non_promoted": len(non_promoted),
             "unknowns": len(unknowns),
+            "fallback_promoted": int(fallback_promoted),
             "classification": "candidate",
             "observation": "runtime_communication",
         }
