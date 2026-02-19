@@ -85,6 +85,18 @@ def _make_exploit_chain_stage(
     return cls()
 
 
+def _make_exploit_autopoc_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    _ = info, source_input_path, remaining_s, no_llm
+    mod = importlib.import_module("aiedge.exploit_autopoc")
+    cls = cast(type[Stage], getattr(mod, "ExploitAutoPoCStage"))
+    return cls()
+
+
 def _make_exploit_policy_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -343,6 +355,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "dynamic_validation": _make_dynamic_validation_stage,
     "exploit_gate": _make_exploit_gate_stage,
     "exploit_chain": _make_exploit_chain_stage,
+    "exploit_autopoc": _make_exploit_autopoc_stage,
     "poc_validation": _make_poc_validation_stage,
     "exploit_policy": _make_exploit_policy_stage,
 }

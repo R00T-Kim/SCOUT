@@ -1008,6 +1008,7 @@ def _build_exploit_assessment(
     stage_names = (
         "exploit_gate",
         "exploit_chain",
+        "exploit_autopoc",
         "poc_validation",
         "exploit_policy",
     )
@@ -1773,7 +1774,12 @@ def _apply_stage_result_to_report(
         }
         return
 
-    if stage in ("exploit_gate", "exploit_chain", "exploit_policy"):
+    if stage in (
+        "exploit_gate",
+        "exploit_chain",
+        "exploit_autopoc",
+        "exploit_policy",
+    ):
         exploit_stage_evidence = normalize_evidence_list(
             details.get("evidence"),
             fallback=[
@@ -3587,6 +3593,41 @@ def analyze_run(
         force_retriage=force_retriage,
     )
     report["findings"] = cast(list[JsonValue], cast(list[object], deduped_findings))
+
+    if manifest_profile == "exploit":
+        try:
+            from .exploit_autopoc import ExploitAutoPoCStage
+
+            autopoc_stage: Stage = ExploitAutoPoCStage()
+            autopoc_rep = run_stages([autopoc_stage], ctx)
+            _write_stage_manifests(
+                ctx=ctx,
+                stages=[autopoc_stage],
+                report=autopoc_rep,
+            )
+            for stage_result in autopoc_rep.stage_results:
+                _apply_stage_result_to_report(report, stage_result, budget_s=budget_s)
+            if autopoc_rep.limitations:
+                existing_limits_after_autopoc = normalize_limitations_list(
+                    report.get("limitations")
+                )
+                report["limitations"] = cast(
+                    list[JsonValue],
+                    list(existing_limits_after_autopoc) + list(autopoc_rep.limitations),
+                )
+        except Exception as exc:
+            existing_limits_after_autopoc_err = normalize_limitations_list(
+                report.get("limitations")
+            )
+            report["limitations"] = cast(
+                list[JsonValue],
+                list(existing_limits_after_autopoc_err)
+                + [
+                    "exploit_autopoc execution failed: "
+                    + f"{type(exc).__name__}: {exc}"
+                ],
+            )
+
     report["exploit_assessment"] = _build_exploit_assessment(
         profile=manifest_profile, report=report, run_dir=info.run_dir
     )

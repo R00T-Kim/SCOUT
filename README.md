@@ -433,8 +433,13 @@ cd /path/to/SCOUT
 
 # Rerun specific stages on existing run
 ./scout stages aiedge-runs/<run_id> \
-  --ack-authorization --no-llm \
+  --no-llm \
   --stages inventory
+
+# Auto-generate non-weaponized PoC probes for chain-backed exploit candidates
+./scout stages aiedge-runs/<run_id> \
+  --no-llm \
+  --stages exploit_autopoc
 ```
 
 ### With Terminator Orchestration (Full Pipeline)

@@ -37,6 +37,17 @@ PYTHONPATH=src python3 -m aiedge stages <run_dir> \
 
 ## 3) Inject private exploit code and capture evidence-only artifacts
 
+`profile=exploit` runs now auto-generate and execute deterministic non-weaponized PoC probes for
+`chain_id`-backed candidates (`stages/exploit_autopoc/*` and `exploits/chain_*/evidence_bundle.json`).
+
+Re-run only this step when needed:
+
+```bash
+PYTHONPATH=src python3 -m aiedge stages <run_dir> --stages exploit_autopoc --no-llm
+```
+
+Use manual/private plugin injection only when you want to override with your own exploit logic:
+
 ```bash
 python3 exploit_runner.py \
   --run-dir <run_dir> \
