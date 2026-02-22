@@ -171,6 +171,143 @@ def test_analyze_cli_rootfs_writes_manifest_marker(
     assert calls["force_retriage"] is False
 
 
+def test_analyze_cli_scan_limits_write_manifest_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fw = _write_firmware(tmp_path)
+    calls: dict[str, object] = {}
+
+    def fake_analyze_run(
+        info: run_mod.RunInfo,
+        *,
+        time_budget_s: int,
+        no_llm: bool,
+        force_retriage: bool,
+    ) -> str:
+        manifest = cast(
+            dict[str, object],
+            json.loads(info.manifest_path.read_text(encoding="utf-8")),
+        )
+        calls["scan_limits"] = manifest.get("scan_limits")
+        calls["time_budget_s"] = time_budget_s
+        calls["no_llm"] = no_llm
+        calls["force_retriage"] = force_retriage
+        return "ok"
+
+    monkeypatch.setattr(run_mod, "analyze_run", fake_analyze_run)
+
+    rc = main(
+        [
+            "analyze",
+            str(fw),
+            "--case-id",
+            "case-scan-limits-marker",
+            "--ack-authorization",
+            "--max-files",
+            "9000",
+            "--max-matches",
+            "25000",
+            "--no-llm",
+        ]
+    )
+
+    assert rc == 0
+    _ = Path(capsys.readouterr().out.strip())
+    assert calls["scan_limits"] == {"max_files": 9000, "max_matches": 25000}
+    assert calls["time_budget_s"] == 3600
+    assert calls["no_llm"] is True
+    assert calls["force_retriage"] is False
+
+
+def test_analyze_cli_rejects_non_positive_scan_limits(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fw = _write_firmware(tmp_path)
+
+    rc = main(
+        [
+            "analyze",
+            str(fw),
+            "--case-id",
+            "case-invalid-scan-limits",
+            "--ack-authorization",
+            "--max-files",
+            "0",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert captured.out == ""
+    assert "--max-files must be a positive integer." in captured.err
+
+
+def test_stages_cli_scan_limits_write_manifest_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fw = _write_firmware(tmp_path)
+    info = run_mod.create_run(
+        str(fw),
+        case_id="case-stages-scan-limits",
+        ack_authorization=True,
+    )
+    calls: dict[str, object] = {}
+
+    def fake_load_existing_run(run_dir: str) -> run_mod.RunInfo:
+        assert Path(run_dir) == info.run_dir
+        return info
+
+    def fake_run_subset(
+        _info: run_mod.RunInfo,
+        stage_names: list[str],
+        *,
+        time_budget_s: int,
+        no_llm: bool,
+    ) -> object:
+        manifest = cast(
+            dict[str, object],
+            json.loads(info.manifest_path.read_text(encoding="utf-8")),
+        )
+        calls["scan_limits"] = manifest.get("scan_limits")
+        calls["stage_names"] = stage_names
+        calls["time_budget_s"] = time_budget_s
+        calls["no_llm"] = no_llm
+        return SimpleNamespace(status="ok")
+
+    monkeypatch.setattr(run_mod, "load_existing_run", fake_load_existing_run)
+    monkeypatch.setattr(run_mod, "run_subset", fake_run_subset)
+
+    rc = main(
+        [
+            "stages",
+            str(info.run_dir),
+            "--stages",
+            "tooling",
+            "--max-files",
+            "7000",
+            "--max-matches",
+            "17000",
+            "--no-llm",
+        ]
+    )
+
+    assert rc == 0
+    assert Path(capsys.readouterr().out.strip()) == info.run_dir
+    assert calls["scan_limits"] == {"max_files": 7000, "max_matches": 17000}
+    assert calls["stage_names"] == ["tooling"]
+    assert calls["time_budget_s"] == 3600
+    assert calls["no_llm"] is True
+
+
 def test_analyze_cli_rejects_missing_rootfs_dir(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

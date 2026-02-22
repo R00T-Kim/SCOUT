@@ -206,6 +206,65 @@ def test_endpoints_stage_tolerates_invalid_ipv6_url_like_tokens(tmp_path: Path) 
     assert "valid.example.net" in values
 
 
+def test_endpoints_stage_prioritizes_http_paths_and_drops_domain_like_noise(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    root_dir = ctx.run_dir / "stages" / "carving" / "roots" / "root0"
+    _ = (root_dir / "usr" / "syno" / "webapi").mkdir(parents=True, exist_ok=True)
+    _ = (root_dir / "usr" / "syno" / "webman").mkdir(parents=True, exist_ok=True)
+    _ = (root_dir / "usr" / "syno" / "webapi" / "auth.cgi").write_text(
+        "token=abc\n",
+        encoding="utf-8",
+    )
+    _ = (root_dir / "usr" / "syno" / "webman" / "login.cgi").write_text(
+        "session=xyz\n",
+        encoding="utf-8",
+    )
+    _ = (root_dir / "usr" / "syno" / "webapi" / "noise.txt").write_text(
+        "\n".join(
+            [
+                "a.addclass",
+                "1.pid",
+                "4-b.getday",
+                "api.example.org",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _write_inventory(
+        ctx,
+        roots=["stages/carving/roots/root0"],
+        extracted_dir="stages/extraction/_firmware.bin.extracted",
+    )
+
+    out = EndpointsStage().run(ctx)
+    assert out.status == "ok"
+
+    payload = _read_json_obj(ctx.run_dir / "stages" / "endpoints" / "endpoints.json")
+    endpoints_any = payload.get("endpoints")
+    assert isinstance(endpoints_any, list)
+    endpoints = cast(list[object], endpoints_any)
+
+    endpoint_pairs = {
+        (
+            cast(str, cast(dict[str, object], item).get("type")),
+            cast(str, cast(dict[str, object], item).get("value")),
+        )
+        for item in endpoints
+        if isinstance(item, dict)
+    }
+
+    assert ("http_path", "/webapi/auth.cgi") in endpoint_pairs
+    assert ("http_path", "/webman/login.cgi") in endpoint_pairs
+    assert ("domain", "api.example.org") in endpoint_pairs
+    assert ("domain", "a.addclass") not in endpoint_pairs
+    assert ("domain", "1.pid") not in endpoint_pairs
+    assert ("domain", "4-b.getday") not in endpoint_pairs
+
+
 def test_run_subset_with_endpoints_populates_report(tmp_path: Path) -> None:
     firmware = tmp_path / "firmware.bin"
     _ = firmware.write_bytes(b"endpoints-subset")
@@ -312,3 +371,52 @@ def test_endpoints_stage_false_positive_controls_for_dotted_noise(
     assert "accountmsg.ko" not in domain_values
     assert "configblob.ko" not in domain_values
     assert "authority.runtime" not in domain_values
+
+
+def test_endpoints_stage_second_pass_filters_code_like_domain_noise(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    root_dir = ctx.run_dir / "stages" / "carving" / "roots" / "root0"
+    root_dir.mkdir(parents=True)
+    _ = (root_dir / "symbols2.txt").write_text(
+        "\n".join(
+            [
+                "a.constructor.name",
+                "z.fn.on",
+                "zlib.so",
+                "zipfile.py",
+                "api.synology.com",
+                "zh.wikipedia.org",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _write_inventory(
+        ctx,
+        roots=["stages/carving/roots/root0"],
+        extracted_dir="stages/extraction/_firmware.bin.extracted",
+    )
+
+    out = EndpointsStage().run(ctx)
+    assert out.status == "ok"
+
+    payload = _read_json_obj(ctx.run_dir / "stages" / "endpoints" / "endpoints.json")
+    endpoints_any = payload.get("endpoints")
+    assert isinstance(endpoints_any, list)
+    endpoints = cast(list[object], endpoints_any)
+    domain_values = [
+        cast(str, cast(dict[str, object], item).get("value"))
+        for item in endpoints
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("type") == "domain"
+    ]
+
+    assert "a.constructor.name" not in domain_values
+    assert "z.fn.on" not in domain_values
+    assert "zlib.so" not in domain_values
+    assert "zipfile.py" not in domain_values
+    assert "api.synology.com" in domain_values
+    assert "zh.wikipedia.org" in domain_values

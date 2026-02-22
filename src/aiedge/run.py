@@ -1184,6 +1184,68 @@ def _load_manifest_rootfs_path(path: Path) -> str | None:
     return None
 
 
+def _clamp_int(value: int, *, min_value: int, max_value: int) -> int:
+    if value < int(min_value):
+        return int(min_value)
+    if value > int(max_value):
+        return int(max_value)
+    return int(value)
+
+
+def _load_manifest_scan_limits(path: Path) -> tuple[int | None, int | None]:
+    try:
+        data = cast(object, json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    scan_limits_any = cast(dict[str, object], data).get("scan_limits")
+    if not isinstance(scan_limits_any, dict):
+        return None, None
+    scan_limits = cast(dict[str, object], scan_limits_any)
+    max_files_any = scan_limits.get("max_files")
+    max_matches_any = scan_limits.get("max_matches")
+    max_files = max_files_any if isinstance(max_files_any, int) and max_files_any > 0 else None
+    max_matches = (
+        max_matches_any
+        if isinstance(max_matches_any, int) and max_matches_any > 0
+        else None
+    )
+    return max_files, max_matches
+
+
+def _adaptive_scan_limits_for_input_size(input_size_bytes: int) -> tuple[int, int]:
+    mb = max(0.0, float(input_size_bytes) / float(1024 * 1024))
+    if mb <= 16:
+        return 2000, 5000
+    if mb <= 64:
+        return 4000, 10000
+    if mb <= 128:
+        return 8000, 20000
+    if mb <= 256:
+        return 12000, 30000
+    return 20000, 50000
+
+
+def _resolve_scan_limits_for_run(info: RunInfo) -> tuple[int, int]:
+    adaptive_files, adaptive_matches = _adaptive_scan_limits_for_input_size(
+        int(max(0, info.input_size_bytes))
+    )
+    manifest_files, manifest_matches = _load_manifest_scan_limits(info.manifest_path)
+    max_files = (
+        int(manifest_files) if isinstance(manifest_files, int) else int(adaptive_files)
+    )
+    max_matches = (
+        int(manifest_matches)
+        if isinstance(manifest_matches, int)
+        else int(adaptive_matches)
+    )
+    return (
+        _clamp_int(max_files, min_value=500, max_value=200000),
+        _clamp_int(max_matches, min_value=1000, max_value=500000),
+    )
+
+
 def _load_manifest_profile(path: Path) -> str:
     data = _read_json_object(path)
     if data is None:
@@ -2209,6 +2271,7 @@ def analyze_run(
     budget_s = int(time_budget_s)
     if budget_s < 0:
         budget_s = 0
+    scan_max_files, scan_max_matches = _resolve_scan_limits_for_run(info)
 
     def remaining_s() -> float:
         return float(budget_s)
@@ -2331,8 +2394,14 @@ def analyze_run(
             StructureStage(info.firmware_dest),
             CarvingStage(info.firmware_dest),
             FirmwareProfileStage(),
-            InventoryStage(),
-            EndpointsStage(),
+            InventoryStage(
+                string_scan_max_files=scan_max_files,
+                string_scan_max_total_matches=scan_max_matches,
+            ),
+            EndpointsStage(
+                max_files=scan_max_files,
+                max_total_matches=scan_max_matches,
+            ),
             SurfacesStage(),
             GraphStage(),
             AttackSurfaceStage(),
@@ -3103,8 +3172,14 @@ def analyze_run(
         StructureStage(info.firmware_dest),
         CarvingStage(info.firmware_dest),
         FirmwareProfileStage(),
-        InventoryStage(),
-        EndpointsStage(),
+        InventoryStage(
+            string_scan_max_files=scan_max_files,
+            string_scan_max_total_matches=scan_max_matches,
+        ),
+        EndpointsStage(
+            max_files=scan_max_files,
+            max_total_matches=scan_max_matches,
+        ),
         SurfacesStage(),
         GraphStage(),
         AttackSurfaceStage(),

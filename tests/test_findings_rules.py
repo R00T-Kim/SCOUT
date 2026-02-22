@@ -250,6 +250,97 @@ def test_run_findings_uses_inventory_roots_when_extraction_is_empty(
     assert "aiedge.findings.analysis_incomplete" not in ids
 
 
+def test_run_findings_adds_web_exec_overlap_inventory_signal(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory_baseline(ctx)
+
+    extracted = (
+        ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "rootfs"
+    )
+    (extracted / "usr" / "syno" / "webapi").mkdir(parents=True, exist_ok=True)
+    _ = (extracted / "usr" / "syno" / "webapi" / "auth.cgi").write_text(
+        "auth=1\n",
+        encoding="utf-8",
+    )
+
+    inv_dir = ctx.run_dir / "stages" / "inventory"
+    _ = (inv_dir / "inventory.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "roots": ["stages/extraction/_firmware.bin.extracted/rootfs"],
+                "summary": {
+                    "roots_scanned": 1,
+                    "files": 3,
+                    "binaries": 1,
+                    "configs": 1,
+                    "string_hits": 0,
+                },
+                "service_candidates": [
+                    {
+                        "name": "auth.cgi",
+                        "kind": "cgi_script",
+                        "confidence": 0.88,
+                        "evidence": [
+                            {
+                                "path": "stages/extraction/_firmware.bin.extracted/rootfs/usr/syno/webapi/auth.cgi"
+                            }
+                        ],
+                    }
+                ],
+                "services": [],
+                "artifacts": {
+                    "binary_analysis": "stages/inventory/binary_analysis.json",
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _ = (inv_dir / "binary_analysis.json").write_text(
+        json.dumps(
+            {
+                "summary": {
+                    "binaries_scanned": 1,
+                    "elf_binaries": 1,
+                    "risky_binaries": 1,
+                    "risky_symbol_hits": 2,
+                    "risky_symbol_counts": {"system": 1, "strcpy": 1},
+                    "arch_counts": {"arm-32": 1},
+                },
+                "hits": [
+                    {
+                        "path": "stages/extraction/_firmware.bin.extracted/rootfs/usr/bin/httpd",
+                        "arch": "arm-32",
+                        "matched_symbols": ["strcpy", "system"],
+                        "sample_sha256": "deadbeef",
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_findings(ctx)
+    by_id = {
+        cast(str, finding.get("id")): finding
+        for finding in result.findings
+        if isinstance(finding.get("id"), str)
+    }
+    assert "aiedge.findings.web.exec_sink_overlap" in by_id
+    overlap = cast(dict[str, object], by_id["aiedge.findings.web.exec_sink_overlap"])
+    evidence_any = overlap.get("evidence")
+    assert isinstance(evidence_any, list)
+    evidence = cast(list[dict[str, object]], evidence_any)
+    assert evidence
+    assert all(not str(item.get("path", "")).startswith("/") for item in evidence)
+
+
 def test_run_findings_writes_known_disclosures_with_citations(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _write_inventory_baseline(ctx)

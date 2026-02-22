@@ -3334,6 +3334,36 @@ def _write_manifest_rootfs_marker(
     )
 
 
+def _write_manifest_scan_limits_marker(
+    manifest_path: Path,
+    *,
+    max_files: int | None,
+    max_matches: int | None,
+) -> None:
+    obj_any = cast(object, json.loads(manifest_path.read_text(encoding="utf-8")))
+    if not isinstance(obj_any, dict):
+        raise ValueError("manifest.json is not an object")
+    obj = cast(dict[str, object], obj_any)
+
+    if max_files is None and max_matches is None:
+        obj.pop("scan_limits", None)
+    else:
+        scan_limits: dict[str, int] = {}
+        if isinstance(max_files, int) and max_files > 0:
+            scan_limits["max_files"] = int(max_files)
+        if isinstance(max_matches, int) and max_matches > 0:
+            scan_limits["max_matches"] = int(max_matches)
+        if scan_limits:
+            obj["scan_limits"] = scan_limits
+        else:
+            obj.pop("scan_limits", None)
+
+    _ = manifest_path.write_text(
+        json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     epilog = textwrap.dedent(
         """\
@@ -3436,6 +3466,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to a pre-extracted root filesystem directory. "
             "When provided, extraction stage ingests this directory instead of relying only on binwalk."
+        ),
+    )
+    _ = analyze.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override scan file cap for inventory string-hit and endpoints stages. "
+            "When omitted, SCOUT auto-scales by input firmware size."
+        ),
+    )
+    _ = analyze.add_argument(
+        "--max-matches",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override match cap for inventory string-hit and endpoints stages. "
+            "When omitted, SCOUT auto-scales by input firmware size."
         ),
     )
     _ = analyze.add_argument(
@@ -3542,6 +3592,26 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _ = analyze_8mb.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override scan file cap for inventory string-hit and endpoints stages. "
+            "When omitted, SCOUT auto-scales by input firmware size."
+        ),
+    )
+    _ = analyze_8mb.add_argument(
+        "--max-matches",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override match cap for inventory string-hit and endpoints stages. "
+            "When omitted, SCOUT auto-scales by input firmware size."
+        ),
+    )
+    _ = analyze_8mb.add_argument(
         "--ref-md",
         default=None,
         metavar="PATH",
@@ -3582,6 +3652,26 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3600,
         help="Overall pipeline time budget in seconds (default: 3600).",
+    )
+    _ = stages.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override scan file cap for inventory string-hit and endpoints stages "
+            "for this existing run."
+        ),
+    )
+    _ = stages.add_argument(
+        "--max-matches",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override match cap for inventory string-hit and endpoints stages "
+            "for this existing run."
+        ),
     )
     _ = stages.add_argument(
         "--no-llm",
@@ -3851,6 +3941,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         no_llm = bool(getattr(args, "no_llm", False))
         stages_raw = cast(str | None, getattr(args, "stages", None))
         rootfs_raw = cast(str | None, getattr(args, "rootfs", None))
+        max_files_raw = cast(int | None, getattr(args, "max_files", None))
+        max_matches_raw = cast(int | None, getattr(args, "max_matches", None))
         ref_md = cast(str | None, getattr(args, "ref_md", None))
         require_ref_md = bool(getattr(args, "require_ref_md", False))
         force_retriage = bool(getattr(args, "force_retriage", False))
@@ -3868,6 +3960,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 20
             rootfs_path = candidate.resolve()
+        max_files: int | None = None
+        if isinstance(max_files_raw, int):
+            if max_files_raw <= 0:
+                print("--max-files must be a positive integer.", file=sys.stderr)
+                return 20
+            max_files = int(max_files_raw)
+        max_matches: int | None = None
+        if isinstance(max_matches_raw, int):
+            if max_matches_raw <= 0:
+                print("--max-matches must be a positive integer.", file=sys.stderr)
+                return 20
+            max_matches = int(max_matches_raw)
 
         enforce_canonical_8mb = command == "analyze-8mb"
         if enforce_canonical_8mb:
@@ -3965,6 +4069,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     manifest_path_any,
                     rootfs_path=rootfs_path,
                 )
+                _write_manifest_scan_limits_marker(
+                    manifest_path_any,
+                    max_files=max_files,
+                    max_matches=max_matches,
+                )
 
             stage_status: str | None = None
             if stage_names is not None:
@@ -4014,6 +4123,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         time_budget_s = cast(int, getattr(args, "time_budget_s"))
         no_llm = bool(getattr(args, "no_llm", False))
         stages_raw = cast(str, getattr(args, "stages"))
+        max_files_raw = cast(int | None, getattr(args, "max_files", None))
+        max_matches_raw = cast(int | None, getattr(args, "max_matches", None))
+
+        max_files: int | None = None
+        if isinstance(max_files_raw, int):
+            if max_files_raw <= 0:
+                print("--max-files must be a positive integer.", file=sys.stderr)
+                return 20
+            max_files = int(max_files_raw)
+        max_matches: int | None = None
+        if isinstance(max_matches_raw, int):
+            if max_matches_raw <= 0:
+                print("--max-matches must be a positive integer.", file=sys.stderr)
+                return 20
+            max_matches = int(max_matches_raw)
 
         stage_names = parse_stage_names(stages_raw)
         if stage_names in (None, []):
@@ -4040,6 +4164,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise RuntimeError("run_subset is unavailable in aiedge.run")
 
             info = load_existing_run(run_dir)
+            info_obj = cast(_RunInfo, info)
+            if isinstance(info_obj.manifest_path, Path) and (
+                max_files is not None or max_matches is not None
+            ):
+                _write_manifest_scan_limits_marker(
+                    info_obj.manifest_path,
+                    max_files=max_files,
+                    max_matches=max_matches,
+                )
             rep = cast(
                 _RunReport,
                 run_subset(

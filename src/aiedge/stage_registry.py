@@ -54,6 +54,83 @@ def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
     return int(value)
 
 
+def _clamp_int(value: int, *, min_value: int, max_value: int) -> int:
+    if value < int(min_value):
+        return int(min_value)
+    if value > int(max_value):
+        return int(max_value)
+    return int(value)
+
+
+def _adaptive_scan_limits_for_input_size(
+    input_size_bytes: int | None,
+) -> tuple[int, int]:
+    size_bytes = int(input_size_bytes or 0)
+    mb = size_bytes / (1024 * 1024) if size_bytes > 0 else 0.0
+    if mb <= 16:
+        return 2000, 5000
+    if mb <= 64:
+        return 4000, 10000
+    if mb <= 128:
+        return 8000, 20000
+    if mb <= 256:
+        return 12000, 30000
+    return 20000, 50000
+
+
+def _load_manifest_scan_limits(
+    manifest_path: Path | None,
+) -> tuple[int | None, int | None]:
+    if not isinstance(manifest_path, Path) or not manifest_path.is_file():
+        return None, None
+    try:
+        payload_any = cast(object, json.loads(manifest_path.read_text(encoding="utf-8")))
+    except Exception:
+        return None, None
+    if not isinstance(payload_any, dict):
+        return None, None
+
+    scan_limits_any = cast(dict[str, object], payload_any).get("scan_limits")
+    if not isinstance(scan_limits_any, dict):
+        return None, None
+    scan_limits = cast(dict[str, object], scan_limits_any)
+
+    max_files_any = scan_limits.get("max_files")
+    max_matches_any = scan_limits.get("max_matches")
+    max_files = max_files_any if isinstance(max_files_any, int) and max_files_any > 0 else None
+    max_matches = (
+        max_matches_any
+        if isinstance(max_matches_any, int) and max_matches_any > 0
+        else None
+    )
+    return max_files, max_matches
+
+
+def _resolve_scan_limits(info: _RunInfoLike) -> tuple[int, int]:
+    manifest_path_any = getattr(info, "manifest_path", None)
+    manifest_path = manifest_path_any if isinstance(manifest_path_any, Path) else None
+    input_size_any = getattr(info, "input_size_bytes", None)
+    input_size_bytes = input_size_any if isinstance(input_size_any, int) else None
+
+    adaptive_files, adaptive_matches = _adaptive_scan_limits_for_input_size(
+        input_size_bytes
+    )
+    manifest_files, manifest_matches = _load_manifest_scan_limits(manifest_path)
+
+    max_files = (
+        int(manifest_files) if isinstance(manifest_files, int) else int(adaptive_files)
+    )
+    max_matches = (
+        int(manifest_matches)
+        if isinstance(manifest_matches, int)
+        else int(adaptive_matches)
+    )
+    return (
+        _clamp_int(max_files, min_value=500, max_value=200000),
+        _clamp_int(max_matches, min_value=1000, max_value=500000),
+    )
+
+
 def _load_manifest_rootfs_path(manifest_path: Path | None) -> Path | None:
     if not isinstance(manifest_path, Path) or not manifest_path.is_file():
         return None
@@ -278,8 +355,12 @@ def _make_inventory_stage(
     remaining_s: Callable[[], float],
     no_llm: bool,
 ) -> Stage:
-    _ = info, source_input_path, remaining_s, no_llm
-    return InventoryStage()
+    _ = source_input_path, remaining_s, no_llm
+    max_files, max_matches = _resolve_scan_limits(info)
+    return InventoryStage(
+        string_scan_max_files=max_files,
+        string_scan_max_total_matches=max_matches,
+    )
 
 
 def _make_firmware_profile_stage(
@@ -308,8 +389,12 @@ def _make_endpoints_stage(
     remaining_s: Callable[[], float],
     no_llm: bool,
 ) -> Stage:
-    _ = info, source_input_path, remaining_s, no_llm
-    return EndpointsStage()
+    _ = source_input_path, remaining_s, no_llm
+    max_files, max_matches = _resolve_scan_limits(info)
+    return EndpointsStage(
+        max_files=max_files,
+        max_total_matches=max_matches,
+    )
 
 
 def _make_surfaces_stage(

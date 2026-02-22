@@ -381,9 +381,21 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
         rel = _rel_to_run_dir(run_dir, p)
         rel_l = rel.lower().replace("\\", "/")
         parts = [x for x in rel_l.split("/") if x]
+        basename = p.name.lower()
+        suffix = p.suffix.lower()
 
         if len(candidates) >= 120:
             break
+
+        if suffix == ".cgi":
+            add(
+                name=p.name,
+                kind="cgi_script",
+                path=p,
+                confidence=0.88,
+                note="path suffix .cgi",
+            )
+            continue
 
         if "cgi-bin" in parts:
             add(
@@ -394,6 +406,24 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
                 note="path contains cgi-bin",
             )
             continue
+
+        if basename in _WEB_SERVICE_BINARIES:
+            add(
+                name=p.name,
+                kind="web_server_binary",
+                path=p,
+                confidence=0.86,
+                note="known web service binary name",
+            )
+
+        if basename in _NETWORK_SERVICE_BINARIES:
+            add(
+                name=p.name,
+                kind="network_service_binary",
+                path=p,
+                confidence=0.74,
+                note="known network daemon binary name",
+            )
 
         if "etc" in parts and "init.d" in parts:
             add(
@@ -525,6 +555,28 @@ _ELF_MACHINE_MAP: dict[int, str] = {
     0xF3: "riscv",
 }
 _SERVICES_LINE_RE = re.compile(r"^([a-zA-Z0-9_.+-]+)\s+(\d+)/(tcp|udp)\b")
+_WEB_SERVICE_BINARIES: frozenset[str] = frozenset(
+    {
+        "httpd",
+        "nginx",
+        "lighttpd",
+        "uhttpd",
+        "mini_httpd",
+        "boa",
+        "apache2",
+        "synowebapi",
+    }
+)
+_NETWORK_SERVICE_BINARIES: frozenset[str] = frozenset(
+    {
+        "upnpd",
+        "miniupnpd",
+        "dnsmasq",
+        "dropbear",
+        "sshd",
+        "telnetd",
+    }
+)
 
 
 def _is_config_file(path: Path) -> bool:
@@ -892,18 +944,22 @@ def _find_rootfs_candidates(
             _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)
             return False
 
-    def looks_like_rootfs(d: Path) -> bool:
+    def looks_like_rootfs(d: Path, *, depth: int) -> bool:
         if not is_dir_safe(d, op="rootfs_probe.is_dir"):
             return False
-        etc_dir = d / "etc"
-        if is_dir_safe(etc_dir, op="rootfs_probe.etc_is_dir") and (
-            is_dir_safe(d / "bin", op="rootfs_probe.bin_is_dir")
-            or is_dir_safe(d / "usr", op="rootfs_probe.usr_is_dir")
-            or is_dir_safe(d / "sbin", op="rootfs_probe.sbin_is_dir")
-        ):
-            return True
-        if is_file_safe(etc_dir / "passwd", op="rootfs_probe.passwd_is_file"):
-            return True
+        # Rootfs probing should focus on top-level candidates only.
+        # Deep nested directories frequently contain localized/data "etc"
+        # paths (for example vendor text assets) that are not filesystem roots.
+        if depth <= 2:
+            etc_dir = d / "etc"
+            if is_dir_safe(etc_dir, op="rootfs_probe.etc_is_dir") and (
+                is_dir_safe(d / "bin", op="rootfs_probe.bin_is_dir")
+                or is_dir_safe(d / "usr", op="rootfs_probe.usr_is_dir")
+                or is_dir_safe(d / "sbin", op="rootfs_probe.sbin_is_dir")
+            ):
+                return True
+            if is_file_safe(etc_dir / "passwd", op="rootfs_probe.passwd_is_file"):
+                return True
         if d.name.endswith("-root") or d.name.endswith("rootfs"):
             return True
         return False
@@ -954,7 +1010,7 @@ def _find_rootfs_candidates(
             continue
         if len(rel.parts) > 6:
             continue
-        if looks_like_rootfs(p):
+        if looks_like_rootfs(p, depth=len(rel.parts)):
             candidates.append(p)
 
     uniq: list[Path] = []
@@ -983,15 +1039,19 @@ _STRING_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
 }
 
+DEFAULT_STRING_SCAN_MAX_FILES = 2000
+DEFAULT_STRING_SCAN_MAX_TOTAL_MATCHES = 5000
+DEFAULT_STRING_SCAN_MAX_BYTES_PER_FILE = 256 * 1024
+
 
 def _scan_string_hits(
     files: list[Path],
     *,
     run_dir: Path | None = None,
     errors: list[dict[str, JsonValue]] | None = None,
-    max_files: int = 2000,
-    max_bytes_per_file: int = 256 * 1024,
-    max_total_matches: int = 5000,
+    max_files: int = DEFAULT_STRING_SCAN_MAX_FILES,
+    max_bytes_per_file: int = DEFAULT_STRING_SCAN_MAX_BYTES_PER_FILE,
+    max_total_matches: int = DEFAULT_STRING_SCAN_MAX_TOTAL_MATCHES,
 ) -> tuple[dict[str, int], list[dict[str, JsonValue]], int]:
     counts: dict[str, int] = {k: 0 for k in _STRING_PATTERNS}
     samples: list[dict[str, JsonValue]] = []
@@ -1147,6 +1207,9 @@ def _write_inventory_payload(
 @dataclass(frozen=True)
 class InventoryStage:
     firmware_name: str = "firmware.bin"
+    string_scan_max_files: int = DEFAULT_STRING_SCAN_MAX_FILES
+    string_scan_max_total_matches: int = DEFAULT_STRING_SCAN_MAX_TOTAL_MATCHES
+    string_scan_max_bytes_per_file: int = DEFAULT_STRING_SCAN_MAX_BYTES_PER_FILE
 
     @property
     def name(self) -> str:
@@ -1432,6 +1495,9 @@ class InventoryStage:
                 all_files,
                 run_dir=ctx.run_dir,
                 errors=errors,
+                max_files=max(1, int(self.string_scan_max_files)),
+                max_total_matches=max(1, int(self.string_scan_max_total_matches)),
+                max_bytes_per_file=max(256, int(self.string_scan_max_bytes_per_file)),
             )
             skipped_files += skipped_string_files
             string_hits_total = int(sum(string_counts.values()))
@@ -1491,6 +1557,15 @@ class InventoryStage:
                 "string_hits": int(string_hits_total),
                 "risky_binary_hits": int(binary_risk_hits_seen),
             }
+            scan_limits: dict[str, JsonValue] = {
+                "string_scan_max_files": int(max(1, self.string_scan_max_files)),
+                "string_scan_max_total_matches": int(
+                    max(1, self.string_scan_max_total_matches)
+                ),
+                "string_scan_max_bytes_per_file": int(
+                    max(256, self.string_scan_max_bytes_per_file)
+                ),
+            }
 
             coverage_metrics = _coverage_metrics(
                 roots_considered=roots_considered,
@@ -1535,6 +1610,7 @@ class InventoryStage:
                 "services": services,
                 "quality": quality,
                 "binary_analysis_summary": binary_summary,
+                "scan_limits": scan_limits,
             }
             artifacts_payload: dict[str, JsonValue] = {}
             if strings_written:
@@ -1604,6 +1680,7 @@ class InventoryStage:
                         "entries": _entry_count_from_coverage(coverage_metrics),
                         "quality": quality,
                         "binary_analysis_summary": binary_summary,
+                        "scan_limits": scan_limits,
                     },
                 ),
                 limitations=limitations,

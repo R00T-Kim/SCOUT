@@ -727,6 +727,143 @@ def _load_nonzero_string_hit_counts(path: Path) -> dict[str, int]:
     return out
 
 
+_WEB_INVENTORY_KINDS: frozenset[str] = frozenset(
+    {
+        "cgi_script",
+        "cgi_binary",
+        "web_server_binary",
+        "http_cgi_policy",
+    }
+)
+_WEB_INVENTORY_NAME_TOKENS: tuple[str, ...] = (
+    ".cgi",
+    "httpd",
+    "nginx",
+    "lighttpd",
+    "uhttpd",
+    "webapi",
+    "webman",
+)
+_EXEC_SINK_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "system",
+        "popen",
+        "execve",
+        "execv",
+        "execvp",
+        "execl",
+        "posix_spawn",
+        "posix_spawnp",
+    }
+)
+
+
+def _inventory_ref_evidence(path_s: str, *, note: str | None = None) -> dict[str, JsonValue] | None:
+    cleaned = _safe_ascii_text(path_s, max_len=220).replace("\\", "/")
+    if not cleaned or cleaned.startswith("/"):
+        return None
+    ev: dict[str, JsonValue] = {"path": cleaned}
+    if note:
+        ev["note"] = _safe_ascii_text(note, max_len=220)
+    return ev
+
+
+def _inventory_web_exec_overlap_signals(
+    run_dir: Path,
+    inv_json_path: Path,
+) -> tuple[int, int, list[dict[str, JsonValue]], list[str]]:
+    inv_any = _safe_load_json(inv_json_path)
+    if not isinstance(inv_any, dict):
+        return 0, 0, [], []
+    inv_obj = cast(dict[str, object], inv_any)
+
+    web_evidence: list[dict[str, JsonValue]] = []
+    web_count = 0
+    candidates_any = inv_obj.get("service_candidates")
+    if isinstance(candidates_any, list):
+        for item_any in cast(list[object], candidates_any):
+            if not isinstance(item_any, dict):
+                continue
+            item = cast(dict[str, object], item_any)
+            kind_any = item.get("kind")
+            name_any = item.get("name")
+            kind = kind_any.lower() if isinstance(kind_any, str) else ""
+            name = name_any.lower() if isinstance(name_any, str) else ""
+            if kind not in _WEB_INVENTORY_KINDS and not any(
+                token in name for token in _WEB_INVENTORY_NAME_TOKENS
+            ):
+                continue
+            web_count += 1
+            if len(web_evidence) >= 5:
+                continue
+            evidence_any = item.get("evidence")
+            if not isinstance(evidence_any, list) or not evidence_any:
+                continue
+            first_any = cast(list[object], evidence_any)[0]
+            if not isinstance(first_any, dict):
+                continue
+            path_any = cast(dict[str, object], first_any).get("path")
+            if not isinstance(path_any, str):
+                continue
+            ev = _inventory_ref_evidence(path_any, note=f"inventory_web_candidate:{kind or 'unknown'}")
+            if ev is not None:
+                web_evidence.append(ev)
+
+    binary_analysis_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
+    artifacts_any = inv_obj.get("artifacts")
+    if isinstance(artifacts_any, dict):
+        artifact_path_any = cast(dict[str, object], artifacts_any).get("binary_analysis")
+        if isinstance(artifact_path_any, str) and artifact_path_any and not artifact_path_any.startswith("/"):
+            candidate_path = run_dir / artifact_path_any
+            if candidate_path.exists() and candidate_path.is_file():
+                binary_analysis_path = candidate_path
+
+    limitations: list[str] = []
+    exec_count = 0
+    exec_evidence: list[dict[str, JsonValue]] = []
+    binary_any = _safe_load_json(binary_analysis_path)
+    if not isinstance(binary_any, dict):
+        limitations.append(
+            "Inventory binary_analysis.json is unavailable; source-to-sink overlap heuristic is limited."
+        )
+    else:
+        hits_any = cast(dict[str, object], binary_any).get("hits")
+        if isinstance(hits_any, list):
+            for hit_any in cast(list[object], hits_any):
+                if not isinstance(hit_any, dict):
+                    continue
+                hit = cast(dict[str, object], hit_any)
+                syms_any = hit.get("matched_symbols")
+                if not isinstance(syms_any, list):
+                    continue
+                syms = {
+                    cast(str, s).lower()
+                    for s in cast(list[object], syms_any)
+                    if isinstance(s, str)
+                }
+                exec_syms = sorted(syms.intersection(_EXEC_SINK_SYMBOLS))
+                if not exec_syms:
+                    continue
+                exec_count += 1
+                if len(exec_evidence) >= 5:
+                    continue
+                path_any = hit.get("path")
+                if not isinstance(path_any, str):
+                    continue
+                ev = _inventory_ref_evidence(
+                    path_any,
+                    note="inventory_exec_sinks:" + ",".join(exec_syms),
+                )
+                if ev is not None:
+                    exec_evidence.append(ev)
+
+    combined = cast(
+        list[dict[str, JsonValue]],
+        list(web_evidence[:4]) + list(exec_evidence[:4]),
+    )
+    return web_count, exec_count, combined, limitations
+
+
 def _iter_files_count(root: Path, *, max_files: int = 50_000) -> int:
     if not root.exists():
         return 0
@@ -2713,6 +2850,12 @@ def run_findings(
 
     findings: list[dict[str, JsonValue]] = []
     string_hit_counts = _load_nonzero_string_hit_counts(inv_strings)
+    web_candidate_count, exec_sink_count, web_exec_evidence, web_exec_limits = (
+        _inventory_web_exec_overlap_signals(ctx.run_dir, inv_json)
+    )
+    for limitation in web_exec_limits:
+        if limitation not in limitations:
+            limitations.append(limitation)
 
     extracted_files = _iter_files_count(extracted_dir)
     candidate_roots = _load_inventory_roots(ctx.run_dir, inv_json, extracted_dir)
@@ -3156,6 +3299,37 @@ def run_findings(
                     ),
                 }
             )
+
+    if web_candidate_count > 0 and exec_sink_count > 0:
+        findings.append(
+            {
+                "id": "aiedge.findings.web.exec_sink_overlap",
+                "title": "Web-exposed component with command-exec sink overlap",
+                "severity": "high",
+                "confidence": 0.78,
+                "disposition": "suspected",
+                "description": (
+                    "Inventory indicates both web-entry candidates (for example CGI/web server components) "
+                    "and binaries exposing command-execution sinks (system/popen/exec*). "
+                    "Prioritize source-to-sink validation for authenticated and unauthenticated web flows."
+                ),
+                "evidence": cast(
+                    list[JsonValue],
+                    cast(
+                        list[object],
+                        list(web_exec_evidence)
+                        or [
+                            {
+                                "path": "stages/inventory/inventory.json",
+                                "note": (
+                                    f"web_candidates={web_candidate_count},exec_sink_binaries={exec_sink_count}"
+                                ),
+                            }
+                        ],
+                    ),
+                ),
+            }
+        )
 
     if string_hit_counts:
         counts_summary = ", ".join(

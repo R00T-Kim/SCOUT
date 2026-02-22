@@ -57,6 +57,103 @@ def _count_files(root: Path) -> int:
     return n
 
 
+def _ingest_manual_rootfs(
+    *,
+    source_dir: Path,
+    destination_dir: Path,
+) -> tuple[dict[str, int], list[str]]:
+    stats: dict[str, int] = {
+        "dirs_created": 0,
+        "files_copied": 0,
+        "symlinks_copied": 0,
+        "special_entries_skipped": 0,
+        "copy_errors": 0,
+    }
+    limitations: list[str] = []
+
+    stack: list[tuple[Path, Path]] = [(source_dir, destination_dir)]
+    while stack:
+        src_dir, dst_dir = stack.pop()
+        try:
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            stats["dirs_created"] += 1
+        except OSError as exc:
+            stats["copy_errors"] += 1
+            limitations.append(
+                f"manual rootfs ingestion could not create directory: {dst_dir.name} ({type(exc).__name__})"
+            )
+            continue
+
+        try:
+            with os.scandir(src_dir) as it:
+                entries = sorted(list(it), key=lambda e: e.name)
+        except OSError as exc:
+            stats["copy_errors"] += 1
+            limitations.append(
+                f"manual rootfs ingestion could not scan directory: {src_dir.name} ({type(exc).__name__})"
+            )
+            continue
+
+        child_dirs: list[tuple[Path, Path]] = []
+        for entry in entries:
+            src_path = Path(entry.path)
+            dst_path = dst_dir / entry.name
+
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    child_dirs.append((src_path, dst_path))
+                    continue
+            except OSError as exc:
+                stats["copy_errors"] += 1
+                limitations.append(
+                    f"manual rootfs ingestion could not stat entry: {entry.name} ({type(exc).__name__})"
+                )
+                continue
+
+            try:
+                if entry.is_symlink():
+                    target = os.readlink(src_path)
+                    if dst_path.exists() or dst_path.is_symlink():
+                        dst_path.unlink()
+                    os.symlink(target, dst_path)
+                    stats["symlinks_copied"] += 1
+                    continue
+            except OSError as exc:
+                stats["copy_errors"] += 1
+                limitations.append(
+                    f"manual rootfs ingestion could not copy symlink: {entry.name} ({type(exc).__name__})"
+                )
+                continue
+
+            try:
+                if entry.is_file(follow_symlinks=False):
+                    shutil.copy2(src_path, dst_path, follow_symlinks=False)
+                    stats["files_copied"] += 1
+                    continue
+            except OSError as exc:
+                stats["copy_errors"] += 1
+                limitations.append(
+                    f"manual rootfs ingestion could not copy file: {entry.name} ({type(exc).__name__})"
+                )
+                continue
+
+            stats["special_entries_skipped"] += 1
+
+        stack.extend(reversed(child_dirs))
+
+    unique_limits = sorted(set(limitations))
+    if stats["special_entries_skipped"] > 0:
+        unique_limits.append(
+            "Manual rootfs ingestion skipped unsupported special filesystem entries."
+        )
+    if stats["copy_errors"] > 0:
+        unique_limits.append(
+            "Manual rootfs ingestion encountered copy errors; inventory/findings may be incomplete."
+        )
+
+    return stats, unique_limits
+
+
 def _append_log(log_path: Path, line: str) -> None:
     try:
         with log_path.open("a", encoding="utf-8") as f:
@@ -781,6 +878,7 @@ class ExtractionStage:
         details["binwalk_available"] = bool(binwalk)
         extraction_mode = "binwalk"
         res: subprocess.CompletedProcess[str] | None = None
+        manual_rootfs_limits: list[str] = []
 
         if self.provided_rootfs_dir is not None:
             extraction_mode = "provided_rootfs"
@@ -816,13 +914,20 @@ class ExtractionStage:
 
             if extracted_dir.exists():
                 shutil.rmtree(extracted_dir, ignore_errors=True)
-            shutil.copytree(rootfs_src, extracted_dir, symlinks=True)
+            manual_copy_stats, manual_rootfs_limits = _ingest_manual_rootfs(
+                source_dir=rootfs_src,
+                destination_dir=extracted_dir,
+            )
             _ = log_path.write_text(
                 "\n".join(
                     [
                         "manual rootfs mode enabled",
                         f"source: {rootfs_ref}",
                         f"destination: {extracted_dir}",
+                        f"files_copied: {manual_copy_stats['files_copied']}",
+                        f"symlinks_copied: {manual_copy_stats['symlinks_copied']}",
+                        f"special_entries_skipped: {manual_copy_stats['special_entries_skipped']}",
+                        f"copy_errors: {manual_copy_stats['copy_errors']}",
                         "",
                     ]
                 ),
@@ -831,6 +936,9 @@ class ExtractionStage:
             reasons.append("used pre-extracted rootfs provided by operator")
             details["tool"] = "provided_rootfs"
             details["manual_rootfs_applied"] = True
+            details["manual_rootfs_copy"] = cast(
+                JsonValue, {k: int(v) for k, v in manual_copy_stats.items()}
+            )
 
         else:
             details["manual_rootfs_requested"] = False
@@ -910,7 +1018,7 @@ class ExtractionStage:
 
         recursive_info: dict[str, JsonValue] = {"attempted": False}
         recursive_limits: list[str] = []
-        if extracted_dir.is_dir():
+        if extracted_dir.is_dir() and extraction_mode != "provided_rootfs":
             recursive_info, recursive_limits, recursive_evidence = (
                 _recursive_nested_extraction(
                     run_dir=ctx.run_dir,
@@ -929,7 +1037,7 @@ class ExtractionStage:
 
         extracted_files = _count_files(extracted_dir)
         min_expected_files = int(max(0, self.min_extracted_files))
-        limitations: list[str] = list(recursive_limits)
+        limitations: list[str] = list(recursive_limits) + list(manual_rootfs_limits)
 
         if res is not None:
             details["binwalk_returncode"] = int(res.returncode)

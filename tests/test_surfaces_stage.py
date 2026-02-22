@@ -200,6 +200,45 @@ def test_surfaces_stage_unknowns_when_endpoints_exist_without_service_owner(
     assert "stages/endpoints/endpoints.json" in cast(list[object], refs_any)
 
 
+def test_surfaces_stage_maps_cgi_and_synowebapi_to_web_surface(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_inventory(
+        ctx,
+        service_candidates=[
+            {
+                "name": "login.cgi",
+                "kind": "cgi_script",
+                "confidence": 0.88,
+                "evidence": [{"path": "stages/extraction/root/usr/syno/webman/login.cgi"}],
+            },
+            {
+                "name": "synowebapi",
+                "kind": "web_server_binary",
+                "confidence": 0.86,
+                "evidence": [{"path": "stages/extraction/root/usr/bin/synowebapi"}],
+            },
+        ],
+    )
+
+    outcome = SurfacesStage().run(ctx)
+    assert outcome.status == "ok"
+
+    payload = _read_json_obj(ctx.run_dir / "stages" / "surfaces" / "surfaces.json")
+    surfaces_any = payload.get("surfaces")
+    assert isinstance(surfaces_any, list)
+    surfaces = cast(list[object], surfaces_any)
+    assert surfaces
+
+    web_components = {
+        cast(dict[str, object], item).get("component")
+        for item in surfaces
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("surface_type") == "web"
+    }
+    assert "login.cgi" in web_components
+    assert "synowebapi" in web_components
+
+
 def test_run_subset_with_surfaces_populates_report(tmp_path: Path) -> None:
     firmware = tmp_path / "firmware.bin"
     _ = firmware.write_bytes(b"surfaces-subset")

@@ -19,6 +19,100 @@ DEFAULT_MAX_BYTES_PER_FILE = 256 * 1024
 DEFAULT_MAX_TOTAL_MATCHES = 5000
 MAX_VALUE_CHARS = 200
 _DOMAIN_NOISE_TLDS: frozenset[str] = frozenset({"ko", "runtime"})
+_DOMAIN_FILELIKE_TLDS: frozenset[str] = frozenset(
+    {
+        "py",
+        "so",
+        "js",
+        "mjs",
+        "cjs",
+        "ts",
+        "tsx",
+        "jsx",
+        "php",
+        "cgi",
+        "sh",
+        "pl",
+        "rb",
+        "lua",
+        "go",
+        "rs",
+        "c",
+        "h",
+        "hpp",
+        "cc",
+        "cpp",
+        "db",
+        "pid",
+        "log",
+        "txt",
+        "xml",
+        "json",
+        "yaml",
+        "yml",
+        "ini",
+        "cfg",
+        "conf",
+        "class",
+        "jar",
+        "zip",
+    }
+)
+_KNOWN_GENERIC_DOMAIN_TLDS: frozenset[str] = frozenset(
+    {
+        "com",
+        "net",
+        "org",
+        "edu",
+        "gov",
+        "mil",
+        "int",
+        "biz",
+        "info",
+        "io",
+        "ai",
+        "app",
+        "dev",
+        "cloud",
+        "site",
+        "online",
+        "tech",
+        "store",
+        "pro",
+        "me",
+        "tv",
+        "xyz",
+        "lan",
+        "local",
+        "home",
+        "internal",
+    }
+)
+_DOMAIN_NOISE_LABELS: frozenset[str] = frozenset(
+    {
+        "addclass",
+        "callee",
+        "constructor",
+        "container",
+        "current",
+        "data",
+        "elem",
+        "eq",
+        "filter",
+        "find",
+        "fn",
+        "id",
+        "name",
+        "on",
+        "prototype",
+        "pseudos",
+        "to",
+        "value",
+    }
+)
+_HTTP_PATH_PRIORITY_MARKERS: tuple[str, ...] = ("/webapi/", "/webman/")
+_HTTP_PATH_SUFFIXES: tuple[str, ...] = (".cgi", ".php", ".py")
+_HTTP_PATH_ENDPOINT_TYPE = "http_path"
 
 _ENDPOINT_PATTERN_SPECS: tuple[tuple[str, re.Pattern[str], float], ...] = (
     (
@@ -259,6 +353,43 @@ def _is_text_candidate(raw: bytes) -> bool:
     return b"\x00" not in raw[:2048]
 
 
+def _path_endpoint_candidates(rel_path: str) -> list[tuple[str, str]]:
+    rel = rel_path.replace("\\", "/")
+    rel_lower = rel.lower()
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    has_http_script_suffix = rel_lower.endswith(_HTTP_PATH_SUFFIXES)
+
+    for marker in _HTTP_PATH_PRIORITY_MARKERS:
+        pos = rel_lower.find(marker)
+        if pos < 0:
+            continue
+        if not has_http_script_suffix:
+            continue
+        path_value = "/" + rel[pos:].lstrip("/")
+        key = (_HTTP_PATH_ENDPOINT_TYPE, path_value)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+
+    if has_http_script_suffix:
+        rel_parts = [part for part in rel.split("/") if part]
+        rel_lower_parts = [part for part in rel_lower.split("/") if part]
+        start_idx = max(0, len(rel_parts) - 2)
+        for idx, token in enumerate(rel_lower_parts):
+            if token in {"cgi-bin", "www", "htdocs", "webapi", "webman"}:
+                start_idx = idx
+                break
+        path_value = "/" + "/".join(rel_parts[start_idx:])
+        key = (_HTTP_PATH_ENDPOINT_TYPE, path_value)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    return out
+
+
 def _sanitize_url(raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
@@ -284,10 +415,55 @@ def _sanitize_url(raw_value: str) -> str:
     return cleaned[:MAX_VALUE_CHARS]
 
 
+def _is_probable_domain_noise(labels: list[str]) -> bool:
+    if len(labels) < 2:
+        return True
+
+    tld = labels[-1]
+    host_labels = labels[:-1]
+    if not host_labels:
+        return True
+
+    if tld in _DOMAIN_FILELIKE_TLDS:
+        return True
+
+    if len(host_labels) == 1 and len(host_labels[0]) <= 1 and len(tld) == 2:
+        return True
+
+    if all(len(label) <= 2 for label in host_labels) and len(host_labels) >= 2:
+        return True
+
+    noise_label_hits = sum(1 for label in labels if label in _DOMAIN_NOISE_LABELS)
+    if noise_label_hits >= 2:
+        return True
+
+    if any(label.isdigit() for label in labels):
+        return True
+
+    if not any(any(ch.isalpha() for ch in label) for label in host_labels):
+        return True
+
+    return False
+
+
 def _normalize_endpoint_value(endpoint_type: str, raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
         return ""
+
+    if endpoint_type == _HTTP_PATH_ENDPOINT_TYPE:
+        normalized = "/" + value.lstrip("/")
+        normalized = normalized[:MAX_VALUE_CHARS]
+        if not normalized.startswith("/"):
+            return ""
+        if " " in normalized:
+            return ""
+        lowered = normalized.lower()
+        if not any(
+            marker in lowered for marker in _HTTP_PATH_PRIORITY_MARKERS
+        ) and not lowered.endswith(_HTTP_PATH_SUFFIXES):
+            return ""
+        return normalized
 
     if endpoint_type == "url":
         return _sanitize_url(value)
@@ -297,7 +473,15 @@ def _normalize_endpoint_value(endpoint_type: str, raw_value: str) -> str:
         labels = [label for label in normalized.split(".") if label]
         if len(labels) < 2:
             return ""
-        if labels[-1] in _DOMAIN_NOISE_TLDS:
+        tld = labels[-1]
+        if tld in _DOMAIN_NOISE_TLDS:
+            return ""
+        if len(tld) == 2:
+            # likely ccTLD; accept by default unless explicitly blocked above
+            pass
+        elif tld not in _KNOWN_GENERIC_DOMAIN_TLDS:
+            return ""
+        if _is_probable_domain_noise(labels):
             return ""
         return normalized
 
@@ -370,6 +554,20 @@ class EndpointsStage:
                 if _is_forbidden_relative_path(rel):
                     continue
 
+                for endpoint_type, candidate_value in _path_endpoint_candidates(rel):
+                    if total_matches >= int(self.max_total_matches):
+                        hit_max_total_matches = True
+                        break
+                    value = _normalize_endpoint_value(endpoint_type, candidate_value)
+                    if not value:
+                        continue
+                    key = (endpoint_type, value)
+                    refs = endpoints_map.setdefault(key, set())
+                    refs.add(rel)
+                    total_matches += 1
+                if hit_max_total_matches:
+                    break
+
                 try:
                     raw = p.read_bytes()
                 except OSError:
@@ -405,6 +603,7 @@ class EndpointsStage:
 
         endpoints: list[dict[str, JsonValue]] = []
         confidence_map = {k: conf for k, _pat, conf in _ENDPOINT_PATTERN_SPECS}
+        confidence_map[_HTTP_PATH_ENDPOINT_TYPE] = 0.92
         for endpoint_type, value in sorted(
             endpoints_map.keys(), key=lambda x: (x[0], x[1])
         ):

@@ -74,7 +74,26 @@ def _is_run_relative_path(path: object) -> bool:
 
 def _surface_type_from_name(name: str) -> str:
     lowered = name.lower()
-    if any(x in lowered for x in ("httpd", "nginx", "lighttpd", "uhttpd")):
+    web_tokens = (
+        "httpd",
+        "nginx",
+        "lighttpd",
+        "uhttpd",
+        "synowebapi",
+        "webapi",
+        "webman",
+    )
+    if any(token in lowered for token in web_tokens):
+        return "web"
+    if any(
+        marker in lowered
+        for marker in (
+            ".cgi",
+            "_cgi",
+            "-cgi",
+            "cgi-bin",
+        )
+    ):
         return "web"
     if any(x in lowered for x in ("dropbear", "sshd")):
         return "ssh"

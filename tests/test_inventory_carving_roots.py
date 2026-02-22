@@ -432,6 +432,47 @@ def test_inventory_resolve_permission_error_is_recorded_without_run_fallback(
     assert files_seen_obj > 0
 
 
+def test_inventory_rootfs_probe_ignores_deep_nested_etc_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _ctx(tmp_path)
+
+    rootfs = ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "fs-root"
+    _ = (rootfs / "etc").mkdir(parents=True, exist_ok=True)
+    _ = (rootfs / "etc" / "passwd").write_text("root:x:0:0\n", encoding="utf-8")
+    deep_etc = rootfs / "usr" / "syno" / "traffic_report" / "texts" / "chs" / "etc"
+    deep_etc.mkdir(parents=True, exist_ok=True)
+    _ = (deep_etc / "messages.txt").write_text("hello\n", encoding="utf-8")
+
+    real_is_dir = Path.is_dir
+
+    def _is_dir_with_targeted_permission_error(self: Path) -> bool:
+        normalized = self.as_posix().lower()
+        if normalized.endswith("/usr/syno/traffic_report/texts/chs/etc"):
+            raise PermissionError(EACCES, "Permission denied", str(self))
+        return real_is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", _is_dir_with_targeted_permission_error)
+
+    outcome = InventoryStage().run(ctx)
+    assert outcome.status in {"ok", "partial"}
+
+    inv = _read_inventory(ctx.run_dir / "stages" / "inventory" / "inventory.json")
+    errors_any = inv.get("errors")
+    assert isinstance(errors_any, list)
+    errors = cast(list[object], errors_any)
+
+    deep_probe_errors = [
+        cast(dict[str, object], item)
+        for item in errors
+        if isinstance(item, dict)
+        and cast(dict[str, object], item).get("op") == "rootfs_probe.etc_is_dir"
+        and "traffic_report/texts/chs/etc"
+        in str(cast(dict[str, object], item).get("path", ""))
+    ]
+    assert deep_probe_errors == []
+
+
 def test_inventory_enriches_service_and_binary_analysis_artifacts(
     tmp_path: Path,
 ) -> None:
