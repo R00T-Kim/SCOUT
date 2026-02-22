@@ -16,6 +16,18 @@ Use the bundled launcher to run commands with short flags:
 
 The analyze command prints the generated run_dir path. Use that value as `<run_dir>` in all commands below.
 
+If extraction quality is low for your target format (few files, wrong OS guess), rerun with pre-extracted rootfs input:
+
+```bash
+./scout analyze /path/to/qnap.img \
+  --case-id qnap-manual-rootfs \
+  --ack-authorization \
+  --no-llm \
+  --rootfs /path/to/extracted/rootfs
+```
+
+`--rootfs` writes `manifest.rootfs_input_path` and forces extraction stage to ingest that directory.
+
 ### ER-e50 `analysis` profile note (verifier scope)
 
 - ER-e50 `analysis` runs intentionally omit `manifest.track` in `manifest.json`.
@@ -28,6 +40,22 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 ```
 
 ## 2) Run dynamic validation stage (if not already included)
+
+Before dynamic/exploit stages, check extraction and inventory quality:
+
+```bash
+python3 - <<'PY' <run_dir>/stages/extraction/stage.json <run_dir>/stages/inventory/inventory.json
+import json,sys
+stage=json.load(open(sys.argv[1], encoding="utf-8"))
+inv=json.load(open(sys.argv[2], encoding="utf-8"))
+print("extraction.status =", stage.get("status"))
+print("extraction.quality_gate =", stage.get("details", {}).get("quality_gate"))
+print("inventory.status =", inv.get("status"))
+print("inventory.quality =", inv.get("quality"))
+PY
+```
+
+If `quality.status=insufficient`, prefer rerunning with `--rootfs` (new run) or provide better extraction roots before continuing.
 
 ```bash
 ./scout stages <run_dir> --stages dynamic_validation
@@ -254,3 +282,24 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
 - Before execution, confirm runtime metadata reports main model `gpt-5.3-codex` (or `openai/gpt-5.3-codex`).
 - During execution, mark each subagent call as model-verified or `model_unverified`; if drift is detected, apply codex retry-first fallback procedure from the policy and log the event.
 - Limitation reminder from policy: subagent model pinning is not enforceable in this toolchain, so model provenance for subagents can be unavailable and must be treated as `model_unverified`.
+
+## 11) Firmware handoff artifact (auto-generated)
+
+SCOUT now writes `<run_dir>/firmware_handoff.json` after `analyze` and `stages`.
+
+Quick check:
+
+```bash
+python3 - <<'PY' <run_dir>/firmware_handoff.json
+import json,sys
+h=json.load(open(sys.argv[1], encoding="utf-8"))
+print("profile =", h.get("profile"))
+print("policy =", h.get("policy"))
+print("bundles =", len(h.get("bundles", [])))
+PY
+```
+
+Expected:
+- non-empty `aiedge.run_id`, `aiedge.run_dir`
+- `policy` keys: `max_reruns_per_stage`, `max_total_stage_attempts`, `max_wallclock_per_run`
+- non-empty `bundles[].artifacts` with run-relative paths

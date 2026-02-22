@@ -52,6 +52,7 @@ DEFAULT_EGRESS_ALLOWLIST: tuple[str, ...] = (
 
 STAGE_MANIFEST_CONTRACT_VERSION = "1.0"
 STAGE_ARTIFACT_HASH_CAP_BYTES = 64 * 1024 * 1024
+HANDOFF_SCHEMA_VERSION = 1
 
 
 def _read_report_stage_status(report: dict[str, JsonValue], stage_name: str) -> str:
@@ -699,6 +700,184 @@ def _write_stage_manifests(
         _ = (stage_dir / "stage.json").write_text(payload, encoding="utf-8")
 
 
+def _manifest_artifact_paths(
+    *,
+    manifest: dict[str, object],
+    run_dir: Path,
+) -> list[str]:
+    artifacts_any = manifest.get("artifacts")
+    if not isinstance(artifacts_any, list):
+        return []
+    out: list[str] = []
+    run_resolved = run_dir.resolve()
+    for item_any in cast(list[object], artifacts_any):
+        if not isinstance(item_any, dict):
+            continue
+        path_any = cast(dict[str, object], item_any).get("path")
+        if not isinstance(path_any, str) or not path_any:
+            continue
+        rel_path = Path(path_any)
+        if rel_path.is_absolute():
+            continue
+        candidate = (run_dir / rel_path).resolve()
+        if not candidate.exists():
+            continue
+        try:
+            _ = candidate.relative_to(run_resolved)
+        except ValueError:
+            continue
+        rel = _try_run_relative(candidate, run_dir)
+        if rel is not None:
+            out.append(rel)
+    return sorted(set(out))
+
+
+def _collect_handoff_bundles(run_dir: Path) -> list[dict[str, JsonValue]]:
+    bundles: list[dict[str, JsonValue]] = []
+    stages_dir = run_dir / "stages"
+    if not stages_dir.is_dir():
+        return bundles
+
+    for stage_dir in sorted(
+        [p for p in stages_dir.iterdir() if p.is_dir()],
+        key=lambda p: p.name,
+    ):
+        stage_name = stage_dir.name
+        attempts_dir = stage_dir / "attempts"
+        attempt_manifests: list[Path] = []
+        if attempts_dir.is_dir():
+            attempt_manifests = sorted(
+                [
+                    p / "stage.json"
+                    for p in attempts_dir.iterdir()
+                    if p.is_dir() and (p / "stage.json").is_file()
+                ],
+                key=lambda p: p.parent.name,
+            )
+        latest_manifest = stage_dir / "stage.json"
+        if latest_manifest.is_file() and latest_manifest not in attempt_manifests:
+            attempt_manifests.append(latest_manifest)
+
+        for manifest_path in attempt_manifests:
+            manifest_obj = _read_json_object(manifest_path)
+            if manifest_obj is None:
+                continue
+            manifest = cast(dict[str, object], manifest_obj)
+            attempt_any = manifest.get("attempt")
+            attempt = int(attempt_any) if isinstance(attempt_any, int) else 0
+            status_any = manifest.get("status")
+            status = status_any if isinstance(status_any, str) else "unknown"
+            artifacts = _manifest_artifact_paths(manifest=manifest, run_dir=run_dir)
+            manifest_rel = _try_run_relative(manifest_path, run_dir)
+            if manifest_rel is not None:
+                artifacts = sorted(set([manifest_rel, *artifacts]))
+            if not artifacts:
+                continue
+            bundle_id = f"{stage_name}-attempt-{attempt if attempt > 0 else 'latest'}"
+            bundles.append(
+                {
+                    "id": bundle_id,
+                    "stage": stage_name,
+                    "attempt": attempt,
+                    "status": status,
+                    "artifacts": cast(
+                        list[JsonValue], cast(list[object], artifacts)
+                    ),
+                }
+            )
+
+    findings_dir = run_dir / "stages" / "findings"
+    if findings_dir.is_dir():
+        findings_paths = sorted(
+            [
+                rel
+                for p in findings_dir.rglob("*")
+                if p.is_file()
+                for rel in [_try_run_relative(p, run_dir)]
+                if isinstance(rel, str) and bool(rel)
+            ]
+        )
+        if findings_paths:
+            bundles.append(
+                {
+                    "id": "findings-artifacts",
+                    "stage": "findings",
+                    "attempt": 1,
+                    "status": "ok",
+                    "artifacts": cast(
+                        list[JsonValue], cast(list[object], findings_paths)
+                    ),
+                }
+            )
+
+    return bundles
+
+
+def _write_firmware_handoff(
+    *,
+    info: RunInfo,
+    profile: str,
+    max_wallclock_per_run: int,
+) -> None:
+    manifest_obj = _read_json_object(info.manifest_path) or {}
+    exploit_gate_any = manifest_obj.get("exploit_gate")
+    exploit_gate = (
+        cast(dict[str, JsonValue], cast(dict[str, object], exploit_gate_any))
+        if isinstance(exploit_gate_any, dict)
+        else None
+    )
+
+    bundles = _collect_handoff_bundles(info.run_dir)
+    if not bundles:
+        fallback_artifacts: list[str] = []
+        report_json_rel = _try_run_relative(info.report_json_path, info.run_dir)
+        if report_json_rel is not None and info.report_json_path.is_file():
+            fallback_artifacts.append(report_json_rel)
+        manifest_rel = _try_run_relative(info.manifest_path, info.run_dir)
+        if manifest_rel is not None and info.manifest_path.is_file():
+            fallback_artifacts.append(manifest_rel)
+        if fallback_artifacts:
+            bundles = [
+                {
+                    "id": "run-metadata",
+                    "stage": "run",
+                    "attempt": 1,
+                    "status": "ok",
+                    "artifacts": cast(
+                        list[JsonValue], cast(list[object], sorted(fallback_artifacts))
+                    ),
+                }
+            ]
+
+    handoff: dict[str, JsonValue] = {
+        "schema_version": HANDOFF_SCHEMA_VERSION,
+        "generated_at": _iso_utc_now(),
+        "profile": profile,
+        "policy": {
+            "max_reruns_per_stage": 3,
+            "max_total_stage_attempts": 64,
+            "max_wallclock_per_run": int(max(1, max_wallclock_per_run)),
+        },
+        "aiedge": {
+            "run_id": info.run_id,
+            "run_dir": str(info.run_dir.resolve()),
+            "report_json": _try_run_relative(info.report_json_path, info.run_dir)
+            or "report/report.json",
+            "report_html": _try_run_relative(info.report_html_path, info.run_dir)
+            or "report/report.html",
+        },
+        "bundles": cast(list[JsonValue], cast(list[object], bundles)),
+    }
+    if profile == "exploit" and exploit_gate is not None:
+        handoff["exploit_gate"] = exploit_gate
+
+    handoff_path = info.run_dir / "firmware_handoff.json"
+    _ = handoff_path.write_text(
+        json.dumps(handoff, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _utc_run_id(input_sha256: str, *, prefix_len: int = 12) -> str:
     if not (6 <= prefix_len <= 12):
         raise ValueError("prefix_len must be 6..12")
@@ -989,6 +1168,19 @@ def _load_manifest_input_path(path: Path) -> str | None:
     val = cast(dict[str, object], data).get("input_path")
     if isinstance(val, str) and val:
         return val
+    return None
+
+
+def _load_manifest_rootfs_path(path: Path) -> str | None:
+    try:
+        data = cast(object, json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    val = cast(dict[str, object], data).get("rootfs_input_path")
+    if isinstance(val, str) and val.strip():
+        return val.strip()
     return None
 
 
@@ -1963,6 +2155,22 @@ def run_subset(
             )
             _ = reporting.write_report_json(report_dir, report)
             _ = reporting.write_report_html(report_dir, report)
+    try:
+        _write_firmware_handoff(
+            info=info,
+            profile=manifest_profile,
+            max_wallclock_per_run=int(max(1, budget_s)),
+        )
+    except Exception as exc:
+        limits = normalize_limitations_list(report.get("limitations"))
+        err_tag = f"firmware_handoff_write_failed:{type(exc).__name__}"
+        if err_tag not in limits:
+            limits.append(err_tag)
+            report["limitations"] = cast(
+                list[JsonValue], cast(list[object], limits)
+            )
+            _ = reporting.write_report_json(report_dir, report)
+            _ = reporting.write_report_html(report_dir, report)
     return rep
 
 
@@ -1981,6 +2189,12 @@ def analyze_run(
 
     report = _load_report_json(info.report_json_path)
     source_input_path = _load_manifest_input_path(info.manifest_path)
+    source_rootfs_path = _load_manifest_rootfs_path(info.manifest_path)
+    source_rootfs_dir = (
+        Path(source_rootfs_path).expanduser()
+        if isinstance(source_rootfs_path, str) and source_rootfs_path
+        else None
+    )
     manifest_profile = _load_manifest_profile(info.manifest_path)
     if no_llm:
         report["llm"] = _llm_skipped_report("disabled by --no-llm")
@@ -2086,6 +2300,7 @@ def analyze_run(
                 "extracted_file_count": 0,
                 "time_budget_s": int(budget_s),
                 "extraction_timeout_s": 0.0,
+                "manual_rootfs_requested": bool(source_rootfs_dir is not None),
             },
             "evidence": [
                 {"path": "stages/extraction", "note": "skipped"},
@@ -2844,6 +3059,22 @@ def analyze_run(
             _ = reporting.write_report_json(report_dir, report)
             _ = reporting.write_report_html(report_dir, report)
             raise
+        try:
+            _write_firmware_handoff(
+                info=info,
+                profile=manifest_profile,
+                max_wallclock_per_run=int(max(1, budget_s)),
+            )
+        except Exception as exc:
+            limits = normalize_limitations_list(report.get("limitations"))
+            tag = f"firmware_handoff_write_failed:{type(exc).__name__}"
+            if tag not in limits:
+                limits.append(tag)
+                report["limitations"] = cast(
+                    list[JsonValue], cast(list[object], limits)
+                )
+                _ = reporting.write_report_json(report_dir, report)
+                _ = reporting.write_report_html(report_dir, report)
         return combine_overall_status("skipped", inv_status, emu_status)
 
     extraction_timeout_s = min(
@@ -2864,7 +3095,11 @@ def analyze_run(
         make_ota_fs_stage(),
         make_ota_roots_stage(),
         make_ota_boottriage_stage(),
-        ExtractionStage(info.firmware_dest, timeout_s=float(extraction_timeout_s)),
+        ExtractionStage(
+            info.firmware_dest,
+            timeout_s=float(extraction_timeout_s),
+            provided_rootfs_dir=source_rootfs_dir,
+        ),
         StructureStage(info.firmware_dest),
         CarvingStage(info.firmware_dest),
         FirmwareProfileStage(),
@@ -2977,6 +3212,13 @@ def analyze_run(
             "extracted_file_count": int(extracted_count),
             "time_budget_s": int(budget_s),
             "extraction_timeout_s": float(extraction_timeout_s or 0),
+            "extraction_mode": cast(
+                str,
+                details.get("extraction_mode", "binwalk"),
+            ),
+            "manual_rootfs_requested": bool(
+                details.get("manual_rootfs_requested", False)
+            ),
         },
         "evidence": cast(list[JsonValue], cast(list[object], evidence)),
         "reasons": reasons,
@@ -3725,6 +3967,25 @@ def analyze_run(
         _ = reporting.write_report_json(report_dir, report)
         _ = reporting.write_report_html(report_dir, report)
         raise
+    try:
+        _write_firmware_handoff(
+            info=info,
+            profile=manifest_profile,
+            max_wallclock_per_run=int(max(1, budget_s)),
+        )
+    except Exception as exc:
+        existing_limits_after_handoff = normalize_limitations_list(
+            report.get("limitations")
+        )
+        handoff_tag = f"firmware_handoff_write_failed:{type(exc).__name__}"
+        if handoff_tag not in existing_limits_after_handoff:
+            existing_limits_after_handoff.append(handoff_tag)
+            report["limitations"] = cast(
+                list[JsonValue],
+                cast(list[object], existing_limits_after_handoff),
+            )
+            _ = reporting.write_report_json(report_dir, report)
+            _ = reporting.write_report_html(report_dir, report)
 
     extraction_status = cast(str, report["extraction"].get("status", "failed"))
     inventory_status = cast(str, report["inventory"].get("status", "failed"))

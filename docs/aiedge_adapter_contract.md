@@ -13,6 +13,7 @@ Contract goal: let an external orchestrator (e.g., Terminator) request AIEdge st
 
 - `run_ref.run_id`: orchestrator-chosen identifier for correlation.
 - `run_ref.run_dir_abs`: absolute path to the AIEdge run directory (executor-owned evidence store).
+- Optional: pre-extracted rootfs path may be supplied out-of-band and persisted as `manifest.rootfs_input_path` (CLI `--rootfs`) for extraction-stage ingestion.
 
 ### stage_names
 
@@ -90,6 +91,15 @@ Optional exploit-chain evidence note (backward-compatible):
   - `canonical_input` with `path`, `sha256`, and `sha256_source`
   - `exploit_gate` metadata captured for evidence provenance
 - Consumers MUST treat these fields as optional and preserve compatibility when absent.
+
+Firmware handoff compatibility note (backward-compatible):
+
+- After `analyze` or `stages`, executors MAY emit `run_dir/firmware_handoff.json`.
+- Consumers should treat it as optional but, when present, expect:
+  - `profile`
+  - `policy` (`max_reruns_per_stage`, `max_total_stage_attempts`, `max_wallclock_per_run`)
+  - `aiedge.run_id`, `aiedge.run_dir`
+  - non-empty `bundles[].artifacts` (run-relative paths)
 
 ## Example request/response
 

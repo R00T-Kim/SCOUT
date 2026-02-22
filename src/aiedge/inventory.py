@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -381,8 +382,18 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
         rel_l = rel.lower().replace("\\", "/")
         parts = [x for x in rel_l.split("/") if x]
 
-        if len(candidates) >= 50:
+        if len(candidates) >= 120:
             break
+
+        if "cgi-bin" in parts:
+            add(
+                name=p.name,
+                kind="cgi_binary",
+                path=p,
+                confidence=0.8,
+                note="path contains cgi-bin",
+            )
+            continue
 
         if "etc" in parts and "init.d" in parts:
             add(
@@ -437,6 +448,43 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
                 confidence=0.5,
             )
 
+    config_candidates = _collect_service_candidates_from_configs(
+        files,
+        run_dir=run_dir,
+        max_candidates=120,
+    )
+    for item_any in config_candidates:
+        if len(candidates) >= 120:
+            break
+        if not isinstance(item_any, dict):
+            continue
+        item = cast(dict[str, object], item_any)
+        name_any = item.get("name")
+        kind_any = item.get("kind")
+        confidence_any = item.get("confidence")
+        evidence_any = item.get("evidence")
+        if not (
+            isinstance(name_any, str)
+            and isinstance(kind_any, str)
+            and isinstance(confidence_any, (int, float))
+            and isinstance(evidence_any, list)
+            and evidence_any
+            and isinstance(evidence_any[0], dict)
+        ):
+            continue
+        evidence_obj = cast(dict[str, object], evidence_any[0])
+        ev_path_any = evidence_obj.get("path")
+        note_any = evidence_obj.get("note")
+        if not isinstance(ev_path_any, str) or not ev_path_any:
+            continue
+        add(
+            name=name_any,
+            kind=kind_any,
+            path=Path(run_dir / ev_path_any),
+            confidence=float(confidence_any),
+            note=note_any if isinstance(note_any, str) else None,
+        )
+
     return candidates
 
 
@@ -454,6 +502,29 @@ _CONFIG_EXTS = {
     ".env",
     ".rc",
 }
+
+_MIN_INVENTORY_FILE_THRESHOLD = 50
+_MIN_INVENTORY_BINARY_THRESHOLD = 5
+_RISKY_BINARY_SYMBOLS: dict[str, bytes] = {
+    "strcpy": b"strcpy",
+    "strcat": b"strcat",
+    "sprintf": b"sprintf",
+    "vsprintf": b"vsprintf",
+    "gets": b"gets",
+    "system": b"system",
+    "popen": b"popen",
+    "execve": b"execve",
+}
+_ELF_MACHINE_MAP: dict[int, str] = {
+    0x03: "x86",
+    0x08: "mips",
+    0x14: "powerpc",
+    0x28: "arm",
+    0x3E: "x86_64",
+    0xB7: "aarch64",
+    0xF3: "riscv",
+}
+_SERVICES_LINE_RE = re.compile(r"^([a-zA-Z0-9_.+-]+)\s+(\d+)/(tcp|udp)\b")
 
 
 def _is_config_file(path: Path) -> bool:
@@ -475,6 +546,293 @@ def _is_config_file(path: Path) -> bool:
         "inittab",
         "rc.local",
         "profile",
+    }
+
+
+def _read_text_sample(
+    path: Path,
+    *,
+    max_bytes: int = 256 * 1024,
+    run_dir: Path | None = None,
+    errors: list[dict[str, JsonValue]] | None = None,
+) -> str | None:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        if isinstance(run_dir, Path) and isinstance(errors, list):
+            _append_error(errors, run_dir=run_dir, path=path, op="read_bytes", exc=exc)
+        return None
+    if not raw:
+        return None
+    try:
+        return raw[:max_bytes].decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+
+def _collect_service_candidates_from_configs(
+    files: list[Path],
+    *,
+    run_dir: Path,
+    max_candidates: int = 120,
+) -> list[JsonValue]:
+    out: list[JsonValue] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(
+        *,
+        name: str,
+        kind: str,
+        path: Path,
+        confidence: float,
+        note: str | None = None,
+    ) -> None:
+        rel = _rel_to_run_dir(run_dir, path)
+        key = (kind, name, rel)
+        if key in seen:
+            return
+        seen.add(key)
+        ev: dict[str, JsonValue] = {"path": rel}
+        if note:
+            ev["note"] = note
+        out.append(
+            cast(
+                JsonValue,
+                {
+                    "name": name,
+                    "kind": kind,
+                    "confidence": float(max(0.0, min(1.0, confidence))),
+                    "evidence": [ev],
+                },
+            )
+        )
+
+    for path in files:
+        if len(out) >= int(max_candidates):
+            break
+        rel = _rel_to_run_dir(run_dir, path).replace("\\", "/")
+        rel_lower = rel.lower()
+        basename = path.name.lower()
+        is_relevant_config = (
+            basename
+            in {
+                "services",
+                "inetd.conf",
+                "xinetd.conf",
+                "thttpd.conf",
+                "httpd.conf",
+                "apache2.conf",
+                "lighttpd.conf",
+                "uhttpd.conf",
+                "nginx.conf",
+            }
+            or "/etc/xinetd.d/" in f"/{rel_lower}"
+        )
+        if not is_relevant_config:
+            continue
+        text = _read_text_sample(path, run_dir=run_dir, errors=None)
+        if not isinstance(text, str):
+            continue
+        lines = [ln.strip() for ln in text.splitlines()[:2000]]
+        if basename == "services":
+            for line in lines:
+                if not line or line.startswith("#"):
+                    continue
+                m = _SERVICES_LINE_RE.match(line)
+                if not m:
+                    continue
+                name = m.group(1)
+                port = m.group(2)
+                proto = m.group(3)
+                add(
+                    name=name,
+                    kind="services_db",
+                    path=path,
+                    confidence=0.55,
+                    note=f"{port}/{proto}",
+                )
+                if len(out) >= int(max_candidates):
+                    break
+            continue
+        if basename == "inetd.conf":
+            for line in lines:
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if not parts:
+                    continue
+                service_name = parts[0]
+                add(
+                    name=service_name,
+                    kind="inetd_service_map",
+                    path=path,
+                    confidence=0.65,
+                )
+                if len(out) >= int(max_candidates):
+                    break
+            continue
+        if "/etc/xinetd.d/" in f"/{rel_lower}":
+            service_name = path.stem
+            for line in lines:
+                if line.lower().startswith("service "):
+                    service_name = line.split(maxsplit=1)[1].strip() or service_name
+                    break
+            add(
+                name=service_name,
+                kind="xinetd_service_map",
+                path=path,
+                confidence=0.65,
+            )
+            continue
+
+        for line in lines:
+            low = line.lower()
+            if not low or low.startswith("#"):
+                continue
+            if "cgipat" in low or "cgi_pattern" in low or "scriptalias" in low:
+                add(
+                    name=f"{path.stem}-cgi",
+                    kind="http_cgi_policy",
+                    path=path,
+                    confidence=0.75,
+                    note=line[:160],
+                )
+            if low.startswith("listen "):
+                add(
+                    name=f"{path.stem}-listen",
+                    kind="http_listen",
+                    path=path,
+                    confidence=0.6,
+                    note=line[:120],
+                )
+            if len(out) >= int(max_candidates):
+                break
+
+    return out
+
+
+def _elf_arch_from_file(path: Path) -> str | None:
+    try:
+        with path.open("rb") as f:
+            head = f.read(64)
+    except OSError:
+        return None
+    if len(head) < 20 or not head.startswith(b"\x7fELF"):
+        return None
+    bits = 64 if head[4] == 2 else 32 if head[4] == 1 else 0
+    endian = "little" if head[5] == 1 else "big" if head[5] == 2 else "little"
+    machine = int.from_bytes(head[18:20], endian, signed=False)
+    arch = _ELF_MACHINE_MAP.get(machine, f"machine_{machine}")
+    if bits in {32, 64}:
+        return f"{arch}-{bits}"
+    return arch
+
+
+def _scan_binary_analysis(
+    files: list[Path],
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    max_binaries: int = 400,
+    max_bytes_per_file: int = 512 * 1024,
+    max_hits: int = 200,
+) -> tuple[dict[str, JsonValue], list[dict[str, JsonValue]], int]:
+    risky_symbol_counts: dict[str, int] = {k: 0 for k in _RISKY_BINARY_SYMBOLS}
+    arch_counts: dict[str, int] = {}
+    hits: list[dict[str, JsonValue]] = []
+    skipped_files = 0
+    binaries_scanned = 0
+    elf_binaries = 0
+    risky_binaries = 0
+
+    for path in files:
+        if binaries_scanned >= int(max_binaries):
+            break
+        if not _looks_binary(path, run_dir=run_dir, errors=errors):
+            continue
+
+        binaries_scanned += 1
+        try:
+            with path.open("rb") as f:
+                sample = f.read(int(max_bytes_per_file))
+        except OSError as exc:
+            skipped_files += 1
+            _append_error(errors, run_dir=run_dir, path=path, op="read_bytes", exc=exc)
+            continue
+        if not sample:
+            continue
+        arch = _elf_arch_from_file(path)
+        if isinstance(arch, str):
+            elf_binaries += 1
+            arch_counts[arch] = int(arch_counts.get(arch, 0) + 1)
+
+        matched_symbols = [
+            symbol
+            for symbol, marker in _RISKY_BINARY_SYMBOLS.items()
+            if marker in sample
+        ]
+        if not matched_symbols:
+            continue
+
+        risky_binaries += 1
+        for symbol in matched_symbols:
+            risky_symbol_counts[symbol] = int(risky_symbol_counts.get(symbol, 0) + 1)
+
+        if len(hits) < int(max_hits):
+            rel = _rel_to_run_dir(run_dir, path)
+            sha = hashlib.sha256(sample).hexdigest()
+            hits.append(
+                {
+                    "path": rel,
+                    "arch": arch or "unknown",
+                    "matched_symbols": cast(
+                        list[JsonValue], cast(list[object], sorted(set(matched_symbols)))
+                    ),
+                    "sample_sha256": sha,
+                }
+            )
+
+    summary: dict[str, JsonValue] = {
+        "binaries_scanned": int(binaries_scanned),
+        "elf_binaries": int(elf_binaries),
+        "risky_binaries": int(risky_binaries),
+        "risky_symbol_hits": int(sum(risky_symbol_counts.values())),
+        "risky_symbol_counts": cast(
+            dict[str, JsonValue],
+            {k: int(v) for k, v in sorted(risky_symbol_counts.items()) if v > 0},
+        ),
+        "arch_counts": cast(
+            dict[str, JsonValue],
+            {k: int(v) for k, v in sorted(arch_counts.items())},
+        ),
+    }
+    return summary, hits, skipped_files
+
+
+def _inventory_quality_assessment(
+    *,
+    files_seen: int,
+    binaries_seen: int,
+    min_files: int = _MIN_INVENTORY_FILE_THRESHOLD,
+    min_binaries: int = _MIN_INVENTORY_BINARY_THRESHOLD,
+) -> dict[str, JsonValue]:
+    reasons: list[str] = []
+    if files_seen < int(min_files):
+        reasons.append(
+            f"files_seen below threshold ({files_seen} < {int(min_files)})"
+        )
+    if binaries_seen < int(min_binaries):
+        reasons.append(
+            f"binaries_seen below threshold ({binaries_seen} < {int(min_binaries)})"
+        )
+    status = "sufficient" if not reasons else "insufficient"
+    return {
+        "status": status,
+        "min_files": int(min_files),
+        "min_binaries": int(min_binaries),
+        "files_seen": int(files_seen),
+        "binaries_seen": int(binaries_seen),
+        "reasons": cast(list[JsonValue], cast(list[object], reasons)),
     }
 
 
@@ -807,6 +1165,8 @@ class InventoryStage:
         _assert_under_dir(ctx.run_dir, inventory_path)
         strings_path = stage_dir / "string_hits.json"
         _assert_under_dir(ctx.run_dir, strings_path)
+        binary_analysis_path = stage_dir / "binary_analysis.json"
+        _assert_under_dir(ctx.run_dir, binary_analysis_path)
 
         evidence: list[JsonValue] = []
         errors: list[dict[str, JsonValue]] = []
@@ -820,6 +1180,7 @@ class InventoryStage:
         binaries_seen = 0
         configs_seen = 0
         string_hits_seen = 0
+        binary_risk_hits_seen = 0
 
         summary_none: dict[str, JsonValue] = {
             "roots_scanned": 0,
@@ -827,6 +1188,7 @@ class InventoryStage:
             "binaries": 0,
             "configs": 0,
             "string_hits": 0,
+            "risky_binary_hits": 0,
         }
         empty_candidates: list[JsonValue] = []
         empty_services: list[JsonValue] = []
@@ -840,6 +1202,28 @@ class InventoryStage:
         if not strings_written:
             limitations.append(
                 "Failed to write string_hits.json placeholder; inventory.json still written with error details."
+            )
+        binary_written = _safe_write_json(
+            run_dir=ctx.run_dir,
+            path=binary_analysis_path,
+            payload={
+                "summary": {
+                    "binaries_scanned": 0,
+                    "elf_binaries": 0,
+                    "risky_binaries": 0,
+                    "risky_symbol_hits": 0,
+                    "risky_symbol_counts": {},
+                    "arch_counts": {},
+                },
+                "hits": [],
+                "note": "Best-effort binary risk scan (symbol/string based).",
+            },
+            errors=errors,
+            op="write_binary_analysis_empty",
+        )
+        if not binary_written:
+            limitations.append(
+                "Failed to write binary_analysis.json placeholder; inventory.json still written with error details."
             )
 
         try:
@@ -926,6 +1310,10 @@ class InventoryStage:
                     skipped_dirs=skipped_dirs,
                     skipped_files=skipped_files,
                 )
+                quality_none = _inventory_quality_assessment(
+                    files_seen=files_seen,
+                    binaries_seen=binaries_seen,
+                )
                 payload_none: dict[str, JsonValue] = {
                     "status": "partial",
                     "reason": reason,
@@ -933,6 +1321,7 @@ class InventoryStage:
                     "summary": summary_none,
                     "service_candidates": empty_candidates,
                     "services": empty_services,
+                    "quality": quality_none,
                 }
                 _ = _write_inventory_payload(
                     run_dir=ctx.run_dir,
@@ -946,6 +1335,10 @@ class InventoryStage:
                 if strings_written:
                     evidence.append(
                         {"path": _rel_to_run_dir(ctx.run_dir, strings_path)}
+                    )
+                if binary_written:
+                    evidence.append(
+                        {"path": _rel_to_run_dir(ctx.run_dir, binary_analysis_path)}
                     )
                 if extracted_state_note is not None:
                     evidence.append(
@@ -970,6 +1363,9 @@ class InventoryStage:
                 limitations.append(
                     "No scan roots available (OTA roots, carving roots, and extraction output unavailable)."
                 )
+                limitations.append(
+                    "Inventory coverage is insufficient; provide a pre-extracted rootfs via --rootfs PATH and rerun."
+                )
                 if errors:
                     limitations.append(
                         "Inventory encountered recoverable filesystem errors; see inventory.json errors[]."
@@ -986,10 +1382,19 @@ class InventoryStage:
                             "services": empty_services,
                             "extracted_dir": extracted_rel,
                             "reason": reason,
+                            "quality": quality_none,
                             "errors": _sorted_errors(errors),
                             "coverage_metrics": coverage_metrics,
                             "entry_count": _entry_count_from_coverage(coverage_metrics),
                             "entries": _entry_count_from_coverage(coverage_metrics),
+                            "binary_analysis_summary": {
+                                "binaries_scanned": 0,
+                                "elf_binaries": 0,
+                                "risky_binaries": 0,
+                                "risky_symbol_hits": 0,
+                                "risky_symbol_counts": {},
+                                "arch_counts": {},
+                            },
                         },
                     ),
                     limitations=limitations,
@@ -1032,6 +1437,16 @@ class InventoryStage:
             string_hits_total = int(sum(string_counts.values()))
             string_hits_seen = int(string_hits_total)
 
+            binary_summary, binary_hits, skipped_binary_files = _scan_binary_analysis(
+                all_files,
+                run_dir=ctx.run_dir,
+                errors=errors,
+            )
+            skipped_files += skipped_binary_files
+            risky_hits_any = binary_summary.get("risky_symbol_hits")
+            if isinstance(risky_hits_any, int):
+                binary_risk_hits_seen = int(risky_hits_any)
+
             strings_payload: dict[str, JsonValue] = {
                 "counts": cast(JsonValue, string_counts),
                 "samples": cast(JsonValue, string_samples),
@@ -1048,6 +1463,25 @@ class InventoryStage:
                 limitations.append(
                     "Failed to write string_hits.json; inventory.json still written with error details."
                 )
+            binary_payload: dict[str, JsonValue] = {
+                "summary": binary_summary,
+                "hits": cast(
+                    list[JsonValue],
+                    cast(list[object], binary_hits),
+                ),
+                "note": "Best-effort binary risk scan (symbol/string based).",
+            }
+            binary_written = _safe_write_json(
+                run_dir=ctx.run_dir,
+                path=binary_analysis_path,
+                payload=binary_payload,
+                errors=errors,
+                op="write_binary_analysis",
+            )
+            if not binary_written:
+                limitations.append(
+                    "Failed to write binary_analysis.json; inventory.json still written with error details."
+                )
 
             summary: dict[str, JsonValue] = {
                 "roots_scanned": int(len(roots)),
@@ -1055,6 +1489,7 @@ class InventoryStage:
                 "binaries": int(binaries),
                 "configs": int(configs),
                 "string_hits": int(string_hits_total),
+                "risky_binary_hits": int(binary_risk_hits_seen),
             }
 
             coverage_metrics = _coverage_metrics(
@@ -1067,8 +1502,28 @@ class InventoryStage:
                 skipped_dirs=skipped_dirs,
                 skipped_files=skipped_files,
             )
+            quality = _inventory_quality_assessment(
+                files_seen=files_seen,
+                binaries_seen=binaries_seen,
+            )
 
             status: str = "partial" if errors else "ok"
+            quality_status_any = quality.get("status")
+            if quality_status_any == "insufficient":
+                extracted_root_only = (
+                    len(roots) == 1
+                    and roots[0] == extracted_dir
+                    and roots_scanned == 1
+                )
+                if extracted_root_only:
+                    status = "partial"
+                    limitations.append(
+                        "Inventory quality gate flagged insufficient coverage on extraction root; downstream results may be incomplete."
+                    )
+                else:
+                    limitations.append(
+                        "Inventory quality heuristics observed sparse coverage, but alternative roots were present."
+                    )
             payload: dict[str, JsonValue] = {
                 "status": status,
                 "extracted_dir": _rel_to_run_dir(ctx.run_dir, extracted_dir),
@@ -1078,11 +1533,20 @@ class InventoryStage:
                 "summary": summary,
                 "service_candidates": service_candidates,
                 "services": services,
+                "quality": quality,
+                "binary_analysis_summary": binary_summary,
             }
+            artifacts_payload: dict[str, JsonValue] = {}
             if strings_written:
-                payload["artifacts"] = {
-                    "string_hits": _rel_to_run_dir(ctx.run_dir, strings_path)
-                }
+                artifacts_payload["string_hits"] = _rel_to_run_dir(
+                    ctx.run_dir, strings_path
+                )
+            if binary_written:
+                artifacts_payload["binary_analysis"] = _rel_to_run_dir(
+                    ctx.run_dir, binary_analysis_path
+                )
+            if artifacts_payload:
+                payload["artifacts"] = artifacts_payload
 
             _ = _write_inventory_payload(
                 run_dir=ctx.run_dir,
@@ -1095,6 +1559,10 @@ class InventoryStage:
             evidence.append({"path": _rel_to_run_dir(ctx.run_dir, inventory_path)})
             if strings_written:
                 evidence.append({"path": _rel_to_run_dir(ctx.run_dir, strings_path)})
+            if binary_written:
+                evidence.append(
+                    {"path": _rel_to_run_dir(ctx.run_dir, binary_analysis_path)}
+                )
             evidence.append({"path": _rel_to_run_dir(ctx.run_dir, extracted_dir)})
             carving_roots_path = ctx.run_dir / "stages" / "carving" / "roots.json"
             if carving_roots_path.is_file():
@@ -1134,6 +1602,8 @@ class InventoryStage:
                         "coverage_metrics": coverage_metrics,
                         "entry_count": _entry_count_from_coverage(coverage_metrics),
                         "entries": _entry_count_from_coverage(coverage_metrics),
+                        "quality": quality,
+                        "binary_analysis_summary": binary_summary,
                     },
                 ),
                 limitations=limitations,
@@ -1169,6 +1639,10 @@ class InventoryStage:
                 skipped_dirs=skipped_dirs,
                 skipped_files=skipped_files,
             )
+            quality_fallback = _inventory_quality_assessment(
+                files_seen=files_seen,
+                binaries_seen=binaries_seen,
+            )
             fallback_payload: dict[str, JsonValue] = {
                 "status": "partial",
                 "reason": "inventory_recovered_from_exception",
@@ -1176,6 +1650,15 @@ class InventoryStage:
                 "summary": summary_none,
                 "service_candidates": empty_candidates,
                 "services": empty_services,
+                "quality": quality_fallback,
+                "binary_analysis_summary": {
+                    "binaries_scanned": 0,
+                    "elf_binaries": 0,
+                    "risky_binaries": 0,
+                    "risky_symbol_hits": 0,
+                    "risky_symbol_counts": {},
+                    "arch_counts": {},
+                },
             }
             if not strings_written:
                 strings_written = _safe_write_json(
@@ -1209,6 +1692,15 @@ class InventoryStage:
                         "coverage_metrics": coverage_metrics,
                         "entry_count": _entry_count_from_coverage(coverage_metrics),
                         "entries": _entry_count_from_coverage(coverage_metrics),
+                        "quality": quality_fallback,
+                        "binary_analysis_summary": {
+                            "binaries_scanned": 0,
+                            "elf_binaries": 0,
+                            "risky_binaries": 0,
+                            "risky_symbol_hits": 0,
+                            "risky_symbol_counts": {},
+                            "arch_counts": {},
+                        },
                     },
                 ),
                 limitations=limitations,

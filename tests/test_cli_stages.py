@@ -119,6 +119,85 @@ def test_analyze_cli_without_stages_calls_analyze_run(
     assert calls["force_retriage"] is False
 
 
+def test_analyze_cli_rootfs_writes_manifest_marker(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fw = _write_firmware(tmp_path)
+    rootfs_dir = tmp_path / "rootfs"
+    (rootfs_dir / "etc").mkdir(parents=True)
+    _ = (rootfs_dir / "etc" / "passwd").write_text("root:x:0:0\n", encoding="utf-8")
+    calls: dict[str, object] = {}
+
+    def fake_analyze_run(
+        info: run_mod.RunInfo,
+        *,
+        time_budget_s: int,
+        no_llm: bool,
+        force_retriage: bool,
+    ) -> str:
+        manifest = cast(
+            dict[str, object],
+            json.loads(info.manifest_path.read_text(encoding="utf-8")),
+        )
+        calls["rootfs_input_path"] = manifest.get("rootfs_input_path")
+        calls["time_budget_s"] = time_budget_s
+        calls["no_llm"] = no_llm
+        calls["force_retriage"] = force_retriage
+        return "ok"
+
+    monkeypatch.setattr(run_mod, "analyze_run", fake_analyze_run)
+
+    rc = main(
+        [
+            "analyze",
+            str(fw),
+            "--case-id",
+            "case-rootfs-marker",
+            "--ack-authorization",
+            "--rootfs",
+            str(rootfs_dir),
+            "--no-llm",
+        ]
+    )
+
+    assert rc == 0
+    _ = Path(capsys.readouterr().out.strip())
+    assert calls["rootfs_input_path"] == str(rootfs_dir.resolve())
+    assert calls["time_budget_s"] == 3600
+    assert calls["no_llm"] is True
+    assert calls["force_retriage"] is False
+
+
+def test_analyze_cli_rejects_missing_rootfs_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fw = _write_firmware(tmp_path)
+    missing = tmp_path / "missing-rootfs"
+
+    rc = main(
+        [
+            "analyze",
+            str(fw),
+            "--case-id",
+            "case-missing-rootfs",
+            "--ack-authorization",
+            "--rootfs",
+            str(missing),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 20
+    assert captured.out == ""
+    assert "Pre-extracted rootfs directory not found" in captured.err
+
+
 def test_analyze_cli_stages_rejects_empty_list(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

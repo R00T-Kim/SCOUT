@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -51,6 +52,24 @@ def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
     if value > int(max_value):
         return int(max_value)
     return int(value)
+
+
+def _load_manifest_rootfs_path(manifest_path: Path | None) -> Path | None:
+    if not isinstance(manifest_path, Path) or not manifest_path.is_file():
+        return None
+    try:
+        payload_any = cast(object, json.loads(manifest_path.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+    if not isinstance(payload_any, dict):
+        return None
+    rootfs_any = cast(dict[str, object], payload_any).get("rootfs_input_path")
+    if not isinstance(rootfs_any, str):
+        return None
+    rootfs_s = rootfs_any.strip()
+    if not rootfs_s:
+        return None
+    return Path(rootfs_s).expanduser()
 
 
 def _make_emulation_stage(
@@ -213,7 +232,14 @@ def _make_extraction_stage(
     remaining_budget_s_raw = remaining_s()
     remaining_budget_s = _quantize_remaining_budget_s(remaining_budget_s_raw)
     timeout_s = min(600, remaining_budget_s)
-    return ExtractionStage(info.firmware_dest, timeout_s=float(timeout_s))
+    manifest_path_any = getattr(info, "manifest_path", None)
+    manifest_path = manifest_path_any if isinstance(manifest_path_any, Path) else None
+    rootfs_path = _load_manifest_rootfs_path(manifest_path)
+    return ExtractionStage(
+        info.firmware_dest,
+        timeout_s=float(timeout_s),
+        provided_rootfs_dir=rootfs_path,
+    )
 
 
 def _make_firmware_lineage_stage(

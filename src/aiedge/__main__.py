@@ -3315,6 +3315,25 @@ def _write_manifest_profile_marker(
     )
 
 
+def _write_manifest_rootfs_marker(
+    manifest_path: Path,
+    *,
+    rootfs_path: Path | None,
+) -> None:
+    obj_any = cast(object, json.loads(manifest_path.read_text(encoding="utf-8")))
+    if not isinstance(obj_any, dict):
+        raise ValueError("manifest.json is not an object")
+    obj = cast(dict[str, object], obj_any)
+    if rootfs_path is None:
+        obj.pop("rootfs_input_path", None)
+    else:
+        obj["rootfs_input_path"] = str(rootfs_path.resolve())
+    _ = manifest_path.write_text(
+        json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     epilog = textwrap.dedent(
         """\
@@ -3411,6 +3430,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _ = analyze.add_argument(
+        "--rootfs",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Path to a pre-extracted root filesystem directory. "
+            "When provided, extraction stage ingests this directory instead of relying only on binwalk."
+        ),
+    )
+    _ = analyze.add_argument(
         "--ref-md",
         default=None,
         metavar="PATH",
@@ -3502,6 +3530,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Comma-separated subset of stage names to run (example: tooling,structure). "
             "Note: findings is an integrated step in full analyze/analyze-8mb runs and is not a selectable stage."
+        ),
+    )
+    _ = analyze_8mb.add_argument(
+        "--rootfs",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Path to a pre-extracted root filesystem directory. "
+            "When provided, extraction stage ingests this directory instead of relying only on binwalk."
         ),
     )
     _ = analyze_8mb.add_argument(
@@ -3813,6 +3850,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         egress_allow = cast(list[str], getattr(args, "egress_allow", []))
         no_llm = bool(getattr(args, "no_llm", False))
         stages_raw = cast(str | None, getattr(args, "stages", None))
+        rootfs_raw = cast(str | None, getattr(args, "rootfs", None))
         ref_md = cast(str | None, getattr(args, "ref_md", None))
         require_ref_md = bool(getattr(args, "require_ref_md", False))
         force_retriage = bool(getattr(args, "force_retriage", False))
@@ -3820,6 +3858,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         exploit_flag = cast(str, getattr(args, "exploit_flag", ""))
         exploit_att = cast(str, getattr(args, "exploit_attestation", ""))
         exploit_scope = cast(str, getattr(args, "exploit_scope", ""))
+        rootfs_path: Path | None = None
+        if isinstance(rootfs_raw, str) and rootfs_raw.strip():
+            candidate = Path(rootfs_raw).expanduser()
+            if not candidate.is_dir():
+                print(
+                    f"Pre-extracted rootfs directory not found: {candidate}",
+                    file=sys.stderr,
+                )
+                return 20
+            rootfs_path = candidate.resolve()
 
         enforce_canonical_8mb = command == "analyze-8mb"
         if enforce_canonical_8mb:
@@ -3912,6 +3960,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         profile=profile,
                         exploit_gate=exploit_gate,
                     )
+            if isinstance(manifest_path_any, Path):
+                _write_manifest_rootfs_marker(
+                    manifest_path_any,
+                    rootfs_path=rootfs_path,
+                )
 
             stage_status: str | None = None
             if stage_names is not None:

@@ -430,3 +430,54 @@ def test_inventory_resolve_permission_error_is_recorded_without_run_fallback(
     files_seen_obj = coverage.get("files_seen")
     assert isinstance(files_seen_obj, int)
     assert files_seen_obj > 0
+
+
+def test_inventory_enriches_service_and_binary_analysis_artifacts(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+
+    rootfs = ctx.run_dir / "stages" / "extraction" / "_firmware.bin.extracted" / "fs-root"
+    etc_dir = rootfs / "etc"
+    bin_dir = rootfs / "bin"
+    etc_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    _ = (etc_dir / "services").write_text(
+        "http 80/tcp\nhttps 443/tcp\n",
+        encoding="utf-8",
+    )
+    _ = (etc_dir / "thttpd.conf").write_text(
+        "cgipat=/cgi-bin/*\n",
+        encoding="utf-8",
+    )
+    risky_bin = bin_dir / "httpd"
+    _ = risky_bin.write_bytes(b"\x7fELF" + b"\x00" * 32 + b"strcpy\x00system\x00")
+    risky_bin.chmod(0o755)
+
+    outcome = InventoryStage().run(ctx)
+    assert outcome.status in {"ok", "partial"}
+
+    inv = _read_inventory(ctx.run_dir / "stages" / "inventory" / "inventory.json")
+    service_candidates_obj = inv.get("service_candidates")
+    assert isinstance(service_candidates_obj, list)
+    service_candidates = cast(list[object], service_candidates_obj)
+    kinds = {
+        cast(dict[str, object], item).get("kind")
+        for item in service_candidates
+        if isinstance(item, dict)
+    }
+    assert "services_db" in kinds or "http_cgi_policy" in kinds
+
+    binary_summary_obj = inv.get("binary_analysis_summary")
+    assert isinstance(binary_summary_obj, dict)
+    binary_summary = cast(dict[str, object], binary_summary_obj)
+    risky_hits = binary_summary.get("risky_symbol_hits")
+    assert isinstance(risky_hits, int)
+    assert risky_hits >= 1
+
+    artifacts_obj = inv.get("artifacts")
+    assert isinstance(artifacts_obj, dict)
+    binary_artifact = cast(dict[str, object], artifacts_obj).get("binary_analysis")
+    assert isinstance(binary_artifact, str)
+    assert (ctx.run_dir / binary_artifact).is_file()

@@ -36,6 +36,15 @@ SCOUT는 펌웨어 분석 결과를 "가능한 취약점 목록"에서 멈추지
 
 ## 최근 동기화 포인트
 
+- `analyze` / `analyze-8mb`에 `--rootfs <DIR>`가 추가되었습니다.  
+  다층 패킹 펌웨어에서 추출 실패 시, 수동/사전 추출 rootfs를 바로 주입할 수 있습니다.
+- extraction stage에 품질 게이트가 추가되어 파일 수가 너무 적으면 `partial` + 경고로 표시됩니다.
+- inventory 산출물이 확장되었습니다.
+  - `stages/inventory/binary_analysis.json`
+  - `inventory.json.quality`
+  - `inventory.json.binary_analysis_summary`
+- `firmware_profile`은 ELF 교차검증(`arch_guess`, `elf_hints`)을 포함해 RTOS 오탐을 줄입니다.
+- `firmware_handoff.json`이 SCOUT에서 자동 생성됩니다(분석/재실행 모두).
 - `./scout` 래퍼가 우선 사용되며, 긴 `PYTHONPATH=... python3 -m aiedge` 호출은 보조 수단입니다.
 - `dynamic_validation`과 `exploit_autopoc`가 **증거 번들(evidence bundle)**을 통해 연결되어, 실시간으로 D/E/V 우선순위 판독이 가능해졌습니다.
 - 런타임 통신 모델이 별도 stage로 산출됩니다.  
@@ -74,6 +83,12 @@ cd /path/to/SCOUT
   --ack-authorization --no-llm \
   --case-id my-analysis \
   --stages tooling,extraction,structure,carving,firmware_profile,inventory
+
+# 추출이 약한 타깃(다층 포맷)에서는 사전 추출 rootfs를 직접 주입
+./scout analyze firmware.img \
+  --ack-authorization --no-llm \
+  --case-id my-analysis \
+  --rootfs /path/to/extracted/rootfs
 ```
 
 ### 전체 프로필(권장: exploit 모드)
@@ -163,11 +178,13 @@ python3 scripts/verify_verified_chain.py --run-dir aiedge-runs/<run_id>
 ```text
 aiedge-runs/<run_id>/
 ├─ manifest.json
+├─ firmware_handoff.json
 ├─ input/firmware.bin
 ├─ stages/
 │  ├─ extraction/
 │  ├─ firmware_profile/
 │  ├─ inventory/
+│  │  └─ binary_analysis.json
 │  ├─ surfaces/
 │  ├─ findings/
 │  ├─ dynamic_validation/

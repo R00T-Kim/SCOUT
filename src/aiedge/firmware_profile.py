@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -13,6 +15,15 @@ from .stage import StageContext, StageOutcome
 OsTypeGuess = Literal["linux_fs", "rtos_monolithic", "unextractable_or_unknown"]
 InventoryMode = Literal["filesystem", "binary_only"]
 EmulationFeasibility = Literal["high", "medium", "low", "unknown"]
+_ELF_MACHINE_MAP: dict[int, str] = {
+    0x03: "x86",
+    0x08: "mips",
+    0x14: "powerpc",
+    0x28: "arm",
+    0x3E: "x86_64",
+    0xB7: "aarch64",
+    0xF3: "riscv",
+}
 
 
 def _sha256_file(path: Path) -> str:
@@ -301,6 +312,170 @@ def _extract_sdk_hints(
     return sorted(hints)
 
 
+def _iter_files_sorted(
+    root: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+    max_depth: int = 8,
+    max_files: int = 8000,
+) -> list[Path]:
+    if not _probe_is_dir(
+        root,
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+        op="elf_probe.root_is_dir",
+    ):
+        return []
+
+    out: list[Path] = []
+    queue: list[tuple[Path, int]] = [(root, 0)]
+    while queue and len(out) < int(max_files):
+        current, depth = queue.pop(0)
+        try:
+            with os.scandir(current) as it:
+                entries = sorted(list(it), key=lambda e: e.name)
+        except OSError as exc:
+            _record_probe_error(
+                errors=errors,
+                limitations=limitations,
+                run_dir=run_dir,
+                path=current,
+                op="elf_probe.listdir",
+                exc=exc,
+            )
+            continue
+
+        child_dirs: list[Path] = []
+        for entry in entries:
+            entry_path = Path(entry.path)
+            try:
+                if entry.is_file(follow_symlinks=False):
+                    out.append(entry_path)
+                    if len(out) >= int(max_files):
+                        break
+                    continue
+            except OSError as exc:
+                _record_probe_error(
+                    errors=errors,
+                    limitations=limitations,
+                    run_dir=run_dir,
+                    path=entry_path,
+                    op="elf_probe.entry_is_file",
+                    exc=exc,
+                )
+                continue
+            if depth >= int(max_depth):
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    child_dirs.append(entry_path)
+            except OSError as exc:
+                _record_probe_error(
+                    errors=errors,
+                    limitations=limitations,
+                    run_dir=run_dir,
+                    path=entry_path,
+                    op="elf_probe.entry_is_dir",
+                    exc=exc,
+                )
+                continue
+        if depth < int(max_depth):
+            queue.extend((p, depth + 1) for p in child_dirs)
+
+    return out
+
+
+def _elf_arch_from_file(path: Path) -> str | None:
+    try:
+        with path.open("rb") as f:
+            head = f.read(64)
+    except OSError:
+        return None
+    if len(head) < 20 or not head.startswith(b"\x7fELF"):
+        return None
+
+    bits = 64 if head[4] == 2 else 32 if head[4] == 1 else 0
+    endian = "little" if head[5] == 1 else "big" if head[5] == 2 else "little"
+    machine = int.from_bytes(head[18:20], endian, signed=False)
+    arch = _ELF_MACHINE_MAP.get(machine, f"machine_{machine}")
+    if bits in {32, 64}:
+        return f"{arch}-{bits}"
+    return arch
+
+
+def _collect_elf_hints(
+    extracted_dir: Path,
+    *,
+    run_dir: Path,
+    errors: list[dict[str, JsonValue]],
+    limitations: list[str],
+) -> dict[str, JsonValue]:
+    files = _iter_files_sorted(
+        extracted_dir,
+        run_dir=run_dir,
+        errors=errors,
+        limitations=limitations,
+    )
+    file_cmd = shutil.which("file")
+    arch_counts: dict[str, int] = {}
+    sample_paths: list[str] = []
+    file_descriptions: list[dict[str, JsonValue]] = []
+    elf_total = 0
+
+    for path in files:
+        arch = _elf_arch_from_file(path)
+        if not isinstance(arch, str):
+            continue
+        elf_total += 1
+        arch_counts[arch] = int(arch_counts.get(arch, 0) + 1)
+        rel = _run_relative(path, run_dir)
+        if rel is not None and len(sample_paths) < 16:
+            sample_paths.append(rel)
+
+        if file_cmd and rel is not None and len(file_descriptions) < 8:
+            try:
+                cp = subprocess.run(
+                    [file_cmd, "-b", str(path)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=2.0,
+                )
+                if cp.returncode == 0:
+                    desc = cp.stdout.strip()
+                else:
+                    desc = (cp.stderr or "").strip() or f"file rc={cp.returncode}"
+                file_descriptions.append(
+                    {"path": rel, "description": desc[:240], "arch": arch}
+                )
+            except Exception as exc:
+                limitations.append(
+                    f"ELF file(1) probe failed for {rel}: {type(exc).__name__}"
+                )
+
+    arch_guess: str | None = None
+    if arch_counts:
+        arch_guess = sorted(
+            arch_counts.items(), key=lambda item: (-item[1], item[0])
+        )[0][0]
+
+    return {
+        "elf_count": int(elf_total),
+        "arch_guess": arch_guess,
+        "arch_counts": cast(
+            dict[str, JsonValue], {k: int(v) for k, v in sorted(arch_counts.items())}
+        ),
+        "sample_paths": cast(list[JsonValue], cast(list[object], sorted(sample_paths))),
+        "file_descriptions": cast(
+            list[JsonValue], cast(list[object], file_descriptions)
+        ),
+        "file_cmd_available": bool(file_cmd),
+    }
+
+
 @dataclass(frozen=True)
 class FirmwareProfileStage:
     @property
@@ -354,6 +529,12 @@ class FirmwareProfileStage:
             errors=errors,
             limitations=limitations,
         )
+        elf_hints = _collect_elf_hints(
+            extraction_dir,
+            run_dir=ctx.run_dir,
+            errors=errors,
+            limitations=limitations,
+        )
 
         if not _probe_exists(
             extraction_dir,
@@ -399,6 +580,10 @@ class FirmwareProfileStage:
         inventory_mode: InventoryMode
         why: str
         emulation_feasibility: EmulationFeasibility
+        elf_count_any = elf_hints.get("elf_count")
+        elf_count = int(elf_count_any) if isinstance(elf_count_any, int) else 0
+        arch_guess_any = elf_hints.get("arch_guess")
+        arch_guess = arch_guess_any if isinstance(arch_guess_any, str) else None
 
         if rootfs_candidates:
             os_type_guess = "linux_fs"
@@ -406,6 +591,23 @@ class FirmwareProfileStage:
             emulation_feasibility = "high"
             why = (
                 "Found extracted rootfs candidate(s) containing etc/ and bin/ or usr/."
+            )
+        elif firmware_is_file and elf_count > 0:
+            os_type_guess = "unextractable_or_unknown"
+            inventory_mode = "binary_only"
+            emulation_feasibility = "medium"
+            if arch_guess:
+                why = (
+                    "No extracted rootfs candidates, but extracted corpus contains "
+                    + f"{elf_count} ELF binaries (dominant arch: {arch_guess}); likely Linux-like binary payload."
+                )
+            else:
+                why = (
+                    "No extracted rootfs candidates, but extracted corpus contains ELF binaries; "
+                    "likely Linux-like binary payload."
+                )
+            limitations.append(
+                "OS classification cross-check: ELF binaries detected without rootfs; treating RTOS guess as low-confidence."
             )
         elif firmware_is_file:
             os_type_guess = "rtos_monolithic"
@@ -432,6 +634,8 @@ class FirmwareProfileStage:
                 cast(list[object], _sorted_unique_errors(errors)),
             ),
             "firmware_id": firmware_id,
+            "arch_guess": arch_guess,
+            "elf_hints": elf_hints,
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
             ),
