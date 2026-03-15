@@ -53,6 +53,10 @@ SCOUT는 펌웨어 분석 결과를 "가능한 취약점 목록"에서 멈추지
   - Neo4j용 `communication_graph.cypher`, `communication_graph.queries.cypher`
 - TUI/뷰어에 위협·런타임·자산 패널이 추가되어 한 화면에서 흐름을 볼 수 있습니다.
 - `AIEDGE_PRIV_RUNNER`는 상대 경로를 지원하며, `run_dir` 포함 다수 위치에서 안전하게 해석됩니다.
+- SquashFS 추출이 **재귀적 BFS 큐**로 개선되었습니다 (깊이 제한 4, 오프셋 기반 매직 스캔으로 벤더 래퍼 `.cv2` 등 대응).
+- **심링크 containment** 적용: 추출된 심링크 대상이 `run_dir` 밖으로 탈출하면 스킵 및 `limitations[]`에 기록합니다.
+- Findings에 **브릿지 토큰 탐지** 추가: `sprintf`/`snprintf`/`strcat`/`strcpy`가 `system`/`popen`/`execve` 근처에 있으면 커맨드 인젝션 후보로 플래그합니다.
+- 신규 **`web_ui` 스테이지**: 웹 콘텐츠 디렉토리(`www/`, `htdocs/`, `webroot/`, `cgi-bin/`)의 HTML/JS에서 보안 패턴(XSS 싱크, API 서피스, WebSocket 등)을 스캔합니다. `stages/web_ui/web_ui.json` 산출.
 
 ---
 
@@ -63,7 +67,8 @@ SCOUT는 펌웨어 분석 결과를 "가능한 취약점 목록"에서 멈추지
   ├─ 추출/프로파일링
   ├─ 인벤토리(파일/바이너리)
   ├─ 공격면 매핑(네트워크/서비스/프로토콜/엔트리포인트)
-  ├─ 취약점 패턴 + 체인 후보
+  ├─ 웹 UI 보안 스캔(HTML/JS 패턴, API 스펙 탐지)
+  ├─ 취약점 패턴 + 체인 후보(브릿지 토큰 탐지 포함)
   ├─ 동적 검증(부팅/포트/서비스/트래픽)
   ├─ PoC/자동 공격체인 시도(실행 기반 증거)
   └─ verified_chain report 생성
@@ -186,6 +191,8 @@ aiedge-runs/<run_id>/
 │  ├─ inventory/
 │  │  └─ binary_analysis.json
 │  ├─ surfaces/
+│  ├─ web_ui/
+│  │  └─ web_ui.json
 │  ├─ findings/
 │  ├─ dynamic_validation/
 │  ├─ exploit_autopoc/

@@ -182,9 +182,10 @@ stages/extraction/
 - `binwalk` best-effort extraction (default)
 - `--rootfs <DIR>` direct ingest of operator-supplied extracted filesystem
 - Recursive nested extraction for common wrapped payloads:
-  - UBI / SquashFS
+  - UBI / SquashFS (BFS queue, depth limit 4, with offset-based magic scanning for vendor wrappers)
   - tar / gzip / bzip2 / cpio
   - ext filesystem images (via `debugfs` when available)
+- Symlink containment: extracted symlink targets are verified to remain inside `run_dir`
 
 **Quality behavior:** extraction emits `quality_gate` with minimum expected file count and marks sparse output as insufficient (`partial`).
 
@@ -325,6 +326,24 @@ stages/surfaces/
 - Crypto: weak algorithms, key reuse, nonce mismanagement
 
 **The graph is the exploit planner's input** — each path from source to sink is a potential exploit chain candidate.
+
+### Web UI Scan
+
+Scans discovered web content roots for JavaScript and HTML security patterns.
+
+```
+stages/web_ui/
+├── stage.json
+└── web_ui.json             # JS/HTML security pattern hits + API surface
+```
+
+**JS patterns detected:** `fetch()`, `axios`, `XMLHttpRequest`, `$.ajax()`, `eval()`, `innerHTML=`, `document.write()`, `WebSocket`, `postMessage()`
+
+**HTML patterns detected:** `<form action=...>`, `<script src=...>`, `<iframe src=...>`, inline event handlers (`onclick=`, etc.)
+
+**API spec detection:** `swagger.json`, `openapi.yaml`, `openapi.json`
+
+Web content roots are discovered by matching directory names (`www/`, `htdocs/`, `webroot/`, `cgi-bin/`, `webman/`, `webapi/`, `public_html/`) from the extracted filesystem.
 
 ### Stage 4: Findings + Review Gates
 
@@ -678,6 +697,9 @@ aiedge-runs/<timestamp>_<sha256-prefix>/
 │   │   ├── surfaces.json                      # network services + interfaces
 │   │   ├── endpoints.json                     # input handlers
 │   │   └── source_sink_graph.json             # taint path candidates
+│   ├── web_ui/
+│   │   ├── stage.json
+│   │   └── web_ui.json                        # JS/HTML security pattern hits
 │   └── findings/
 │       ├── pattern_scan.json                  # structured findings
 │       ├── binary_strings_hits.json           # string-level evidence

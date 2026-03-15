@@ -16,13 +16,17 @@
   - sparse 결과는 `quality.status=insufficient`로 표시되고 `partial`로 강등될 수 있음
 - `firmware_handoff.json` 자동 생성 (analyze + stages)
 - TUI/뷰어 진입 가이드는 `./scout tui` 단축키(`ti/tw/to`) 및 `./scout serve`를 기준으로 정렬되어 최신 상태입니다.
+- SquashFS 재귀 추출: BFS 큐 기반, 깊이 제한 4, 오프셋 기반 매직 스캔(벤더 래퍼 대응). 이중/다중 SquashFS 자동 추출 가능.
+- 심링크 containment: 추출된 심링크가 `run_dir` 밖으로 resolve되면 rootfs 후보에서 제외. `_rel_to_run_dir`, `_probe_is_dir`, `_probe_exists`, `_resolve_or_record`, `is_dir_safe`, `is_file_safe` 모두 적용.
+- `_BINARY_BRIDGE_TOKENS` 탐지 카테고리: `sprintf`/`snprintf`/`strcat`/`strcpy` 등이 `system`/`popen` exec 싱크 근처에 있으면 커맨드 인젝션 브릿지로 플래그. inventory 교차검증(`bridge_sink_cooccurrence`) 포함.
+- `web_ui` 스테이지: HTML/JS 보안 패턴 스캐너. `stages/web_ui/web_ui.json` 산출. JS 9개 패턴 + HTML 4개 패턴 + API 스펙 파일 탐지.
 
 ## Known Issues (중요)
 
 - 샌드박스/호스트 정책에 따라 `serve --once`가 포트 바인딩 권한 문제로 실패할 수 있음 (`Operation not permitted`).
-- 다층 벤더 포맷은 여전히 완전 자동 추출이 보장되지 않음.
-  - 현재는 `--rootfs` 우회가 실전 대응 경로이며, 포맷 전용 extractor 체인 확장은 계속 필요.
-- binary 분석은 심볼/문자열 기반 휴리스틱 중심이며, 디컴파일/CFG 기반 정밀 분석 통합은 미완.
+- 다층 벤더 포맷은 재귀 SquashFS로 많이 개선되었으나, 암호화된 포맷이나 특수 커스텀 헤더는 여전히 수동 추출 필요.
+  - 현재는 `--rootfs` 우회가 보완 경로이며, 포맷 전용 extractor 체인 확장은 계속 필요.
+- binary 분석은 심볼/문자열 기반 휴리스틱 + 브릿지 토큰 근접 분석 중심이며, 디컴파일/CFG 기반 정밀 분석 통합은 미완.
 
 ## 다음 우선순위
 

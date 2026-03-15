@@ -56,6 +56,8 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir <run_dir>
   - findings artifacts are emitted by `run_findings()` (integrated step), so `stages/findings/stage.json` is not expected
   - `stages/findings/pattern_scan.json` with `schema_version="pattern-scan-v1"`
   - `stages/findings/binary_strings_hits.json` with `schema_version="binary-strings-hits-v1"`
+  - `stages/findings/pattern_scan.json` may include findings with bridge token classification (`_BINARY_BRIDGE_TOKENS`: format/copy functions like `sprintf`/`strcat` proximate to exec sinks). These are first-class findings and must not be suppressed by consumers.
+  - `stages/web_ui/web_ui.json` is produced by the `web_ui` stage when web content directories are found. It is not currently a required artifact for the analyst report verifier, but consumers should reference it when building attack surface summaries.
 - For all stage artifacts checked by the verifier:
   - any JSON string value that looks like an absolute path (`/`-prefixed or `^[A-Za-z]:\\`) is rejected
   - `evidence_refs` must remain run-relative and resolve under the run directory
