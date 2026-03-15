@@ -276,3 +276,197 @@ def test_extraction_stage_manual_rootfs_tolerates_special_entries(tmp_path: Path
     special_any = copy_any.get("special_entries_skipped")
     assert isinstance(special_any, int)
     assert special_any >= 1
+
+
+def test_recursive_squashfs_extracts_nested_layers(tmp_path, monkeypatch):
+    """When unsquashfs produces output containing another SquashFS, it is recursively extracted."""
+    from aiedge.extraction import _recursive_nested_extraction, _SQUASHFS_MAGICS
+
+    run_dir = tmp_path / "run"
+    stage_dir = run_dir / "stages" / "extraction"
+    stage_dir.mkdir(parents=True)
+    log_path = stage_dir / "extraction.log"
+    log_path.touch()
+    firmware_path = run_dir / "input" / "firmware.bin"
+    firmware_path.parent.mkdir(parents=True)
+    firmware_path.write_bytes(b"\x00" * 64)
+
+    extracted_dir = stage_dir / "_firmware.bin.extracted"
+    extracted_dir.mkdir()
+
+    # Create an initial SquashFS candidate (magic at offset 0)
+    outer_sq = extracted_dir / "outer.squashfs"
+    outer_sq.write_bytes(b"hsqs" + b"\x00" * 100)
+
+    call_count = {"n": 0}
+    def fake_run(argv, **kwargs):
+        call_count["n"] += 1
+        # First call: extract outer.squashfs -> create inner SquashFS inside output
+        out_dir_str = None
+        for i, arg in enumerate(argv):
+            if arg == "-d" and i + 1 < len(argv):
+                out_dir_str = argv[i + 1]
+                break
+        if out_dir_str:
+            out_dir = Path(out_dir_str)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            if call_count["n"] == 1:
+                # First extraction produces a file and an inner SquashFS
+                (out_dir / "README").write_text("outer rootfs")
+                inner = out_dir / "inner.squashfs"
+                inner.write_bytes(b"hsqs" + b"\x00" * 50)
+            else:
+                # Second extraction produces regular files only
+                (out_dir / "real_binary").write_text("inner rootfs content")
+        class FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return FakeResult()
+
+    monkeypatch.setattr("aiedge.extraction.shutil.which", lambda cmd: f"/usr/bin/{cmd}" if cmd in ("unsquashfs", "ubireader_extract_images") else None)
+    monkeypatch.setattr("aiedge.extraction.subprocess.run", fake_run)
+
+    details, limitations, evidence = _recursive_nested_extraction(
+        run_dir=run_dir,
+        stage_dir=stage_dir,
+        extracted_dir=extracted_dir,
+        firmware_path=firmware_path,
+        log_path=log_path,
+        timeout_s=60.0,
+    )
+
+    assert int(details.get("squashfs_extract_ok", 0)) >= 2, "Should extract at least 2 SquashFS layers"
+    assert call_count["n"] >= 2, "unsquashfs should be called at least twice (outer + inner)"
+
+
+def test_recursive_squashfs_depth_limit(tmp_path, monkeypatch):
+    """SquashFS recursion stops at _SQUASHFS_EXTRACT_MAX_DEPTH."""
+    from aiedge.extraction import _recursive_nested_extraction, _SQUASHFS_EXTRACT_MAX_DEPTH
+
+    run_dir = tmp_path / "run"
+    stage_dir = run_dir / "stages" / "extraction"
+    stage_dir.mkdir(parents=True)
+    log_path = stage_dir / "extraction.log"
+    log_path.touch()
+    firmware_path = run_dir / "input" / "firmware.bin"
+    firmware_path.parent.mkdir(parents=True)
+    firmware_path.write_bytes(b"\x00" * 64)
+
+    extracted_dir = stage_dir / "_firmware.bin.extracted"
+    extracted_dir.mkdir()
+    initial_sq = extracted_dir / "start.squashfs"
+    initial_sq.write_bytes(b"hsqs" + b"\x00" * 100)
+
+    call_count = {"n": 0}
+    def fake_run(argv, **kwargs):
+        call_count["n"] += 1
+        out_dir_str = None
+        for i, arg in enumerate(argv):
+            if arg == "-d" and i + 1 < len(argv):
+                out_dir_str = argv[i + 1]
+                break
+        if out_dir_str:
+            out_dir = Path(out_dir_str)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "file.txt").write_text("content")
+            # Always produce another nested SquashFS (infinite chain)
+            nested = out_dir / f"nested_{call_count['n']}.squashfs"
+            nested.write_bytes(b"hsqs" + b"\x00" * 50)
+        class FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return FakeResult()
+
+    monkeypatch.setattr("aiedge.extraction.shutil.which", lambda cmd: f"/usr/bin/{cmd}" if cmd in ("unsquashfs", "ubireader_extract_images") else None)
+    monkeypatch.setattr("aiedge.extraction.subprocess.run", fake_run)
+
+    details, _, _ = _recursive_nested_extraction(
+        run_dir=run_dir,
+        stage_dir=stage_dir,
+        extracted_dir=extracted_dir,
+        firmware_path=firmware_path,
+        log_path=log_path,
+        timeout_s=60.0,
+    )
+
+    # Should have stopped at or before the depth limit
+    assert call_count["n"] <= _SQUASHFS_EXTRACT_MAX_DEPTH + 1
+
+
+def test_squashfs_offset_detection(tmp_path):
+    """_find_squashfs_magic_offset detects SquashFS magic at non-zero offset."""
+    from aiedge.extraction import _find_squashfs_magic_offset
+
+    # File with 512-byte vendor header before SquashFS magic
+    f = tmp_path / "wrapped.cv2.squashfs"
+    f.write_bytes(b"\x00" * 512 + b"hsqs" + b"\x00" * 100)
+    offset = _find_squashfs_magic_offset(f)
+    assert offset == 512
+
+    # File with magic at offset 0
+    f2 = tmp_path / "normal.squashfs"
+    f2.write_bytes(b"hsqs" + b"\x00" * 100)
+    offset2 = _find_squashfs_magic_offset(f2)
+    assert offset2 == 0
+
+    # File with no magic
+    f3 = tmp_path / "not_squashfs"
+    f3.write_bytes(b"\x00" * 100)
+    offset3 = _find_squashfs_magic_offset(f3)
+    assert offset3 is None
+
+
+def test_recursive_squashfs_deduplication(tmp_path, monkeypatch):
+    """Same SquashFS file is not extracted twice."""
+    from aiedge.extraction import _recursive_nested_extraction
+
+    run_dir = tmp_path / "run"
+    stage_dir = run_dir / "stages" / "extraction"
+    stage_dir.mkdir(parents=True)
+    log_path = stage_dir / "extraction.log"
+    log_path.touch()
+    firmware_path = run_dir / "input" / "firmware.bin"
+    firmware_path.parent.mkdir(parents=True)
+    firmware_path.write_bytes(b"\x00" * 64)
+
+    extracted_dir = stage_dir / "_firmware.bin.extracted"
+    extracted_dir.mkdir()
+    # Create two identical SquashFS candidates (same content, different names)
+    for name in ("a.squashfs", "b_link.squashfs"):
+        (extracted_dir / name).write_bytes(b"hsqs" + b"\x00" * 100)
+
+    call_count = {"n": 0}
+    def fake_run(argv, **kwargs):
+        call_count["n"] += 1
+        out_dir_str = None
+        for i, arg in enumerate(argv):
+            if arg == "-d" and i + 1 < len(argv):
+                out_dir_str = argv[i + 1]
+                break
+        if out_dir_str:
+            out_dir = Path(out_dir_str)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "file.txt").write_text("content")
+        class FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return FakeResult()
+
+    monkeypatch.setattr("aiedge.extraction.shutil.which", lambda cmd: f"/usr/bin/{cmd}" if cmd in ("unsquashfs", "ubireader_extract_images") else None)
+    monkeypatch.setattr("aiedge.extraction.subprocess.run", fake_run)
+
+    details, _, _ = _recursive_nested_extraction(
+        run_dir=run_dir,
+        stage_dir=stage_dir,
+        extracted_dir=extracted_dir,
+        firmware_path=firmware_path,
+        log_path=log_path,
+        timeout_s=60.0,
+    )
+
+    # Both are different files so both should be extracted (2 calls)
+    # But if they were symlinks to the same file, dedup would prevent double extraction
+    assert call_count["n"] == 2

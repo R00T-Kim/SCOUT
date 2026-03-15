@@ -756,6 +756,9 @@ _EXEC_SINK_SYMBOLS: frozenset[str] = frozenset(
         "posix_spawnp",
     }
 )
+_BRIDGE_SYMBOLS: frozenset[str] = frozenset({
+    "sprintf", "snprintf", "strcat", "strcpy", "vsprintf", "vsnprintf",
+})
 
 
 def _inventory_ref_evidence(path_s: str, *, note: str | None = None) -> dict[str, JsonValue] | None:
@@ -850,9 +853,13 @@ def _inventory_web_exec_overlap_signals(
                 path_any = hit.get("path")
                 if not isinstance(path_any, str):
                     continue
+                notes: list[str] = ["inventory_exec_sinks:" + ",".join(exec_syms)]
+                bridge_syms = sorted(syms.intersection(_BRIDGE_SYMBOLS))
+                if exec_syms and bridge_syms:
+                    notes.append(f"bridge_sink_cooccurrence:{','.join(bridge_syms)}+{','.join(exec_syms)}")
                 ev = _inventory_ref_evidence(
                     path_any,
-                    note="inventory_exec_sinks:" + ",".join(exec_syms),
+                    note=";".join(notes),
                 )
                 if ev is not None:
                     exec_evidence.append(ev)
@@ -913,6 +920,16 @@ _BINARY_SOURCE_TOKENS = (
     "getenv(",
     "recv(",
     "stdin",
+)
+_BINARY_BRIDGE_TOKENS: tuple[str, ...] = (
+    "sprintf(",
+    "snprintf(",
+    "strcat(",
+    "strcpy(",
+    "strncat(",
+    "strncpy(",
+    "vsprintf(",
+    "vsnprintf(",
 )
 
 
@@ -991,11 +1008,15 @@ def _classify_binary_token(text_l: str) -> tuple[str, str, str] | None:
     for token in _BINARY_SOURCE_TOKENS:
         if token in text_l:
             return "source", token, ""
+    for token in _BINARY_BRIDGE_TOKENS:
+        if token in text_l:
+            return "bridge", token, ""
     return None
 
 
 def _binary_anchor_score(
-    *, near_shell: int, mid_shell: int, near_source: int, mid_source: int
+    *, near_shell: int, mid_shell: int, near_source: int, mid_source: int,
+    near_bridge: int = 0, mid_bridge: int = 0,
 ) -> float:
     score = 0.2
     if near_shell > 0:
@@ -1006,7 +1027,12 @@ def _binary_anchor_score(
         score += 0.2
     elif mid_source > 0:
         score += 0.1
-    if near_shell == 0 and mid_shell == 0 and near_source == 0 and mid_source == 0:
+    if near_bridge > 0:
+        score += 0.15
+    elif mid_bridge > 0:
+        score += 0.08
+    if (near_shell == 0 and mid_shell == 0 and near_source == 0
+            and mid_source == 0 and near_bridge == 0 and mid_bridge == 0):
         return 0.25
     return min(score, 0.85)
 
@@ -1624,11 +1650,15 @@ def _binary_hits_to_pattern_hits(
             mid_shell = sum(1 for x in mid_hits if x.get("kind") == "shell")
             near_source = sum(1 for x in near_hits if x.get("kind") == "source")
             mid_source = sum(1 for x in mid_hits if x.get("kind") == "source")
+            near_bridge = sum(1 for x in near_hits if x.get("kind") == "bridge")
+            mid_bridge = sum(1 for x in mid_hits if x.get("kind") == "bridge")
             score = _binary_anchor_score(
                 near_shell=near_shell,
                 mid_shell=mid_shell,
                 near_source=near_source,
                 mid_source=mid_source,
+                near_bridge=near_bridge,
+                mid_bridge=mid_bridge,
             )
 
             token_sha256s = sorted(

@@ -36,8 +36,11 @@ def _sha256_file(path: Path) -> str:
 
 def _run_relative(path: Path, run_dir: Path) -> str | None:
     try:
-        rel = path.resolve().relative_to(run_dir.resolve())
-        return rel.as_posix()
+        resolved = path.resolve()
+        run_resolved = run_dir.resolve()
+        if not resolved.is_relative_to(run_resolved):
+            return None
+        return resolved.relative_to(run_resolved).as_posix()
     except (OSError, RuntimeError, ValueError):
         pass
     try:
@@ -76,6 +79,17 @@ def _record_probe_error(
     )
 
 
+def _is_contained_path(path: Path, *, run_dir: Path) -> bool:
+    """Return False if path resolves outside run_dir (e.g. absolute symlink)."""
+    try:
+        if path.is_symlink():
+            resolved = path.resolve()
+            return resolved.is_relative_to(run_dir.resolve())
+    except OSError:
+        return False
+    return True
+
+
 def _probe_is_dir(
     path: Path,
     *,
@@ -84,6 +98,8 @@ def _probe_is_dir(
     limitations: list[str],
     op: str,
 ) -> bool:
+    if not _is_contained_path(path, run_dir=run_dir):
+        return False
     try:
         return path.is_dir()
     except OSError as exc:
@@ -106,6 +122,8 @@ def _probe_is_file(
     limitations: list[str],
     op: str,
 ) -> bool:
+    if not _is_contained_path(path, run_dir=run_dir):
+        return False
     try:
         return path.is_file()
     except OSError as exc:
@@ -128,6 +146,8 @@ def _probe_exists(
     limitations: list[str],
     op: str,
 ) -> bool:
+    if not _is_contained_path(path, run_dir=run_dir):
+        return False
     try:
         return path.exists()
     except OSError as exc:

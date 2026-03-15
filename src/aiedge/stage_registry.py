@@ -19,6 +19,7 @@ from .inventory import InventoryStage
 from .llm_synthesis import LLMSynthesisStage
 from .functional_spec import FunctionalSpecStage
 from .surfaces import SurfacesStage
+from .web_ui import WebUiStage
 from .ota import OtaStage
 from .ota_payload import OtaPayloadStage
 from .threat_model import ThreatModelStage
@@ -407,6 +408,16 @@ def _make_surfaces_stage(
     return SurfacesStage()
 
 
+def _make_web_ui_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    _ = info, source_input_path, remaining_s, no_llm
+    return WebUiStage()
+
+
 def _make_graph_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -484,6 +495,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "inventory": _make_inventory_stage,
     "endpoints": _make_endpoints_stage,
     "surfaces": _make_surfaces_stage,
+    "web_ui": _make_web_ui_stage,
     "graph": _make_graph_stage,
     "attack_surface": _make_attack_surface_stage,
     "functional_spec": _make_functional_spec_stage,

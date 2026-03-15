@@ -85,7 +85,10 @@ def _resolve_or_record(
     op: str,
 ) -> Path | None:
     try:
-        return path.resolve()
+        resolved = path.resolve()
+        if not resolved.is_relative_to(run_dir.resolve()):
+            return None
+        return resolved
     except OSError as exc:
         _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)
         return None
@@ -932,6 +935,10 @@ def _find_rootfs_candidates(
 
     def is_dir_safe(path: Path, *, op: str) -> bool:
         try:
+            if path.is_symlink():
+                resolved = path.resolve()
+                if not resolved.is_relative_to(run_dir.resolve()):
+                    return False
             return path.is_dir()
         except OSError as exc:
             _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)
@@ -939,6 +946,10 @@ def _find_rootfs_candidates(
 
     def is_file_safe(path: Path, *, op: str) -> bool:
         try:
+            if path.is_symlink():
+                resolved = path.resolve()
+                if not resolved.is_relative_to(run_dir.resolve()):
+                    return False
             return path.is_file()
         except OSError as exc:
             _append_error(errors, run_dir=run_dir, path=path, op=op, exc=exc)

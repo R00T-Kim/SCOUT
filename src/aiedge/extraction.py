@@ -20,6 +20,7 @@ _CPIO_MAGICS = (b"070701", b"070702", b"070707")
 _GZIP_MAGIC = b"\x1f\x8b"
 _BZIP_MAGIC = b"BZh"
 _ARCHIVE_EXTRACT_MAX_DEPTH = 6
+_SQUASHFS_EXTRACT_MAX_DEPTH = 4
 
 
 def _assert_under_dir(base_dir: Path, target: Path) -> None:
@@ -33,9 +34,13 @@ def _assert_under_dir(base_dir: Path, target: Path) -> None:
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
     try:
-        return str(path.resolve().relative_to(run_dir.resolve()))
+        resolved = path.resolve()
+        run_resolved = run_dir.resolve()
+        if not resolved.is_relative_to(run_resolved):
+            return "<outside_run_dir>"
+        return str(resolved.relative_to(run_resolved))
     except Exception:
-        return str(path)
+        return "<outside_run_dir>"
 
 
 def _evidence_path(
@@ -592,6 +597,61 @@ def _iter_magic_files(
     return out
 
 
+def _find_squashfs_magic_offset(
+    path: Path,
+    *,
+    magics: tuple[bytes, ...] = _SQUASHFS_MAGICS,
+    max_scan: int = 4096,
+) -> int | None:
+    """Scan first *max_scan* bytes for SquashFS magic at any offset.
+
+    Handles vendor wrappers (e.g. cv2) that prepend a header before
+    the actual SquashFS payload.
+    """
+    try:
+        with path.open("rb") as f:
+            data = f.read(int(max_scan))
+    except OSError:
+        return None
+    for magic in magics:
+        idx = data.find(magic)
+        if idx >= 0:
+            return idx
+    return None
+
+
+def _iter_squashfs_candidates_with_offset(
+    root: Path,
+    *,
+    magics: tuple[bytes, ...],
+    max_candidates: int,
+    max_file_bytes: int,
+    skip_parts: set[str],
+    max_scan_bytes: int = 4096,
+) -> list[tuple[Path, int]]:
+    """Like _iter_magic_files but returns (path, offset) and checks non-zero offsets."""
+    out: list[tuple[Path, int]] = []
+    if not root.is_dir():
+        return out
+    for p in sorted(root.rglob("*")):
+        if len(out) >= int(max_candidates):
+            break
+        if any(part in skip_parts for part in p.parts):
+            continue
+        if not p.is_file():
+            continue
+        try:
+            size = int(p.stat().st_size)
+        except OSError:
+            continue
+        if size <= 0 or size > int(max_file_bytes):
+            continue
+        offset = _find_squashfs_magic_offset(p, magics=magics, max_scan=max_scan_bytes)
+        if offset is not None:
+            out.append((p, offset))
+    return out
+
+
 def _recursive_nested_extraction(
     *,
     run_dir: Path,
@@ -714,74 +774,99 @@ def _recursive_nested_extraction(
 
     details["ubi_extract_ok"] = int(ubi_ok)
 
-    squashfs_candidates = _iter_magic_files(
-        extracted_dir,
-        magics=_SQUASHFS_MAGICS,
-        max_candidates=24,
-        max_file_bytes=1024 * 1024 * 1024,
-        skip_part="__recursive_squashfs",
-    )
-    details["squashfs_candidates"] = cast(
-        list[JsonValue],
-        cast(
-            list[object],
-            [_rel_to_run_dir(run_dir, p) for p in squashfs_candidates[:12]],
-        ),
-    )
-    details["squashfs_candidate_count"] = int(len(squashfs_candidates))
+    # -- recursive SquashFS extraction (BFS) --
+    squash_ok = 0
+    squash_index = 0
+    max_squashfs_depth = 0
+    # Only skip archive layers; __recursive_squashfs is our own output and
+    # must be scannable for nested layers (dedup via seen_squashfs).
+    # __ubi_recursive must also be scannable because UBI containers often
+    # contain SquashFS volumes that need extraction.
+    squashfs_skip_parts = {"__recursive_layers"}
+    squashfs_queue: list[tuple[Path, int]] = [(extracted_dir, 0)]
+    seen_squashfs: set[str] = set()
+    all_squashfs_refs: list[str] = []
 
-    if squashfs_candidates and not unsquashfs:
+    while squashfs_queue:
+        current_root, depth = squashfs_queue.pop(0)
+        max_squashfs_depth = max(max_squashfs_depth, depth)
+        if depth >= _SQUASHFS_EXTRACT_MAX_DEPTH:
+            continue
+
+        candidates = _iter_squashfs_candidates_with_offset(
+            current_root,
+            magics=_SQUASHFS_MAGICS,
+            max_candidates=24,
+            max_file_bytes=1024 * 1024 * 1024,
+            skip_parts=squashfs_skip_parts,
+        )
+        for sq_path, offset in candidates:
+            key = str(sq_path.resolve())
+            if key in seen_squashfs:
+                continue
+            seen_squashfs.add(key)
+            all_squashfs_refs.append(_rel_to_run_dir(run_dir, sq_path))
+            if not unsquashfs:
+                continue
+            squash_index += 1
+            out_dir = squash_out_root / f"root_{squash_index:02d}"
+            _assert_under_dir(run_dir, out_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            argv = [unsquashfs, "-d", str(out_dir), str(sq_path)]
+            if offset > 0:
+                argv = [unsquashfs, "-o", str(offset), "-d", str(out_dir), str(sq_path)]
+            _append_log(log_path, f"recursive unsquashfs argv: {argv}")
+            try:
+                cp = subprocess.run(
+                    argv,
+                    cwd=str(stage_dir),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=max(30.0, min(float(timeout_s or 0.0) * 2.0, 600.0)),
+                )
+            except subprocess.TimeoutExpired:
+                limitations.append(
+                    f"unsquashfs timed out for {_rel_to_run_dir(run_dir, sq_path)}"
+                )
+                continue
+            details["squashfs_extract_attempted"] = int(
+                cast(int, details.get("squashfs_extract_attempted", 0)) + 1
+            )
+            _append_log(log_path, f"recursive unsquashfs returncode: {cp.returncode}")
+            if cp.stdout:
+                _append_log(log_path, "--- recursive unsquashfs stdout (trunc) ---")
+                _append_log(log_path, cp.stdout[:4096])
+            if cp.stderr:
+                _append_log(log_path, "--- recursive unsquashfs stderr (trunc) ---")
+                _append_log(log_path, cp.stderr[:4096])
+            if cp.returncode != 0:
+                limitations.append(
+                    f"unsquashfs failed for {_rel_to_run_dir(run_dir, sq_path)} (rc={cp.returncode})"
+                )
+                continue
+            if _count_files(out_dir) <= 0:
+                limitations.append(
+                    f"unsquashfs produced empty output for {_rel_to_run_dir(run_dir, sq_path)}"
+                )
+                continue
+            squash_ok += 1
+            evidence.append(_evidence_path(run_dir, out_dir))
+            # Enqueue for next depth level
+            squashfs_queue.append((out_dir, depth + 1))
+
+    if all_squashfs_refs and not unsquashfs:
         limitations.append(
             "SquashFS candidate detected but unsquashfs is unavailable; nested squashfs extraction skipped."
         )
 
-    squash_ok = 0
-    for idx, sq_path in enumerate(squashfs_candidates, start=1):
-        if not unsquashfs:
-            break
-        out_dir = squash_out_root / f"root_{idx:02d}"
-        _assert_under_dir(run_dir, out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        argv = [unsquashfs, "-d", str(out_dir), str(sq_path)]
-        _append_log(log_path, f"recursive unsquashfs argv: {argv}")
-        try:
-            cp = subprocess.run(
-                argv,
-                cwd=str(stage_dir),
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=max(30.0, min(float(timeout_s or 0.0) * 2.0, 600.0)),
-            )
-        except subprocess.TimeoutExpired:
-            limitations.append(
-                f"unsquashfs timed out for {_rel_to_run_dir(run_dir, sq_path)}"
-            )
-            continue
-        details["squashfs_extract_attempted"] = int(
-            cast(int, details.get("squashfs_extract_attempted", 0)) + 1
-        )
-        _append_log(log_path, f"recursive unsquashfs returncode: {cp.returncode}")
-        if cp.stdout:
-            _append_log(log_path, "--- recursive unsquashfs stdout (trunc) ---")
-            _append_log(log_path, cp.stdout[:4096])
-        if cp.stderr:
-            _append_log(log_path, "--- recursive unsquashfs stderr (trunc) ---")
-            _append_log(log_path, cp.stderr[:4096])
-        if cp.returncode != 0:
-            limitations.append(
-                f"unsquashfs failed for {_rel_to_run_dir(run_dir, sq_path)} (rc={cp.returncode})"
-            )
-            continue
-        if _count_files(out_dir) <= 0:
-            limitations.append(
-                f"unsquashfs produced empty output for {_rel_to_run_dir(run_dir, sq_path)}"
-            )
-            continue
-        squash_ok += 1
-        evidence.append(_evidence_path(run_dir, out_dir))
-
+    details["squashfs_candidates"] = cast(
+        list[JsonValue],
+        cast(list[object], sorted(all_squashfs_refs)[:24]),
+    )
+    details["squashfs_candidate_count"] = int(len(all_squashfs_refs))
     details["squashfs_extract_ok"] = int(squash_ok)
+    details["squashfs_depth_reached"] = int(max_squashfs_depth)
 
     archive_info, archive_limits, archive_evidence = _recursive_archive_extraction(
         run_dir=run_dir,
