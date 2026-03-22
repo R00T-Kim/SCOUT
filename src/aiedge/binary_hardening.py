@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -249,4 +250,199 @@ def parse_elf_hardening(path: Path) -> ELFHardening | None:
         relro=relro,
         canary=canary,
         stripped=stripped,
+    )
+
+
+# ---------------------------------------------------------------------------
+# IPC indicator extraction
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ELFIPCIndicators:
+    unix_socket_paths: tuple[str, ...]
+    dbus_interfaces: tuple[str, ...]
+    shm_names: tuple[str, ...]
+    pipe_references: bool
+    fork_exec_references: bool
+    ipc_symbols: tuple[str, ...]
+
+
+# Symbol sets (bytes) for IPC detection
+_IPC_SOCKET_SYMBOLS: frozenset[bytes] = frozenset(
+    [b"socket", b"bind", b"connect", b"accept", b"listen"]
+)
+_IPC_DBUS_SYMBOLS: frozenset[bytes] = frozenset(
+    [b"dbus_bus_get", b"dbus_connection", b"sd_bus_open", b"g_bus_get"]
+)
+_IPC_SHM_SYMBOLS: frozenset[bytes] = frozenset(
+    [b"shm_open", b"shmget", b"mmap"]
+)
+_IPC_PIPE_SYMBOLS: frozenset[bytes] = frozenset(
+    [b"mkfifo", b"pipe", b"pipe2"]
+)
+_IPC_EXEC_SYMBOLS: frozenset[bytes] = frozenset(
+    [b"fork", b"vfork", b"execve", b"execvp", b"posix_spawn"]
+)
+
+# Compiled regex patterns operating on bytes
+_UNIX_SOCKET_PATH_RE: re.Pattern[bytes] = re.compile(
+    rb"(?:/var/run|/tmp|/run)/[^\x00\s\"'<>]{1,128}\.s(?:ock(?:et)?|ock)"
+)
+_DBUS_INTERFACE_RE: re.Pattern[bytes] = re.compile(
+    rb"(?:org|com|net|io)\.[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+){2,}"
+)
+_SHM_PATH_RE: re.Pattern[bytes] = re.compile(
+    rb"/dev/shm/[^\x00\s\"'<>]{1,128}"
+)
+
+_IPC_SIZE_LIMIT = 64 * 1024 * 1024  # 64 MB
+
+
+def extract_elf_ipc_indicators(path: Path) -> ELFIPCIndicators | None:
+    """Parse ELF binary for IPC usage indicators.
+    Returns None if not a valid ELF file or on any error."""
+    try:
+        if path.stat().st_size > _IPC_SIZE_LIMIT:
+            return None
+        with path.open("rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+
+    if len(data) < 52 or data[:4] != _ELF_MAGIC:
+        return None
+
+    ei_class = data[4]
+    ei_data = data[5]
+
+    if ei_class not in (_ELFCLASS32, _ELFCLASS64):
+        return None
+    if ei_data not in (_ELFDATA2LSB, _ELFDATA2MSB):
+        return None
+
+    is_64 = ei_class == _ELFCLASS64
+    endian = "<" if ei_data == _ELFDATA2LSB else ">"
+
+    try:
+        if is_64:
+            if len(data) < 64:
+                return None
+            (e_shoff,) = struct.unpack_from(endian + "Q", data, 40)
+            (e_shentsize,) = struct.unpack_from(endian + "H", data, 58)
+            (e_shnum,) = struct.unpack_from(endian + "H", data, 60)
+            (e_shstrndx,) = struct.unpack_from(endian + "H", data, 62)
+        else:
+            if len(data) < 52:
+                return None
+            (e_shoff,) = struct.unpack_from(endian + "I", data, 32)
+            (e_shentsize,) = struct.unpack_from(endian + "H", data, 46)
+            (e_shnum,) = struct.unpack_from(endian + "H", data, 48)
+            (e_shstrndx,) = struct.unpack_from(endian + "H", data, 50)
+    except struct.error:
+        return None
+
+    # Locate .shstrtab
+    shstrtab_data: bytes = b""
+    if e_shoff > 0 and e_shnum > 0 and e_shentsize > 0 and e_shstrndx < e_shnum:
+        shstr_sh_start = e_shoff + e_shstrndx * e_shentsize
+        try:
+            if is_64:
+                (sh_offset,) = struct.unpack_from(endian + "Q", data, shstr_sh_start + 24)
+                (sh_size,) = struct.unpack_from(endian + "Q", data, shstr_sh_start + 32)
+            else:
+                (sh_offset,) = struct.unpack_from(endian + "I", data, shstr_sh_start + 16)
+                (sh_size,) = struct.unpack_from(endian + "I", data, shstr_sh_start + 20)
+            if sh_offset + sh_size <= len(data):
+                shstrtab_data = data[sh_offset : sh_offset + sh_size]
+        except struct.error:
+            pass
+
+    # Scan section headers for .dynstr and .rodata
+    dynstr_data: bytes = b""
+    rodata_data: bytes = b""
+
+    if e_shoff > 0 and e_shnum > 0 and e_shentsize > 0:
+        for i in range(e_shnum):
+            sh_start = e_shoff + i * e_shentsize
+            try:
+                if is_64:
+                    if sh_start + 64 > len(data):
+                        break
+                    (sh_name,) = struct.unpack_from(endian + "I", data, sh_start)
+                    (sh_type,) = struct.unpack_from(endian + "I", data, sh_start + 4)
+                    (sh_offset,) = struct.unpack_from(endian + "Q", data, sh_start + 24)
+                    (sh_size,) = struct.unpack_from(endian + "Q", data, sh_start + 32)
+                else:
+                    if sh_start + 40 > len(data):
+                        break
+                    (sh_name,) = struct.unpack_from(endian + "I", data, sh_start)
+                    (sh_type,) = struct.unpack_from(endian + "I", data, sh_start + 4)
+                    (sh_offset,) = struct.unpack_from(endian + "I", data, sh_start + 16)
+                    (sh_size,) = struct.unpack_from(endian + "I", data, sh_start + 20)
+            except struct.error:
+                break
+
+            if not shstrtab_data or sh_name >= len(shstrtab_data):
+                continue
+
+            name_end = shstrtab_data.find(b"\x00", sh_name)
+            sec_name = shstrtab_data[sh_name:name_end] if name_end >= 0 else b""
+
+            if sh_type == _SHT_STRTAB and sec_name == b".dynstr":
+                if sh_offset + sh_size <= len(data):
+                    dynstr_data = data[sh_offset : sh_offset + sh_size]
+            elif sec_name == b".rodata":
+                if sh_offset + sh_size <= len(data):
+                    rodata_data = data[sh_offset : sh_offset + sh_size]
+
+    # --- Symbol scanning in .dynstr ---
+    found_symbols: list[str] = []
+    pipe_references = False
+    fork_exec_references = False
+
+    all_ipc_symbol_sets = (
+        _IPC_SOCKET_SYMBOLS,
+        _IPC_DBUS_SYMBOLS,
+        _IPC_SHM_SYMBOLS,
+        _IPC_PIPE_SYMBOLS,
+        _IPC_EXEC_SYMBOLS,
+    )
+
+    search_target = dynstr_data if dynstr_data else b""
+    for sym_set in all_ipc_symbol_sets:
+        for sym in sym_set:
+            if sym in search_target:
+                found_symbols.append(sym.decode("utf-8", errors="replace"))
+
+    for sym in _IPC_PIPE_SYMBOLS:
+        if sym in search_target:
+            pipe_references = True
+            break
+
+    for sym in _IPC_EXEC_SYMBOLS:
+        if sym in search_target:
+            fork_exec_references = True
+            break
+
+    # --- Regex scanning in .rodata ---
+    unix_socket_paths: list[str] = []
+    dbus_interfaces: list[str] = []
+    shm_names: list[str] = []
+
+    if rodata_data:
+        for m in _UNIX_SOCKET_PATH_RE.finditer(rodata_data):
+            unix_socket_paths.append(m.group(0).decode("utf-8", errors="replace"))
+        for m in _DBUS_INTERFACE_RE.finditer(rodata_data):
+            dbus_interfaces.append(m.group(0).decode("utf-8", errors="replace"))
+        for m in _SHM_PATH_RE.finditer(rodata_data):
+            shm_names.append(m.group(0).decode("utf-8", errors="replace"))
+
+    return ELFIPCIndicators(
+        unix_socket_paths=tuple(sorted(set(unix_socket_paths))),
+        dbus_interfaces=tuple(sorted(set(dbus_interfaces))),
+        shm_names=tuple(sorted(set(shm_names))),
+        pipe_references=pipe_references,
+        fork_exec_references=fork_exec_references,
+        ipc_symbols=tuple(sorted(set(found_symbols))),
     )

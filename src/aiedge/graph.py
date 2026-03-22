@@ -1696,6 +1696,180 @@ class GraphStage:
         elif attribution_obj is not None:
             limitations.append("Attribution output missing list field: claims")
 
+        # ── IPC channel detection ────────────────────────────────
+        # Read binary IPC indicators from inventory to create
+        # ipc_channel nodes and IPC edges between components.
+        ipc_node_count = 0
+        ipc_edge_count = 0
+        _IPC_CHANNEL_LIMIT = 200
+
+        inventory_payload = _load_json_object(
+            run_dir / "stages" / "inventory" / "inventory.json"
+        )
+
+        # Collect IPC paths per component from binary_analysis
+        binary_analysis_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
+        binary_analysis = _load_json_object(binary_analysis_path)
+        binaries_any = binary_analysis.get("binaries") if binary_analysis is not None else None
+        binaries_list: list[dict[str, object]] = []
+        if isinstance(binaries_any, list):
+            for b in binaries_any:
+                if isinstance(b, dict):
+                    binaries_list.append(cast(dict[str, object], b))
+
+        # Map: ipc_path -> list of component node IDs that reference it
+        ipc_path_to_components: dict[str, list[str]] = {}
+
+        for brec in binaries_list:
+            bin_path = brec.get("path")
+            if not isinstance(bin_path, str):
+                continue
+            ipc_ind = brec.get("ipc_indicators")
+            if not isinstance(ipc_ind, dict):
+                continue
+
+            # Find or create a component node for this binary
+            bin_name = bin_path.rsplit("/", 1)[-1] if "/" in bin_path else bin_path
+            comp_value = bin_name
+            comp_id = f"component:{comp_value}"
+
+            # Collect all IPC paths from this binary
+            for field, ipc_type in (
+                ("unix_socket_paths", "ipc_unix_socket"),
+                ("dbus_interfaces", "ipc_dbus"),
+                ("shm_names", "ipc_shm"),
+            ):
+                paths_any = ipc_ind.get(field)
+                if not isinstance(paths_any, list):
+                    continue
+                for p in paths_any:
+                    if not isinstance(p, str) or not p.strip():
+                        continue
+                    path_key = f"{ipc_type}:{p.strip()}"
+                    ipc_path_to_components.setdefault(path_key, []).append(comp_id)
+
+            # Check pipe/exec references
+            if ipc_ind.get("pipe_references") is True:
+                ipc_path_to_components.setdefault(
+                    f"ipc_pipe:{bin_name}", []
+                ).append(comp_id)
+            if ipc_ind.get("fork_exec_references") is True:
+                ipc_path_to_components.setdefault(
+                    f"ipc_exec_chain:{bin_name}", []
+                ).append(comp_id)
+
+        # Create IPC channel nodes and edges between components that share IPC paths
+        for ipc_key, comp_ids in ipc_path_to_components.items():
+            if ipc_node_count >= _IPC_CHANNEL_LIMIT:
+                break
+            parts_ipc = ipc_key.split(":", 1)
+            if len(parts_ipc) != 2:
+                continue
+            edge_type_str, ipc_label = parts_ipc
+
+            upsert_node(
+                node_type="ipc_channel",
+                value=ipc_label,
+                label=ipc_label,
+                refs=[],
+            )
+            ipc_node_count += 1
+
+            unique_comps = sorted(set(comp_ids))
+            for cid in unique_comps:
+                # Ensure the component node exists
+                comp_label = cid.split(":", 1)[-1] if ":" in cid else cid
+                upsert_node(
+                    node_type="component",
+                    value=comp_label,
+                    label=comp_label,
+                    refs=[],
+                )
+                channel_node_id = f"ipc_channel:{ipc_label}"
+                upsert_edge(
+                    src=cid,
+                    dst=channel_node_id,
+                    edge_type=edge_type_str,
+                    confidence=0.65,
+                    refs=[],
+                    observation="static_reference",
+                )
+                ipc_edge_count += 1
+
+            # If multiple components share the same IPC channel, create
+            # cross-component edges for direct IPC relationship
+            if len(unique_comps) >= 2:
+                for i in range(len(unique_comps)):
+                    for j in range(i + 1, len(unique_comps)):
+                        upsert_edge(
+                            src=unique_comps[i],
+                            dst=unique_comps[j],
+                            edge_type=edge_type_str,
+                            confidence=0.55,
+                            refs=[],
+                            observation="static_reference",
+                        )
+                        ipc_edge_count += 1
+
+        # Also detect IPC from service_candidates
+        svc_cands_any = inventory_payload.get("service_candidates") if inventory_payload is not None else None
+        if isinstance(svc_cands_any, list):
+            for sc in svc_cands_any:
+                if not isinstance(sc, dict):
+                    continue
+                sc_dict = cast(dict[str, object], sc)
+                kind_any = sc_dict.get("kind")
+                name_any = sc_dict.get("name")
+                if not isinstance(kind_any, str) or not isinstance(name_any, str):
+                    continue
+                if kind_any in ("unix_socket", "dbus_service", "shm_segment", "socket_unit"):
+                    if ipc_node_count >= _IPC_CHANNEL_LIMIT:
+                        break
+                    ipc_type_map = {
+                        "unix_socket": "ipc_unix_socket",
+                        "dbus_service": "ipc_dbus",
+                        "shm_segment": "ipc_shm",
+                        "socket_unit": "ipc_unix_socket",
+                    }
+                    et = ipc_type_map.get(kind_any, "ipc_unix_socket")
+                    ev_refs: list[str] = []
+                    ev_any = sc_dict.get("evidence")
+                    if isinstance(ev_any, list):
+                        for e in ev_any:
+                            if isinstance(e, dict):
+                                p = cast(dict[str, object], e).get("path")
+                                if isinstance(p, str):
+                                    ev_refs.append(p)
+
+                    channel_value = name_any
+                    upsert_node(
+                        node_type="ipc_channel",
+                        value=channel_value,
+                        label=name_any,
+                        refs=ev_refs,
+                    )
+                    ipc_node_count += 1
+
+                    # Link IPC channel to matching component nodes
+                    # Match by service name (e.g., "avahi-daemon.socket" -> "avahi-daemon")
+                    svc_base = name_any.replace(".socket", "").replace(".service", "")
+                    channel_nid = f"ipc_channel:{channel_value}"
+                    for nid, node_obj in nodes.items():
+                        if node_obj.node_type == "component" and (
+                            node_obj.label == svc_base
+                            or node_obj.label == name_any
+                            or svc_base in node_obj.label
+                        ):
+                            upsert_edge(
+                                src=nid,
+                                dst=channel_nid,
+                                edge_type=et,
+                                confidence=0.70,
+                                refs=ev_refs,
+                                observation="static_reference",
+                            )
+                            ipc_edge_count += 1
+
         node_items = sorted(
             nodes.values(),
             key=lambda n: (n.node_type, n.node_id, n.label),

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SCOUT (AIEdge) is a deterministic firmware-to-exploit evidence engine. It takes firmware blobs as input and produces hash-anchored evidence artifacts through a 27-stage sequential pipeline — from unpacking through vulnerability discovery to exploit chain verification. SCOUT is the evidence-production layer; a separate orchestrator (Terminator) applies LLM judgment and dynamic validation on top via `firmware_handoff.json`.
+SCOUT (AIEdge) is a deterministic firmware-to-exploit evidence engine. It takes firmware blobs as input and produces hash-anchored evidence artifacts through a 30-stage sequential pipeline — from unpacking through vulnerability discovery to exploit chain verification. SCOUT is the evidence-production layer; a separate orchestrator (Terminator) applies LLM judgment and dynamic validation on top via `firmware_handoff.json`.
 
 **Key constraints:** Pure Python 3.10+ with zero pip dependencies (stdlib only). External tools (binwalk, QEMU, FirmAE, docker) are runtime-optional.
 
@@ -25,6 +25,9 @@ SCOUT (AIEdge) is a deterministic firmware-to-exploit evidence engine. It takes 
 ./scout analyze firmware.img --ack-authorization --no-llm --case-id <id> \
   --rootfs /path/to/extracted/rootfs
 
+# 8MB canonical track (truncated input for quick profiling)
+./scout analyze-8mb firmware.bin --ack-authorization --no-llm --case-id <id>
+
 # Rerun specific stages on existing run
 ./scout stages aiedge-runs/<run_id> --no-llm --stages inventory
 
@@ -40,10 +43,14 @@ pytest -q tests/test_inventory.py::test_func     # single test
 # Type checking (pyright configured via pyrightconfig.json)
 pyright src/
 
-# Verification scripts
+# Quality and verification
+./scout corpus-validate aiedge-runs/<run_id>              # corpus manifest validation
+./scout quality-metrics aiedge-runs/<run_id>               # compute quality metrics
+./scout quality-gate aiedge-runs/<run_id>                  # check quality thresholds
+./scout release-quality-gate aiedge-runs/<run_id>          # unified release gate (CLI)
+scripts/release_gate.sh --run-dir aiedge-runs/<run_id>     # unified release gate (shell)
 python3 scripts/verify_analyst_digest.py --run-dir aiedge-runs/<run_id>
 python3 scripts/verify_verified_chain.py --run-dir aiedge-runs/<run_id>
-scripts/release_gate.sh --run-dir aiedge-runs/<run_id>   # unified release gate
 
 # TUI dashboard (./scout provides shortcut aliases)
 ./scout tui aiedge-runs/<run_id> --interactive   # interactive mode
@@ -56,6 +63,10 @@ scripts/release_gate.sh --run-dir aiedge-runs/<run_id>   # unified release gate
 ./scout serve aiedge-runs/<run_id>
 ```
 
+**Exit codes:** 0 = success, 10 = partial success, 20 = fatal error, 30 = policy violation.
+
+**Default time budget:** `--time-budget-s 3600` (1 hour). Stages receive a remaining-budget callback and should respect it.
+
 ## Architecture
 
 ### Stage Pipeline
@@ -64,7 +75,7 @@ Stages execute sequentially via `run_stages()` in `src/aiedge/stage.py`. Each st
 - Property `name: str`
 - Method `run(ctx: StageContext) -> StageOutcome`
 
-Stages are registered as factory functions in `src/aiedge/stage_registry.py` (`_STAGE_FACTORIES` dict). Stage factories are instantiated by `run.py` which manages run directories, manifests, and report finalization.
+Stages are registered as factory functions in `src/aiedge/stage_registry.py` (`_STAGE_FACTORIES` dict, 29 entries). Stage factories are instantiated by `run.py` which manages run directories, manifests, and report finalization.
 
 **Execution order:** tooling → extraction → structure → carving → firmware_profile → inventory → endpoints → surfaces → web_ui → graph → attack_surface → functional_spec → threat_model → **findings** → **llm_triage** → llm_synthesis → attribution → dynamic_validation → emulation → exploit_gate → exploit_chain → exploit_autopoc → poc_validation → exploit_policy (plus OTA-specific stages: ota, ota_payload, ota_fs, ota_roots, ota_boottriage, firmware_lineage)
 
@@ -77,10 +88,12 @@ Stages have **no in-memory coupling**. Each stage reads JSON artifacts from pred
 | Type | Location | Purpose |
 |------|----------|---------|
 | `Stage` Protocol | `stage.py:59-63` | Interface all stages implement |
-| `StageContext` | `stage.py:26-29` | Frozen dataclass: `run_dir`, `logs_dir`, `report_dir` |
-| `StageOutcome` | `stage.py` | Result: `status` (ok/partial/failed/skipped), `details`, `limitations` |
-| `StageFactory` | `stage_registry.py:35` | Callable creating Stage from run info |
-| `RunReport` | `stage.py` | Aggregated result of all stages |
+| `StageContext` | `stage.py:25-29` | Frozen dataclass: `run_dir`, `logs_dir`, `report_dir` |
+| `StageOutcome` | `stage.py:33-36` | Result: `status` (ok/partial/failed/skipped), `details`, `limitations` |
+| `StageFactory` | `stage_registry.py:36` | `Callable[[_RunInfoLike, str|None, Callable[[], float], bool], Stage]` |
+| `RunReport` | `stage.py:53-56` | Aggregated result of all stages |
+| `LLMDriver` Protocol | `llm_driver.py:30-47` | Unified LLM backend interface (`name`, `available()`, `execute()`) |
+| `ModelTier` | `llm_driver.py:15` | `Literal["haiku", "sonnet", "opus"]` for LLM tier selection |
 
 ### Evidence & Governance Layers
 
@@ -89,18 +102,27 @@ Stages have **no in-memory coupling**. Each stage reads JSON artifacts from pred
 - **Determinism** (`determinism.py`): Canonical JSON bundles ensure reproducible runs
 - **Quality gates** (`quality_policy.py`, `quality_metrics.py`): Threshold checks and corpus-based evaluation
 - **Schema validation** (`schema.py`): Report validation, version tracking, verdict semantics
+- **Duplicate gate** (`duplicate_gate.py`): Cross-run duplicate suppression with Terminator feedback integration
+
+### LLM Driver Abstraction
+
+`llm_driver.py` provides an `LLMDriver` Protocol with `CodexCLIDriver` implementation. All LLM call sites (`llm_synthesis`, `exploit_autopoc`, `llm_codex`) use `resolve_driver()` to get the active backend. Select provider via `AIEDGE_LLM_DRIVER` env var. Supports `ModelTier` for automatic model selection. Stages gracefully skip LLM calls under `--no-llm`.
 
 ### Findings Stage — Special Pattern
 
 The `findings` stage is **not** registered in `_STAGE_FACTORIES`. It runs as an integrated step via `run_findings(ctx)` called directly from `run.py` during full `analyze`/`analyze-8mb` execution, after all registered stages complete. It cannot be invoked standalone via `--stages findings`. Its output goes to `run_dir/stages/findings/*.json`.
 
+### exploit_gate — Inline Stage
+
+`exploit_gate` is registered in `_STAGE_FACTORIES` but has no dedicated module file. Its factory `_make_exploit_gate_stage` is defined inline in `stage_registry.py`.
+
 ### CLI Entry Point
 
-All CLI subcommands defined in `_build_parser()` (~line 3367 of `__main__.py`) and dispatched in `main()` (~line 3905). The TUI rendering logic (~2500 lines) is also in `__main__.py`. The `./scout` shell wrapper adds short aliases (`t`, `ti`, `tw`, `to`) and sets up `PYTHONPATH`.
+`__main__.py` (4498 lines) contains all CLI subcommands, TUI rendering, and the report viewer. Subcommands: `analyze`, `analyze-8mb`, `stages`, `corpus-validate`, `quality-metrics`, `quality-gate`, `release-quality-gate`, `serve`, `tui`. Parser is built in `_build_parser()` (line 3367), dispatched in `main()` (line 3905). The `./scout` shell wrapper adds short aliases (`t`, `ti`, `tw`, `to`) and sets up `PYTHONPATH`.
 
 ### Path Safety
 
-`_assert_under_dir()` is used across all 23+ stage modules to enforce that artifact paths stay within the run directory. This is a critical security invariant — every file write in a stage must pass this check.
+`_assert_under_dir()` enforces that artifact paths stay within the run directory. The canonical definition lives in `findings.py` (line 27-33); each stage module defines its own local copy. This appears across 23 stage modules (122 total call sites). Every file write in a stage must pass this check — it is a critical security invariant.
 
 ## Adding a New Pipeline Stage
 
@@ -108,15 +130,16 @@ All CLI subcommands defined in `_build_parser()` (~line 3367 of `__main__.py`) a
 2. Add a factory function in `stage_registry.py` and register in `_STAGE_FACTORIES`
 3. Use `_assert_under_dir(ctx.run_dir, path)` for all file writes
 4. Stage output goes to `run_dir/stages/your_stage/stage.json` + artifacts
-5. Add tests in `tests/test_your_stage.py`
-
-Recent example: `llm_triage` stage (`src/aiedge/llm_triage.py`) is registered in `_STAGE_FACTORIES` and runs between `findings` and `llm_synthesis`. It reads findings artifacts, applies LLM-assisted prioritization with security context, and writes `stages/llm_triage/triage.json`.
+5. The factory signature is `(run_info, case_id, remaining_budget_fn, no_llm) -> Stage`
+6. Add tests in `tests/test_your_stage.py`
 
 ## Critical Coupling Points
 
-- **`stage.py`** Protocol/dataclass changes affect all 27 stages
+- **`stage.py`** Protocol/dataclass changes affect all 30 stages
 - **`schema.py`** validation changes affect report generation, quality gates, and all verification scripts
 - **`run.py`** report finalization changes affect all verification scripts and handoff generation
+- **`exploit_tiering.py`** tier definitions are imported by `schema.py`, `findings.py`, and exploit stages
+- **`terminator_feedback.py`** bridges SCOUT↔Terminator bidirectional feedback; changes affect handoff contract
 - Individual stage modules are well-isolated and safe to modify independently
 
 ## Environment Variables
@@ -154,4 +177,6 @@ Key configuration prefixes (no config files, environment-variable-driven):
 | `docs/aiedge_adapter_contract.md` | Terminator↔SCOUT handoff protocol |
 | `docs/aiedge_report_contract.md` | Report structure and governance rules |
 | `docs/analyst_digest_contract.md` | Analyst digest schema and verdict semantics |
+| `docs/verified_chain_contract.md` | Verified chain evidence requirements |
+| `docs/aiedge_duplicate_gate_contract.md` | Cross-run duplicate suppression rules |
 | `docs/runbook.md` | Operator flow for digest-first review |

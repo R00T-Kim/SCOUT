@@ -387,7 +387,7 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
         basename = p.name.lower()
         suffix = p.suffix.lower()
 
-        if len(candidates) >= 120:
+        if len(candidates) >= 150:
             break
 
         if suffix == ".cgi":
@@ -426,6 +426,55 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
                 path=p,
                 confidence=0.74,
                 note="known network daemon binary name",
+            )
+
+        # --- IPC mechanism detection ---
+        if basename in _IPC_SERVICE_BINARIES:
+            add(
+                name=p.name,
+                kind="ipc_binary",
+                path=p,
+                confidence=0.70,
+                note="known IPC service binary name",
+            )
+        # Unix domain socket paths
+        if rel_l.endswith(".sock") or rel_l.endswith(".socket"):
+            add(
+                name=basename,
+                kind="unix_socket",
+                path=p,
+                confidence=0.75,
+                note="unix domain socket path",
+            )
+        # D-Bus service files
+        if (
+            rel_l.endswith(".service")
+            and "dbus" in parts
+        ):
+            add(
+                name=_service_name_from_path(p),
+                kind="dbus_service",
+                path=p,
+                confidence=0.72,
+                note="D-Bus service file",
+            )
+        # Shared memory segments
+        if "dev" in parts and "shm" in parts:
+            add(
+                name=basename,
+                kind="shm_segment",
+                path=p,
+                confidence=0.65,
+                note="shared memory segment path",
+            )
+        # Systemd socket units
+        if rel_l.endswith(".socket") and ("systemd" in parts or "system" in parts):
+            add(
+                name=_service_name_from_path(p),
+                kind="socket_unit",
+                path=p,
+                confidence=0.73,
+                note="systemd socket unit",
             )
 
         if "etc" in parts and "init.d" in parts:
@@ -484,10 +533,10 @@ def _collect_service_candidates(files: list[Path], *, run_dir: Path) -> list[Jso
     config_candidates = _collect_service_candidates_from_configs(
         files,
         run_dir=run_dir,
-        max_candidates=120,
+        max_candidates=150,
     )
     for item_any in config_candidates:
-        if len(candidates) >= 120:
+        if len(candidates) >= 150:
             break
         if not isinstance(item_any, dict):
             continue
@@ -580,6 +629,18 @@ _NETWORK_SERVICE_BINARIES: frozenset[str] = frozenset(
         "telnetd",
     }
 )
+_IPC_SERVICE_BINARIES: frozenset[str] = frozenset({
+    "dbus-daemon",
+    "dbus-broker",
+    "ubusd",
+    "netifd",
+    "rpcd",
+    "procd",
+    "rpcbind",
+    "portmap",
+    "avahi-daemon",
+    "mdnsd",
+})
 
 
 def _is_config_file(path: Path) -> bool:
@@ -792,7 +853,7 @@ def _scan_binary_analysis(
     max_bytes_per_file: int = 512 * 1024,
     max_hits: int = 200,
 ) -> tuple[dict[str, JsonValue], list[dict[str, JsonValue]], int]:
-    from .binary_hardening import parse_elf_hardening
+    from .binary_hardening import extract_elf_ipc_indicators, parse_elf_hardening
 
     risky_symbol_counts: dict[str, int] = {k: 0 for k in _RISKY_BINARY_SYMBOLS}
     arch_counts: dict[str, int] = {}
@@ -874,6 +935,23 @@ def _scan_binary_analysis(
             }
             if hardening_dict is not None:
                 hit["hardening"] = cast(JsonValue, hardening_dict)
+            ipc_ind = extract_elf_ipc_indicators(path)
+            if ipc_ind is not None:
+                ipc_data: dict[str, object] = {}
+                if ipc_ind.unix_socket_paths:
+                    ipc_data["unix_socket_paths"] = list(ipc_ind.unix_socket_paths)
+                if ipc_ind.dbus_interfaces:
+                    ipc_data["dbus_interfaces"] = list(ipc_ind.dbus_interfaces)
+                if ipc_ind.shm_names:
+                    ipc_data["shm_names"] = list(ipc_ind.shm_names)
+                if ipc_ind.pipe_references:
+                    ipc_data["pipe_references"] = True
+                if ipc_ind.fork_exec_references:
+                    ipc_data["fork_exec_references"] = True
+                if ipc_ind.ipc_symbols:
+                    ipc_data["ipc_symbols"] = list(ipc_ind.ipc_symbols)
+                if ipc_data:
+                    hit["ipc_indicators"] = cast(JsonValue, ipc_data)
             hits.append(hit)
 
     hardening_summary: dict[str, JsonValue] = {

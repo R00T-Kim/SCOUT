@@ -113,6 +113,11 @@ _DOMAIN_NOISE_LABELS: frozenset[str] = frozenset(
 _HTTP_PATH_PRIORITY_MARKERS: tuple[str, ...] = ("/webapi/", "/webman/")
 _HTTP_PATH_SUFFIXES: tuple[str, ...] = (".cgi", ".php", ".py")
 _HTTP_PATH_ENDPOINT_TYPE = "http_path"
+_DBUS_NOISE_PREFIXES: frozenset[str] = frozenset({
+    "com.example", "org.example", "org.w3.dom", "org.xml.sax",
+    "org.apache.log", "org.slf4j", "com.google.common",
+    "org.junit", "com.sun.java", "javax.xml",
+})
 
 _ENDPOINT_PATTERN_SPECS: tuple[tuple[str, re.Pattern[str], float], ...] = (
     (
@@ -137,6 +142,26 @@ _ENDPOINT_PATTERN_SPECS: tuple[tuple[str, re.Pattern[str], float], ...] = (
         "email",
         re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
         0.6,
+    ),
+    (
+        "unix_socket",
+        re.compile(r"/(?:var/run|tmp|dev|run)/[^\s'\"<>]{1,120}\.sock(?:et)?"),
+        0.75,
+    ),
+    (
+        "dbus_interface",
+        re.compile(r"\b(?:org|com|net|io)(?:\.[a-zA-Z][a-zA-Z0-9_]*){2,}\b"),
+        0.55,
+    ),
+    (
+        "shm_path",
+        re.compile(r"/dev/shm/[^\s'\"<>]{1,80}"),
+        0.65,
+    ),
+    (
+        "named_pipe",
+        re.compile(r"/(?:var/run|tmp)/[^\s'\"<>]{1,80}(?:\.fifo|\.pipe|_fifo|_pipe)"),
+        0.60,
     ),
 )
 
@@ -373,6 +398,12 @@ def _path_endpoint_candidates(rel_path: str) -> list[tuple[str, str]]:
         seen.add(key)
         out.append(key)
 
+    if rel_lower.endswith(".sock") or rel_lower.endswith(".socket"):
+        key = ("unix_socket", rel_path)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+
     if has_http_script_suffix:
         rel_parts = [part for part in rel.split("/") if part]
         rel_lower_parts = [part for part in rel_lower.split("/") if part]
@@ -497,6 +528,38 @@ def _normalize_endpoint_value(endpoint_type: str, raw_value: str) -> str:
         except ValueError:
             return ""
         if any(num < 0 or num > 255 for num in nums):
+            return ""
+        return value[:MAX_VALUE_CHARS]
+
+    if endpoint_type == "unix_socket":
+        value = value.strip()
+        if not value.startswith("/"):
+            return ""
+        if len(value) > 200:
+            return ""
+        return value[:MAX_VALUE_CHARS]
+
+    if endpoint_type == "dbus_interface":
+        value = value.lower()
+        segments = value.split(".")
+        if len(segments) < 3:
+            return ""
+        if any(seg == "" for seg in segments):
+            return ""
+        for prefix in _DBUS_NOISE_PREFIXES:
+            if value.startswith(prefix):
+                return ""
+        return value[:MAX_VALUE_CHARS]
+
+    if endpoint_type == "shm_path":
+        value = value.strip()
+        if not value.startswith("/dev/shm/"):
+            return ""
+        return value[:MAX_VALUE_CHARS]
+
+    if endpoint_type == "named_pipe":
+        value = value.strip()
+        if not value.startswith("/"):
             return ""
         return value[:MAX_VALUE_CHARS]
 

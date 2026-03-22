@@ -101,6 +101,8 @@ def _surface_type_from_name(name: str) -> str:
         return "telnet"
     if any(x in lowered for x in ("dnsmasq", "udhcpd", "dhcpd")):
         return "dns_dhcp"
+    if any(x in lowered for x in ("dbus", "ubus", "rpcd", "netifd", "unix_socket", "ipc")):
+        return "ipc"
     return "service"
 
 
@@ -110,6 +112,7 @@ def _surface_confidence(base: float, surface_type: str) -> float:
         "ssh": 0.08,
         "telnet": 0.04,
         "dns_dhcp": 0.06,
+        "ipc": 0.05,
         "service": 0.0,
     }
     return _clamp01(base + offsets.get(surface_type, 0.0))

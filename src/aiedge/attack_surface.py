@@ -303,7 +303,7 @@ def _unknown_item_sort_key(item: dict[str, JsonValue]) -> tuple[str, str]:
 
 
 _HIGH_RISK_ENDPOINT_TOKEN_RE = re.compile(
-    r"(admin|login|auth|token|session|debug|diag|shell|cgi|api|rpc|soap|update|upgrade|firmware|ota|config|backup|restore|ssh|telnet|dropbear|ftp|mqtt|coap)",
+    r"(admin|login|auth|token|session|debug|diag|shell|cgi|api|rpc|soap|update|upgrade|firmware|ota|config|backup|restore|ssh|telnet|dropbear|ftp|mqtt|coap|dbus-send|gdbus|busctl|shm_open|mkfifo)",
     re.IGNORECASE,
 )
 
@@ -355,6 +355,10 @@ def _endpoint_risk_score(
         score += 0.35
     elif et == "domain":
         score += 0.1
+    elif et in {"unix_socket", "named_pipe", "shm_path"}:
+        score += 0.30
+    elif et == "dbus_interface":
+        score += 0.25
     else:
         score += 0.05
 
