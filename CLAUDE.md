@@ -75,9 +75,9 @@ Stages execute sequentially via `run_stages()` in `src/aiedge/stage.py`. Each st
 - Property `name: str`
 - Method `run(ctx: StageContext) -> StageOutcome`
 
-Stages are registered as factory functions in `src/aiedge/stage_registry.py` (`_STAGE_FACTORIES` dict, 29 entries). Stage factories are instantiated by `run.py` which manages run directories, manifests, and report finalization.
+Stages are registered as factory functions in `src/aiedge/stage_registry.py` (`_STAGE_FACTORIES` dict, 34 entries). Stage factories are instantiated by `run.py` which manages run directories, manifests, and report finalization.
 
-**Execution order:** tooling → extraction → structure → carving → firmware_profile → inventory → endpoints → surfaces → web_ui → graph → attack_surface → functional_spec → threat_model → **findings** → **llm_triage** → llm_synthesis → attribution → dynamic_validation → emulation → exploit_gate → exploit_chain → exploit_autopoc → poc_validation → exploit_policy (plus OTA-specific stages: ota, ota_payload, ota_fs, ota_roots, ota_boottriage, firmware_lineage)
+**Execution order:** tooling → extraction → structure → carving → firmware_profile → inventory → **ghidra_analysis** → **sbom** → **cve_scan** → **reachability** → endpoints → surfaces → web_ui → graph → attack_surface → functional_spec → threat_model → **findings** → **llm_triage** → llm_synthesis → attribution → dynamic_validation → emulation → **fuzzing** → exploit_gate → exploit_chain → exploit_autopoc → poc_validation → exploit_policy (plus OTA-specific stages: ota, ota_payload, ota_fs, ota_roots, ota_boottriage, firmware_lineage)
 
 **IPC detection flow:** inventory → endpoints → surfaces → graph → attack_surface. ELF `.rodata`/`.dynstr` IPC symbol extraction occurs in inventory; `ipc_channel` graph nodes and 5 IPC edge types (`ipc_unix_socket`, `ipc_dbus`, `ipc_shm`, `ipc_pipe`, `ipc_exec_chain`) are emitted by graph stage.
 
@@ -96,6 +96,63 @@ Stages have **no in-memory coupling**. Each stage reads JSON artifacts from pred
 | `RunReport` | `stage.py:53-56` | Aggregated result of all stages |
 | `LLMDriver` Protocol | `llm_driver.py:30-47` | Unified LLM backend interface (`name`, `available()`, `execute()`) |
 | `ModelTier` | `llm_driver.py:15` | `Literal["haiku", "sonnet", "opus"]` for LLM tier selection |
+| `AIEdgePolicyViolation` | `policy.py:4` | Security exception raised by `_assert_under_dir()` and authorization checks |
+
+### Security Assessment Modules (Phase 1 — Direction 7)
+
+- **Certificate analysis** (`cert_analysis.py`): X.509 certificate scanning — expired, weak key, weak signature, self-signed, private keys exposed
+- **Init service analysis** (`init_analysis.py`): Boot service auditing — SysV, systemd, BusyBox inittab, OpenWrt procd, xinetd/inetd. Flags telnet, FTP, UPnP, SNMP
+- **Filesystem permissions** (`fs_permissions.py`): World-writable, SUID/SGID, sensitive file permission auditing
+
+### SBOM & CVE Scanning (Phase 1 — Direction 1)
+
+- **SBOM generation** (`sbom.py`): CycloneDX 1.6 SBOM from inventory — opkg/dpkg package DBs, binary version strings, SO library versions, kernel version. CPE 2.3 construction
+- **CVE scanning** (`cve_scan.py`): NVD API 2.0 CVE matching against SBOM CPE index. Rate-limited, cached, auto-generates finding candidates for critical/high CVEs
+
+### Ghidra Headless Integration (Phase 4 — Direction 2)
+
+- **Ghidra bridge** (`ghidra_bridge.py`): Ghidra headless subprocess wrapper with SHA-256 cache. Detects via `AIEDGE_GHIDRA_HOME` or PATH. Runtime-optional (graceful skip)
+- **Ghidra analysis stage** (`ghidra_analysis.py`): Selects priority binaries from inventory (risky symbols, services), runs Ghidra decompilation/xref/dataflow scripts. Max `AIEDGE_GHIDRA_MAX_BINARIES` (default 10)
+
+### Fuzzing Pipeline (Phase 4 — Direction 4)
+
+- **Target scoring** (`fuzz_target.py`): Binary fuzzing suitability score (0-100) based on attack surface, input parsing, sinks, hardening, CVE history
+- **Harness generation** (`fuzz_harness.py`): AFL++ dictionary, seed corpus, and harness config generation. Supports stdin/file/CGI/network desocketing modes
+- **Campaign execution** (`fuzz_campaign.py`): AFL++ Docker container with QEMU mode (`-Q`). Budget-limited per target (`AIEDGE_FUZZ_BUDGET_S`)
+- **Crash triage** (`fuzz_triage.py`): Crash replay, signal classification, exploitability assessment (probably_exploitable/not/unknown)
+
+### Reachability Analysis (Phase 3 — Direction 10)
+
+- **Reachability stage** (`reachability.py`): BFS from attack surface entry nodes through communication graph to CVE-matched components. Classifies: `directly_reachable` (≤2 hops), `potentially_reachable` (3+), `unreachable`
+
+### Report Export (Phase 3)
+
+- **Executive report** (`report_export.py`): Markdown report generator — pipeline summary, top risks, SBOM/CVE tables, attack surface, credential findings, limitations
+
+### Firmware Comparison (Phase 3 — Direction 5)
+
+- **Firmware diff** (`firmware_diff.py`): Filesystem diff (added/removed/modified/permissions), binary hardening diff, config security diff between two analysis runs
+
+### Emulation GDB (Phase 3 — Direction 3)
+
+- **GDB RSP client** (`emulation_gdb.py`): Pure-stdlib GDB Remote Serial Protocol client over TCP. Connects to QEMU `-g` stub for register reads, memory inspection, breakpoints, backtraces
+
+### MCP Server (Phase 2 — Direction 6)
+
+- **MCP stdio server** (`mcp_server.py`): JSON-RPC 2.0 over stdin/stdout, 12 tools exposing SCOUT stages/artifacts to Claude Code, Claude Desktop, and other MCP-compatible AI agents. Usage: `./scout mcp [--project-id <run_id>]`
+
+### LLM Driver Abstraction (Phase 2 — Direction 9)
+
+`llm_driver.py` provides an `LLMDriver` Protocol with three implementations:
+- `CodexCLIDriver` — wraps `codex exec --ephemeral` (default)
+- `ClaudeAPIDriver` — direct Claude API via `urllib.request` (`ANTHROPIC_API_KEY`)
+- `OllamaDriver` — local Ollama HTTP API (`AIEDGE_OLLAMA_URL`)
+
+Select via `AIEDGE_LLM_DRIVER=codex|claude|ollama`. All three support `ModelTier` (haiku/sonnet/opus) selection. Cost tracking via `llm_cost.py` with optional budget limit (`AIEDGE_LLM_BUDGET_USD`).
+
+### Shared Utilities
+
+- **Path safety** (`path_safety.py`): Shared `assert_under_dir()`, `rel_to_run_dir()`, `sha256_file()`, `sha256_text()` — canonical implementations for new modules
 
 ### Evidence & Governance Layers
 
@@ -120,7 +177,7 @@ The `findings` stage is **not** registered in `_STAGE_FACTORIES`. It runs as an 
 
 ### CLI Entry Point
 
-`__main__.py` (4498 lines) contains all CLI subcommands, TUI rendering, and the report viewer. Subcommands: `analyze`, `analyze-8mb`, `stages`, `corpus-validate`, `quality-metrics`, `quality-gate`, `release-quality-gate`, `serve`, `tui`. Parser is built in `_build_parser()` (line 3367), dispatched in `main()` (line 3905). The `./scout` shell wrapper adds short aliases (`t`, `ti`, `tw`, `to`) and sets up `PYTHONPATH`.
+`__main__.py` (4510 lines) contains all CLI subcommands, TUI rendering, and the report viewer. Subcommands: `analyze`, `analyze-8mb`, `stages`, `corpus-validate`, `quality-metrics`, `quality-gate`, `release-quality-gate`, `serve`, `mcp`, `tui`. Parser is built in `_build_parser()` (line 3367), dispatched in `main()` (line 3905). The `./scout` shell wrapper adds short aliases (`t`, `ti`, `tw`, `to`) and sets up `PYTHONPATH`.
 
 ### Path Safety
 
@@ -142,7 +199,23 @@ The `findings` stage is **not** registered in `_STAGE_FACTORIES`. It runs as an 
 - **`run.py`** report finalization changes affect all verification scripts and handoff generation
 - **`exploit_tiering.py`** tier definitions are imported by `schema.py`, `findings.py`, and exploit stages
 - **`terminator_feedback.py`** bridges SCOUT↔Terminator bidirectional feedback; changes affect handoff contract
+- **`reporting.py`** report generation logic imported by `run.py`; changes affect all output formats
+- **`policy.py`** defines `AIEdgePolicyViolation` used by `_assert_under_dir()` across 23 stage modules
 - Individual stage modules are well-isolated and safe to modify independently
+
+## Test Infrastructure
+
+Configured via `pyproject.toml`: `testpaths = ["tests"]`, `pythonpath = ["src"]`, `addopts = "-q"`. No `conftest.py` — each test file is self-contained, creating its own temporary directories via `tmp_path`. 84 test files covering stage logic, schema contracts, CLI behavior, and E2E report validation.
+
+**Verification scripts** in `scripts/` validate run outputs post-execution:
+- `verify_analyst_digest.py` / `verify_verified_chain.py` — evidence chain integrity
+- `verify_aiedge_final_report.py` / `verify_aiedge_analyst_report.py` — report schema compliance
+- `verify_exploit_meaningfulness.py` — exploit artifact quality
+- `verify_network_isolation.py` / `verify_run_dir_evidence_only.py` — security invariants
+- `build_verified_chain.py` — constructs verified chain from run artifacts
+- `release_gate.sh` — unified release quality gate (wraps CLI `release-quality-gate`)
+
+**E2E scripts** in `scripts/`: `e2e_aiedge_matrix.sh` (full pipeline), `e2e_aiedge_8mb_track.sh` (truncated track), `e2e_er_e50_inventory_regression.sh` (regression).
 
 ## Environment Variables
 
@@ -160,6 +233,23 @@ Key configuration prefixes (no config files, environment-variable-driven):
 - `AIEDGE_EMULATION_IMAGE` — Docker image for Tier 1 FirmAE emulation (default: scout-emulation:latest)
 - `AIEDGE_FIRMAE_ROOT` — FirmAE installation path (default: /opt/FirmAE)
 - `AIEDGE_FEEDBACK_DIR` — Terminator feedback directory for bidirectional handoff
+- `AIEDGE_NVD_API_KEY` — NVD API key for higher CVE scan rate limits (optional)
+- `AIEDGE_NVD_CACHE_DIR` — cross-run NVD response cache directory
+- `AIEDGE_SBOM_MAX_COMPONENTS` — maximum SBOM components (default: 500)
+- `AIEDGE_CVE_SCAN_MAX_COMPONENTS` — maximum components to CVE-scan (default: 50)
+- `AIEDGE_CVE_SCAN_TIMEOUT_S` — per-request NVD API timeout (default: 30)
+- `AIEDGE_LLM_DRIVER` — LLM provider selection: `codex` (default), `claude`, `ollama`
+- `ANTHROPIC_API_KEY` — Claude API key (required for `claude` driver)
+- `AIEDGE_OLLAMA_URL` — Ollama server URL (default: `http://localhost:11434`)
+- `AIEDGE_LLM_BUDGET_USD` — LLM cost budget limit per run (optional)
+- `AIEDGE_MCP_MAX_OUTPUT_KB` — MCP tool output truncation limit (default: 30)
+- `AIEDGE_GHIDRA_HOME` — Ghidra installation path (optional, falls back to PATH)
+- `AIEDGE_GHIDRA_MAX_BINARIES` — max binaries for Ghidra analysis (default: 10)
+- `AIEDGE_GHIDRA_TIMEOUT_S` — per-binary Ghidra timeout (default: 300)
+- `AIEDGE_AFLPP_IMAGE` — AFL++ Docker image (default: `aflplusplus/aflplusplus`)
+- `AIEDGE_FUZZ_BUDGET_S` — per-target fuzzing budget in seconds (default: 300)
+- `AIEDGE_FUZZ_MAX_TARGETS` — max fuzzing targets (default: 3)
+- `AIEDGE_QEMU_GDB_PORT` — GDB stub port for emulation (default: 1234)
 
 ## Design Invariants
 
@@ -182,5 +272,15 @@ Key configuration prefixes (no config files, environment-variable-driven):
 | `docs/verified_chain_contract.md` | Verified chain evidence requirements |
 | `docs/aiedge_duplicate_gate_contract.md` | Cross-run duplicate suppression rules |
 | `docs/runbook.md` | Operator flow for digest-first review |
-| `stages/surfaces/source_sink_graph.json` | Source→sink path tracing artifact (`source-sink-v1`) |
-| `stages/findings/credential_mapping.json` | Credential-to-auth-surface mapping artifact (`credential-mapping-v1`) |
+| `docs/aiedge_8mb_track_runbook.md` | 8MB truncated track operator guide |
+| `docs/e2e_terminator_aiedge_stage_control.md` | Terminator↔SCOUT stage control integration |
+| `docs/analyst_viewer_cockpit_mapping.md` | Viewer panel-to-artifact mapping |
+
+### Runtime Artifact Schemas (generated per-run, not committed)
+
+| Artifact | Location | Schema |
+|----------|----------|--------|
+| Source→sink graph | `stages/surfaces/source_sink_graph.json` | `source-sink-v1` |
+| Credential mapping | `stages/findings/credential_mapping.json` | `credential-mapping-v1` |
+| Communication graph | `stages/graph/communication_graph.json` | Per-run network topology |
+| Firmware handoff | `firmware_handoff.json` | SCOUT→Terminator contract |

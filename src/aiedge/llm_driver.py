@@ -5,9 +5,15 @@ llm_synthesis, exploit_autopoc, and llm_codex into a single module.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import ssl
 import subprocess
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
@@ -25,6 +31,7 @@ class LLMDriverResult:
     argv: list[str]
     attempts: list[dict[str, object]]
     returncode: int
+    usage: dict[str, int] | None = None
 
 
 class LLMDriver(Protocol):
@@ -194,9 +201,316 @@ class CodexCLIDriver:
         )
 
 
+class ClaudeAPIDriver:
+    """Direct Claude API driver via urllib (no SDK needed)."""
+
+    _MODEL_MAP: dict[str, str] = {
+        "haiku": "claude-haiku-4-5-20251001",
+        "sonnet": "claude-sonnet-4-6-20250827",
+        "opus": "claude-opus-4-6-20250826",
+    }
+
+    _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 529})
+
+    @property
+    def name(self) -> str:
+        return "claude"
+
+    def available(self) -> bool:
+        return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+
+    def execute(
+        self,
+        *,
+        prompt: str,
+        run_dir: Path,
+        timeout_s: float,
+        max_attempts: int = 3,
+        retryable_tokens: tuple[str, ...] = (),
+        model_tier: ModelTier = "sonnet",
+    ) -> LLMDriverResult:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            return LLMDriverResult(
+                status="missing_cli",
+                stdout="",
+                stderr="ANTHROPIC_API_KEY not set",
+                argv=[],
+                attempts=[],
+                returncode=-1,
+            )
+
+        model = self._MODEL_MAP.get(model_tier, self._MODEL_MAP["sonnet"])
+        url = "https://api.anthropic.com/v1/messages"
+        payload = json.dumps({
+            "model": model,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode("utf-8")
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+        attempts: list[dict[str, object]] = []
+        argv = [f"POST {url}", f"model={model}"]
+
+        for attempt_idx in range(max(1, max_attempts)):
+            attempt_record: dict[str, object] = {"attempt": attempt_idx + 1, "model": model}
+            try:
+                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                ctx = ssl.create_default_context()
+                with urllib.request.urlopen(req, timeout=timeout_s, context=ctx) as resp:
+                    raw = resp.read().decode("utf-8")
+                    attempt_record["returncode"] = 0
+                    attempt_record["raw_response_len"] = len(raw)
+                    attempts.append(attempt_record)
+                    data = json.loads(raw)
+                    content_blocks = data.get("content", [])
+                    stdout = ""
+                    for block in content_blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            stdout += block.get("text", "")
+                    usage_raw = data.get("usage", {})
+                    usage: dict[str, int] | None = None
+                    if usage_raw:
+                        usage = {
+                            "input_tokens": int(usage_raw.get("input_tokens", 0)),
+                            "output_tokens": int(usage_raw.get("output_tokens", 0)),
+                        }
+                    return LLMDriverResult(
+                        status="ok",
+                        stdout=stdout,
+                        stderr="",
+                        argv=argv,
+                        attempts=attempts,
+                        returncode=0,
+                        usage=usage,
+                    )
+            except urllib.error.HTTPError as exc:
+                status_code = exc.code
+                attempt_record["returncode"] = status_code
+                try:
+                    err_body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    err_body = ""
+                attempt_record["stderr"] = err_body
+                attempts.append(attempt_record)
+                if status_code in self._RETRYABLE_STATUS and attempt_idx + 1 < max_attempts:
+                    backoff = 2 ** attempt_idx
+                    time.sleep(backoff)
+                    continue
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"HTTP {status_code}: {err_body[:500]}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=status_code,
+                )
+            except TimeoutError as exc:
+                attempt_record["returncode"] = -1
+                attempt_record["exception"] = "TimeoutError"
+                attempts.append(attempt_record)
+                if attempt_idx + 1 < max_attempts:
+                    continue
+                return LLMDriverResult(
+                    status="timeout",
+                    stdout="",
+                    stderr=f"Request timed out after {timeout_s}s: {exc}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=-1,
+                )
+            except (ssl.SSLError, urllib.error.URLError, OSError) as exc:
+                attempt_record["returncode"] = -1
+                attempt_record["exception"] = type(exc).__name__
+                attempt_record["stderr"] = str(exc)
+                attempts.append(attempt_record)
+                if attempt_idx + 1 < max_attempts:
+                    time.sleep(2 ** attempt_idx)
+                    continue
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"{type(exc).__name__}: {exc}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=-1,
+                )
+            except Exception as exc:
+                attempt_record["returncode"] = -1
+                attempt_record["exception"] = type(exc).__name__
+                attempt_record["stderr"] = str(exc)
+                attempts.append(attempt_record)
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"{type(exc).__name__}: {exc}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=-1,
+                )
+
+        # Should not be reached
+        return LLMDriverResult(
+            status="error",
+            stdout="",
+            stderr="ClaudeAPIDriver: exhausted attempts without result",
+            argv=argv,
+            attempts=attempts,
+            returncode=-1,
+        )
+
+
+class OllamaDriver:
+    """Local Ollama LLM server driver."""
+
+    _TIER_DEFAULTS: dict[str, str] = {
+        "haiku": "llama3.2:1b",
+        "sonnet": "llama3.2:3b",
+        "opus": "llama3.1:8b",
+    }
+
+    @property
+    def name(self) -> str:
+        return "ollama"
+
+    def _base_url(self) -> str:
+        return os.environ.get("AIEDGE_OLLAMA_URL", "http://localhost:11434").rstrip("/")
+
+    def _model_for_tier(self, tier: ModelTier) -> str:
+        env_key = f"AIEDGE_OLLAMA_MODEL_{tier.upper()}"
+        return os.environ.get(env_key, self._TIER_DEFAULTS.get(tier, "llama3.2:3b"))
+
+    def available(self) -> bool:
+        url = f"{self._base_url()}/api/tags"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    def execute(
+        self,
+        *,
+        prompt: str,
+        run_dir: Path,
+        timeout_s: float,
+        max_attempts: int = 3,
+        retryable_tokens: tuple[str, ...] = (),
+        model_tier: ModelTier = "sonnet",
+    ) -> LLMDriverResult:
+        model = self._model_for_tier(model_tier)
+        url = f"{self._base_url()}/api/generate"
+        payload = json.dumps({
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+        }).encode("utf-8")
+        headers = {"content-type": "application/json"}
+        argv = [f"POST {url}", f"model={model}"]
+        attempts: list[dict[str, object]] = []
+
+        for attempt_idx in range(max(1, max_attempts)):
+            attempt_record: dict[str, object] = {"attempt": attempt_idx + 1, "model": model}
+            try:
+                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                    raw = resp.read().decode("utf-8")
+                    attempt_record["returncode"] = 0
+                    attempts.append(attempt_record)
+                    data = json.loads(raw)
+                    stdout = data.get("response", "")
+                    return LLMDriverResult(
+                        status="ok",
+                        stdout=stdout,
+                        stderr="",
+                        argv=argv,
+                        attempts=attempts,
+                        returncode=0,
+                    )
+            except urllib.error.HTTPError as exc:
+                status_code = exc.code
+                attempt_record["returncode"] = status_code
+                try:
+                    err_body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    err_body = ""
+                attempt_record["stderr"] = err_body
+                attempts.append(attempt_record)
+                if attempt_idx + 1 < max_attempts:
+                    time.sleep(2 ** attempt_idx)
+                    continue
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"HTTP {status_code}: {err_body[:500]}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=status_code,
+                )
+            except TimeoutError as exc:
+                attempt_record["returncode"] = -1
+                attempt_record["exception"] = "TimeoutError"
+                attempts.append(attempt_record)
+                if attempt_idx + 1 < max_attempts:
+                    continue
+                return LLMDriverResult(
+                    status="timeout",
+                    stdout="",
+                    stderr=f"Request timed out after {timeout_s}s: {exc}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=-1,
+                )
+            except (urllib.error.URLError, OSError) as exc:
+                attempt_record["returncode"] = -1
+                attempt_record["exception"] = type(exc).__name__
+                attempt_record["stderr"] = str(exc)
+                attempts.append(attempt_record)
+                if attempt_idx + 1 < max_attempts:
+                    time.sleep(2 ** attempt_idx)
+                    continue
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"{type(exc).__name__}: {exc}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=-1,
+                )
+            except Exception as exc:
+                attempt_record["returncode"] = -1
+                attempt_record["exception"] = type(exc).__name__
+                attempt_record["stderr"] = str(exc)
+                attempts.append(attempt_record)
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"{type(exc).__name__}: {exc}",
+                    argv=argv,
+                    attempts=attempts,
+                    returncode=-1,
+                )
+
+        return LLMDriverResult(
+            status="error",
+            stdout="",
+            stderr="OllamaDriver: exhausted attempts without result",
+            argv=argv,
+            attempts=attempts,
+            returncode=-1,
+        )
+
+
 def resolve_driver() -> LLMDriver:
     """Return the configured LLM driver (default: codex)."""
     driver_name = os.environ.get("AIEDGE_LLM_DRIVER", "codex").strip().lower()
-    if driver_name == "codex":
-        return CodexCLIDriver()
+    if driver_name == "claude":
+        return ClaudeAPIDriver()
+    if driver_name == "ollama":
+        return OllamaDriver()
     return CodexCLIDriver()  # default fallback

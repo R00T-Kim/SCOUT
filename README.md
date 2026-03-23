@@ -42,6 +42,18 @@ SCOUT doesn't guess. Each stage produces **hash-anchored artifacts** in a `run_d
 
 ## What changed recently (quick sync notes)
 
+- **SBOM & CVE scanning** — New `sbom` stage generates CycloneDX 1.6 SBOM from firmware inventory (opkg/dpkg package DBs, binary version strings, SO library versions, kernel version). New `cve_scan` stage queries NVD API 2.0 with CPE matching. Auto-generates finding candidates for critical/high CVEs. Configure via `AIEDGE_NVD_API_KEY`, `AIEDGE_NVD_CACHE_DIR`.
+- **Security assessment modules** — New `cert_analysis.py` (X.509 certificate scanning: expired, weak key/signature, self-signed, private keys exposed), `init_analysis.py` (boot service auditing: SysV, systemd, BusyBox inittab, OpenWrt procd; flags telnet/FTP/UPnP/SNMP), `fs_permissions.py` (world-writable files, SUID/SGID, sensitive file permission auditing).
+- **MCP server** — New `mcp` subcommand exposes 12 SCOUT tools via Model Context Protocol (JSON-RPC 2.0 over stdio). Any MCP-compatible AI agent (Claude Code, Claude Desktop, etc.) can drive firmware analysis. Usage: `./scout mcp --project-id <run_id>`, then `claude mcp add scout -- ./scout mcp --project-id <id>`.
+- **LLM driver expansion** — `ClaudeAPIDriver` (direct Claude API via `urllib.request`, `ANTHROPIC_API_KEY`) and `OllamaDriver` (local LLM server, `AIEDGE_OLLAMA_URL`). Select via `AIEDGE_LLM_DRIVER=codex|claude|ollama`. Cost tracking via `llm_cost.py` with optional budget limit (`AIEDGE_LLM_BUDGET_USD`).
+- **CVE reachability analysis** — New `reachability` stage determines whether CVE-matched components are actually reachable from the attack surface via BFS on the communication graph. Classifies: `directly_reachable` (≤2 hops), `potentially_reachable` (3+), `unreachable`.
+- **Firmware comparison** — New `firmware_diff.py` compares two analysis runs: filesystem diff (added/removed/modified/permissions), binary hardening diff (NX/PIE/RELRO changes), config security diff (unified diff with security keyword highlighting). CLI: `./scout diff <old_run> <new_run>`.
+- **GDB emulation support** — New `emulation_gdb.py` provides a pure-stdlib GDB Remote Serial Protocol client. Connects to QEMU `-g` stub for register reads, memory inspection, breakpoints, backtraces.
+- **Ghidra headless integration** — New `ghidra_bridge.py` + `ghidra_analysis.py` stage. Optional Ghidra decompilation, cross-references, dataflow tracing (source→sink with actual function analysis). SHA-256 cache for analyzed binaries. Runtime-optional (graceful skip if Ghidra not installed).
+- **AFL++ fuzzing pipeline** — New `fuzz_target.py` (binary scoring 0-100), `fuzz_harness.py` (dictionary/seed/harness generation), `fuzz_campaign.py` (AFL++ Docker with QEMU mode), `fuzz_triage.py` (crash exploitability classification). Runtime-optional (graceful skip if Docker/AFL++ not available).
+- **Executive report generation** — New `report_export.py` generates Markdown executive reports with pipeline summary, top risks, SBOM/CVE tables, attack surface, credential findings.
+- **Web viewer UX overhaul** — Single-pane navigation (sidebar click shows one panel, hides others), persistent KPI summary bar (Critical/High CVEs, Components, Endpoints), new panels for SBOM, CVE Scan, Reachability, Security Assessment. Improved text contrast for readability. Graph re-rendering on panel switch.
+- **Pipeline expansion** — 29 → 34 registered stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` added to the pipeline.
 - **IPC detection pipeline** — Unix socket, D-Bus service, shared memory, named pipe detection from firmware rootfs. ELF binary `.rodata`/`.dynstr` scanning for IPC symbols (socket, bind, dbus_*, shm_open, fork, execve). New `ipc_channel` graph nodes and 5 IPC edge types (`ipc_unix_socket`, `ipc_dbus`, `ipc_shm`, `ipc_pipe`, `ipc_exec_chain`). IPC-specific risk scoring in attack surface.
 - **Source→sink path tracing** — `surfaces` stage now generates `source_sink_graph.json` linking network-facing endpoints through service components to exec sink binaries (system, popen, execve). Enables "where does input reach dangerous functions?" analysis.
 - **Credential auto-mapping** — `findings` stage generates `credential_mapping.json` mapping SSH keys, password hashes, API tokens, and default credentials to auth surfaces (SSH, web, OS). Risk-rated (high/medium/low).
@@ -88,13 +100,22 @@ SCOUT doesn't guess. Each stage produces **hash-anchored artifacts** in a `run_d
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                         SCOUT (Evidence Engine)                          │
 │                                                                          │
-│  Firmware ──► Unpack ──► Profile ──► Inventory ──► Surface ──► Findings  │
-│                                        (+ hardening)                     │
-│  ──► LLM Triage ──► LLM Synthesis ──► Emulation(3-tier) ──► Exploit     │
+│  Firmware ──► Unpack ──► Profile ──► Inventory ──► SBOM ──► CVE Scan    │
+│                                        (+ hardening)    (NVD API 2.0)   │
+│                                                              │           │
+│  ──► Security Assessment ──► Surface ──► Reachability ──► Findings      │
+│      (cert/init/fs-perm)               (BFS graph)                      │
+│                                                                          │
+│  ──► Ghidra Analysis ──► LLM Triage ──► LLM Synthesis                   │
+│      (optional)                                                          │
+│                                                                          │
+│  ──► Emulation(3-tier) ──► Fuzzing (AFL++) ──► Exploit                  │
+│                             (optional)                                   │
 │                                                                          │
 │  StageFactory stages: stage.json (sha256 manifest)                       │
 │  Findings step: run_findings() writes structured artifacts               │
 │                All paths run-relative, all hashes recorded               │
+│                34 registered stages (expanded from 29)                   │
 │                                                                          │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                    Handoff (JSON contract)                                │

@@ -3848,6 +3848,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional max runtime in seconds before auto-stop.",
     )
 
+    mcp = sub.add_parser(
+        "mcp",
+        help="Start MCP (Model Context Protocol) stdio server for AI agent integration.",
+    )
+    _ = mcp.add_argument(
+        "--project-id",
+        default=None,
+        help="Default run directory ID (e.g. aiedge-run-20260323-...). Optional.",
+    )
+
     tui = sub.add_parser(
         "tui",
         help="Render an analyst-focused terminal dashboard for an existing run directory.",
@@ -4197,6 +4207,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if rep.status in ("partial", "failed"):
             return 10
         return 0
+
+    if command == "mcp":
+        from .mcp_server import main as mcp_main
+
+        project_id = cast(str | None, getattr(args, "project_id", None))
+        try:
+            return mcp_main(project_id=project_id)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as e:
+            print(f"MCP server error: {e}", file=sys.stderr)
+            return 20
 
     if command == "serve":
         run_dir = cast(str, getattr(args, "run_dir"))

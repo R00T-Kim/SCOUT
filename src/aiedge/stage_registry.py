@@ -492,6 +492,73 @@ def _make_llm_synthesis_stage(
     return LLMSynthesisStage(no_llm=no_llm)
 
 
+def _make_sbom_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .sbom import SbomStage
+
+    run_dir = info.firmware_dest.parent
+    return SbomStage(
+        run_dir=run_dir,
+        case_id=source_input_path,
+        remaining_budget_s=remaining_s,
+        no_llm=no_llm,
+    )
+
+
+def _make_cve_scan_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .cve_scan import CveScanStage
+
+    run_dir = info.firmware_dest.parent
+    return CveScanStage(
+        run_dir=run_dir,
+        case_id=source_input_path,
+        remaining_budget_s=remaining_s,
+        no_llm=no_llm,
+    )
+
+
+def _make_reachability_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .reachability import make_reachability_stage
+
+    return make_reachability_stage(info, source_input_path, remaining_s, no_llm)
+
+
+def _make_ghidra_analysis_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .ghidra_analysis import make_ghidra_analysis_stage
+
+    return make_ghidra_analysis_stage(info, source_input_path, remaining_s, no_llm)
+
+
+def _make_fuzzing_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .fuzz_campaign import make_fuzz_campaign_stage
+
+    return make_fuzz_campaign_stage(info, source_input_path, remaining_s, no_llm)
+
+
 _STAGE_FACTORIES: dict[str, StageFactory] = {
     "tooling": _make_tooling_stage,
     "ota": _make_ota_stage,
@@ -505,6 +572,10 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "carving": _make_carving_stage,
     "firmware_profile": _make_firmware_profile_stage,
     "inventory": _make_inventory_stage,
+    "ghidra_analysis": _make_ghidra_analysis_stage,
+    "sbom": _make_sbom_stage,
+    "cve_scan": _make_cve_scan_stage,
+    "reachability": _make_reachability_stage,
     "endpoints": _make_endpoints_stage,
     "surfaces": _make_surfaces_stage,
     "web_ui": _make_web_ui_stage,
@@ -517,6 +588,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "attribution": _make_attribution_stage,
     "emulation": _make_emulation_stage,
     "dynamic_validation": _make_dynamic_validation_stage,
+    "fuzzing": _make_fuzzing_stage,
     "exploit_gate": _make_exploit_gate_stage,
     "exploit_chain": _make_exploit_chain_stage,
     "exploit_autopoc": _make_exploit_autopoc_stage,
