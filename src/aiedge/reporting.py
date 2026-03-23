@@ -2148,30 +2148,30 @@ def write_analyst_report_v2_viewer(
                     raw_nodes = gdict.get("nodes")
                     raw_edges = gdict.get("edges")
                     if isinstance(raw_nodes, list) and isinstance(raw_edges, list):
-                        # Prioritize IPC nodes, then components, then others
-                        ipc_nodes = [n for n in raw_nodes if isinstance(n, dict) and n.get("type") == "ipc_channel"]
-                        other_nodes = [n for n in raw_nodes if isinstance(n, dict) and n.get("type") != "ipc_channel"]
-                        trimmed_nodes = ipc_nodes + other_nodes[:_GRAPH_NODE_LIMIT - len(ipc_nodes)]
-                        # Keep IPC edges + top edges by confidence
-                        ipc_edges = [e for e in raw_edges if isinstance(e, dict) and isinstance(e.get("edge_type"), str) and "ipc" in str(e.get("edge_type"))]
-                        other_edges = sorted(
-                            [e for e in raw_edges if isinstance(e, dict) and not ("ipc" in str(e.get("edge_type", "")))],
-                            key=lambda x: -(x.get("confidence", 0) if isinstance(x.get("confidence"), (int, float)) else 0),
-                        )
-                        trimmed_edges = ipc_edges + other_edges[:_GRAPH_EDGE_LIMIT - len(ipc_edges)]
-                        # Keep node IDs referenced by trimmed edges
-                        keep_ids: set[str] = set()
-                        for e in trimmed_edges:
+                        # Step 1: Rank ALL nodes by total edge connectivity
+                        node_conn: dict[str, int] = {}
+                        for e in raw_edges:
                             if isinstance(e, dict):
-                                s = e.get("src")
-                                d = e.get("dst")
-                                if isinstance(s, str):
-                                    keep_ids.add(s)
-                                if isinstance(d, str):
-                                    keep_ids.add(d)
-                        final_nodes = [n for n in trimmed_nodes if isinstance(n, dict) and n.get("id") in keep_ids]
-                        if not final_nodes:
-                            final_nodes = trimmed_nodes[:_GRAPH_NODE_LIMIT]
+                                for k in ("src", "dst"):
+                                    nid = e.get(k)
+                                    if isinstance(nid, str):
+                                        node_conn[nid] = node_conn.get(nid, 0) + 1
+                        # Step 2: Select top N nodes — IPC first, then most connected
+                        ipc_max = min(30, _GRAPH_NODE_LIMIT // 5)
+                        ipc_cands = sorted(
+                            [n for n in raw_nodes if isinstance(n, dict) and n.get("id") and n.get("type") == "ipc_channel"],
+                            key=lambda n: -(node_conn.get(n.get("id",""), 0)),
+                        )[:ipc_max]
+                        other_cands = sorted(
+                            [n for n in raw_nodes if isinstance(n, dict) and n.get("id") and n.get("type") != "ipc_channel"],
+                            key=lambda n: -(node_conn.get(n.get("id",""), 0)),
+                        )[:_GRAPH_NODE_LIMIT - len(ipc_cands)]
+                        final_nodes = ipc_cands + other_cands
+                        final_ids = {str(n.get("id","")) for n in final_nodes}
+                        # Step 3: Keep edges where BOTH endpoints are in selected nodes
+                        trimmed_edges = [e for e in raw_edges if isinstance(e, dict) and str(e.get("src","")) in final_ids and str(e.get("dst","")) in final_ids]
+                        if len(trimmed_edges) > _GRAPH_EDGE_LIMIT:
+                            trimmed_edges = sorted(trimmed_edges, key=lambda x: -(x.get("confidence",0) if isinstance(x.get("confidence"),(int,float)) else 0))[:_GRAPH_EDGE_LIMIT]
                         # Strip nodes/edges to viewer-essential fields + pre-compute layout
                         slim_nodes = [{"id": n.get("id",""), "label": n.get("label", n.get("id","")), "type": n.get("type","")} for n in final_nodes if isinstance(n, dict)]
                         slim_edges = [{"src": e.get("src",""), "dst": e.get("dst",""), "edge_type": e.get("edge_type",""), "confidence": e.get("confidence",0)} for e in trimmed_edges if isinstance(e, dict)]
@@ -3913,6 +3913,7 @@ def write_analyst_report_v2_viewer(
             "          tooltip.style.display = 'none';",
             "        }",
             "      }",
+            "      if (!running) drawFrame();",
             "    });",
             "",
             "    canvas.addEventListener('mouseup', function() {",
@@ -3920,6 +3921,7 @@ def write_analyst_report_v2_viewer(
             "      dragging = null;",
             "      panning = false;",
             "      canvas.style.cursor = 'grab';",
+            "      if (!running) drawFrame();",
             "    });",
             "",
             "    canvas.addEventListener('mouseleave', function() {",
@@ -3938,6 +3940,7 @@ def write_analyst_report_v2_viewer(
             "      transform.x = mx - (mx - transform.x) * (newScale / transform.scale);",
             "      transform.y = my - (my - transform.y) * (newScale / transform.scale);",
             "      transform.scale = newScale;",
+            "      if (!running) drawFrame();",
             "    }, { passive: false });",
             "",
             "    /* Force simulation */",
@@ -4010,7 +4013,7 @@ def write_analyst_report_v2_viewer(
             "    }",
             "",
             "    function drawFrame() {",
-            "      simulate();",
+            "      if (running) simulate();",
             "      var w = canvas.width, h = canvas.height;",
             "      ctx.setTransform(1,0,0,1,0,0);",
             "      ctx.clearRect(0, 0, w, h);",
