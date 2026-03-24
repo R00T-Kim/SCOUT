@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import cast
+
+def _threshold_float(env_name: str, default: float) -> float:
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return default
+
 
 QUALITY_GATE_SCHEMA_VERSION = 1
 QUALITY_GATE_THRESHOLD_MISS = "QUALITY_GATE_THRESHOLD_MISS"
@@ -157,12 +168,17 @@ def evaluate_quality_gate(
     llm_gate_payload: dict[str, object] | None = None,
     llm_gate_path: str | None = None,
 ) -> dict[str, object]:
+    precision_min = _threshold_float("AIEDGE_QG_PRECISION_MIN", 0.9)
+    recall_min = _threshold_float("AIEDGE_QG_RECALL_MIN", 0.6)
+    fpr_max = _threshold_float("AIEDGE_QG_FPR_MAX", 0.1)
+    abstain_max = _threshold_float("AIEDGE_QG_ABSTAIN_MAX", 0.25)
+
     policy = {
-        "precision_min": 0.9,
-        "recall_min": 0.6,
-        "high_severity_false_positive_rate_max": 0.1,
+        "precision_min": precision_min,
+        "recall_min": recall_min,
+        "high_severity_false_positive_rate_max": fpr_max,
         "high_severity_false_positive_rate_proxy": "overall.fpr",
-        "abstain_rate_max": 0.25,
+        "abstain_rate_max": abstain_max,
         "release_mode": release_mode,
         "llm_primary": llm_primary,
     }
@@ -181,43 +197,43 @@ def evaluate_quality_gate(
     }
 
     errors: list[dict[str, object]] = []
-    if precision < 0.9:
+    if precision < precision_min:
         errors.append(
             _threshold_error(
                 metric="precision",
                 source_field="overall.precision",
                 actual=precision,
-                threshold=0.9,
+                threshold=precision_min,
                 operator=">=",
             )
         )
-    if recall < 0.6:
+    if recall < recall_min:
         errors.append(
             _threshold_error(
                 metric="recall",
                 source_field="overall.recall",
                 actual=recall,
-                threshold=0.6,
+                threshold=recall_min,
                 operator=">=",
             )
         )
-    if high_sev_fp_proxy > 0.1:
+    if high_sev_fp_proxy > fpr_max:
         errors.append(
             _threshold_error(
                 metric="high_severity_false_positive_rate",
                 source_field="overall.fpr",
                 actual=high_sev_fp_proxy,
-                threshold=0.1,
+                threshold=fpr_max,
                 operator="<=",
             )
         )
-    if abstain_rate > 0.25:
+    if abstain_rate > abstain_max:
         errors.append(
             _threshold_error(
                 metric="abstain_rate",
                 source_field="abstain_rate",
                 actual=abstain_rate,
-                threshold=0.25,
+                threshold=abstain_max,
                 operator="<=",
             )
         )

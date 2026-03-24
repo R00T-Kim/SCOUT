@@ -23,6 +23,7 @@ from .web_ui import WebUiStage
 from .ota import OtaStage
 from .ota_payload import OtaPayloadStage
 from .threat_model import ThreatModelStage
+from .path_safety import env_int
 from .stage import Stage
 from .structure import StructureStage
 from .tooling import ToolingStage
@@ -38,21 +39,6 @@ StageFactory = Callable[[_RunInfoLike, str | None, Callable[[], float], bool], S
 
 def _quantize_remaining_budget_s(remaining_budget_s: float) -> int:
     return max(0, int(float(remaining_budget_s)))
-
-
-def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return int(default)
-    try:
-        value = int(raw)
-    except Exception:
-        return int(default)
-    if value < int(min_value):
-        return int(min_value)
-    if value > int(max_value):
-        return int(max_value)
-    return int(value)
 
 
 def _clamp_int(value: int, *, min_value: int, max_value: int) -> int:
@@ -435,13 +421,13 @@ def _make_attack_surface_stage(
     no_llm: bool,
 ) -> Stage:
     _ = info, source_input_path, remaining_s, no_llm
-    max_items = _env_int(
+    max_items = env_int(
         "AIEDGE_ATTACK_SURFACE_MAX_ITEMS",
         default=500,
         min_value=50,
         max_value=5000,
     )
-    max_unknowns = _env_int(
+    max_unknowns = env_int(
         "AIEDGE_ATTACK_SURFACE_MAX_UNKNOWNS",
         default=400,
         min_value=50,

@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
 
-from .path_safety import assert_under_dir, rel_to_run_dir, sha256_text
+from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_text
 from .stage import StageContext, StageOutcome
 
 # ---------------------------------------------------------------------------
@@ -49,6 +49,14 @@ _CONFIDENCE_RANGE = 0.75
 _CONFIDENCE_PRODUCT = 0.40
 
 _STATIC_CONFIDENCE_CAP = 0.60  # findings stage governance cap
+
+# Reachability-based confidence multipliers (applied after _STATIC_CONFIDENCE_CAP)
+_REACHABILITY_MULTIPLIERS: dict[str, float] = {
+    "directly_reachable": 1.0,    # No change — component is network-reachable
+    "potentially_reachable": 0.8, # Slight reduction — reachability unconfirmed
+    "unreachable": 0.5,           # Significant reduction — component not reachable
+    "unknown": 0.9,               # Small penalty — no reachability data for component
+}
 
 _CVSS_HIGH_THRESHOLD = 7.0
 _CVSS_CRITICAL_THRESHOLD = 9.0
@@ -72,17 +80,6 @@ def _parse_timestamp(ts: str) -> float:
         return 0.0
 
 
-def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        v = int(raw)
-    except Exception:
-        return default
-    return max(min_value, min(max_value, v))
-
-
 def _severity_label(score: float) -> str:
     if score >= _CVSS_CRITICAL_THRESHOLD:
         return "critical"
@@ -96,6 +93,42 @@ def _severity_label(score: float) -> str:
 def _finding_confidence(match_confidence: float, cvss_score: float) -> float:
     raw = match_confidence * cvss_score / 10.0 * 0.6
     return min(_STATIC_CONFIDENCE_CAP, raw)
+
+
+# ---------------------------------------------------------------------------
+# Reachability loader
+# ---------------------------------------------------------------------------
+
+def _load_reachability_map(run_dir: Path) -> dict[str, str]:
+    """Load component reachability classifications from the reachability stage.
+
+    Returns a dict mapping component name to reachability status:
+    'directly_reachable', 'potentially_reachable', 'unreachable', or 'unknown'.
+    Returns an empty dict if reachability data is unavailable.
+    """
+    reach_path = run_dir / "stages" / "reachability" / "reachability.json"
+    try:
+        if not reach_path.is_file():
+            return {}
+        raw = cast(object, json.loads(reach_path.read_text(encoding="utf-8")))
+        if not isinstance(raw, dict):
+            return {}
+        data = cast(dict[str, object], raw)
+        results_any = data.get("results")
+        if not isinstance(results_any, list):
+            return {}
+        mapping: dict[str, str] = {}
+        for entry_any in cast(list[object], results_any):
+            if not isinstance(entry_any, dict):
+                continue
+            entry = cast(dict[str, object], entry_any)
+            comp_any = entry.get("component")
+            status_any = entry.get("reachability")
+            if isinstance(comp_any, str) and comp_any and isinstance(status_any, str):
+                mapping[comp_any] = status_any
+        return mapping
+    except Exception:
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -580,13 +613,13 @@ class CveScanStage:
         cross_run_cache_str = os.environ.get("AIEDGE_NVD_CACHE_DIR")
         cross_run_cache_dir: Path | None = Path(cross_run_cache_str) if cross_run_cache_str else None
 
-        max_components = _env_int(
+        max_components = env_int(
             "AIEDGE_CVE_SCAN_MAX_COMPONENTS",
             default=_DEFAULT_MAX_COMPONENTS,
             min_value=1,
             max_value=500,
         )
-        timeout_s = _env_int(
+        timeout_s = env_int(
             "AIEDGE_CVE_SCAN_TIMEOUT_S",
             default=_DEFAULT_TIMEOUT_S,
             min_value=5,
@@ -634,6 +667,15 @@ class CveScanStage:
                 f"(AIEDGE_CVE_SCAN_MAX_COMPONENTS); {len(components) - max_components} skipped"
             )
             components = components[:max_components]
+
+        # ------------------------------------------------------------------ #
+        # Load reachability data (optional — stage may not have run yet)
+        # ------------------------------------------------------------------ #
+        reachability_map = _load_reachability_map(run_dir)
+        if not reachability_map:
+            limitations.append(
+                "reachability data unavailable; CVE confidence not adjusted for reachability"
+            )
 
         # ------------------------------------------------------------------ #
         # Main scan loop
@@ -738,6 +780,12 @@ class CveScanStage:
             comp_name_f = str(m.get("component", ""))
             comp_ver_f = str(m.get("version", ""))
 
+            # Apply reachability multiplier when data is available
+            reach_status = reachability_map.get(comp_name_f, "unknown") if reachability_map else "unknown"
+            if reachability_map:
+                multiplier = _REACHABILITY_MULTIPLIERS.get(reach_status, _REACHABILITY_MULTIPLIERS["unknown"])
+                confidence = min(_STATIC_CONFIDENCE_CAP, confidence * multiplier)
+
             # Stable SBOM reference key
             sbom_ref_part = f"sbom:comp-{comp_name_f}"
             if comp_ver_f:
@@ -755,6 +803,7 @@ class CveScanStage:
                     "version": comp_ver_f,
                     "cve_id": cve_id,
                     "cvss_v3_score": score,
+                    "reachability": reach_status if reachability_map else "unknown",
                     "evidence_refs": [f"nvd_api:{cve_id}", sbom_ref_part],
                 }
             )

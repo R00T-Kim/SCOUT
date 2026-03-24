@@ -9,18 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -129,7 +120,7 @@ def _safe_write_json(
     errors: list[dict[str, JsonValue]],
     op: str,
 ) -> bool:
-    _assert_under_dir(run_dir, path)
+    assert_under_dir(run_dir, path)
     try:
         _ = path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
@@ -597,6 +588,14 @@ _RISKY_BINARY_SYMBOLS: dict[str, bytes] = {
     "popen": b"popen",
     "execve": b"execve",
 }
+_FORTIFY_SYMBOLS: dict[str, str] = {
+    "__sprintf_chk": "sprintf",
+    "__strcpy_chk": "strcpy",
+    "__strcat_chk": "strcat",
+    "__memcpy_chk": "memcpy",
+    "__memmove_chk": "memmove",
+    "__vsprintf_chk": "vsprintf",
+}
 _ELF_MACHINE_MAP: dict[int, str] = {
     0x03: "x86",
     0x08: "mips",
@@ -853,7 +852,11 @@ def _scan_binary_analysis(
     max_bytes_per_file: int = 512 * 1024,
     max_hits: int = 200,
 ) -> tuple[dict[str, JsonValue], list[dict[str, JsonValue]], int]:
-    from .binary_hardening import extract_elf_ipc_indicators, parse_elf_hardening
+    from .binary_hardening import (
+        extract_dynstr_bytes,
+        extract_elf_ipc_indicators,
+        parse_elf_hardening,
+    )
 
     risky_symbol_counts: dict[str, int] = {k: 0 for k in _RISKY_BINARY_SYMBOLS}
     arch_counts: dict[str, int] = {}
@@ -909,11 +912,30 @@ def _scan_binary_analysis(
             elf_binaries += 1
             arch_counts[arch] = int(arch_counts.get(arch, 0) + 1)
 
-        matched_symbols = [
-            symbol
-            for symbol, marker in _RISKY_BINARY_SYMBOLS.items()
-            if marker in sample
-        ]
+        # --- Risky symbol detection: prefer .dynstr, fall back to byte scan ---
+        dynstr = extract_dynstr_bytes(path) if isinstance(arch, str) else b""
+        use_dynstr = len(dynstr) > 0
+        search_blob = dynstr if use_dynstr else sample
+        symbol_source = "dynstr" if use_dynstr else "binary_scan"
+
+        # Detect FORTIFY_SOURCE symbols in dynstr
+        fortified_bases: set[str] = set()
+        if use_dynstr:
+            for fortify_sym, base_sym in _FORTIFY_SYMBOLS.items():
+                if fortify_sym.encode() in dynstr:
+                    fortified_bases.add(base_sym)
+
+        matched_symbols: list[str] = []
+        matched_symbol_details: list[dict[str, JsonValue]] = []
+        for symbol, marker in _RISKY_BINARY_SYMBOLS.items():
+            if marker in search_blob:
+                is_fortified = symbol in fortified_bases
+                matched_symbols.append(symbol)
+                matched_symbol_details.append({
+                    "symbol": symbol,
+                    "source": symbol_source,
+                    "fortified": is_fortified,
+                })
 
         # Extract IPC indicators for all ELF binaries (before the risky-symbol
         # early-continue so we don't miss binaries that only have IPC signals).
@@ -950,8 +972,13 @@ def _scan_binary_analysis(
                 "matched_symbols": cast(
                     list[JsonValue], cast(list[object], sorted(set(matched_symbols)))
                 ),
+                "symbol_source": symbol_source,
                 "sample_sha256": sha,
             }
+            if matched_symbol_details:
+                hit["symbol_details"] = cast(
+                    list[JsonValue], cast(list[object], matched_symbol_details)
+                )
             if hardening_dict is not None:
                 hit["hardening"] = cast(JsonValue, hardening_dict)
             if ipc_data:
@@ -1348,7 +1375,7 @@ class InventoryStage:
 
     def run(self, ctx: StageContext) -> StageOutcome:
         stage_dir = ctx.run_dir / "stages" / "inventory"
-        _assert_under_dir(ctx.run_dir, stage_dir)
+        assert_under_dir(ctx.run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
 
         extracted_dir = (
@@ -1356,11 +1383,11 @@ class InventoryStage:
         )
         extracted_rel = _rel_to_run_dir(ctx.run_dir, extracted_dir)
         inventory_path = stage_dir / "inventory.json"
-        _assert_under_dir(ctx.run_dir, inventory_path)
+        assert_under_dir(ctx.run_dir, inventory_path)
         strings_path = stage_dir / "string_hits.json"
-        _assert_under_dir(ctx.run_dir, strings_path)
+        assert_under_dir(ctx.run_dir, strings_path)
         binary_analysis_path = stage_dir / "binary_analysis.json"
-        _assert_under_dir(ctx.run_dir, binary_analysis_path)
+        assert_under_dir(ctx.run_dir, binary_analysis_path)
 
         evidence: list[JsonValue] = []
         errors: list[dict[str, JsonValue]] = []

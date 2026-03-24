@@ -12,18 +12,9 @@ from pathlib import Path
 from typing import cast
 
 from .confidence_caps import calibrated_confidence, evidence_level
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = _safe_resolve(base_dir) or base_dir.absolute()
-    resolved = _safe_resolve(target) or target.absolute()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _safe_resolve(path: Path) -> Path | None:
@@ -1331,20 +1322,20 @@ class GraphStage:
         out_matrix_json = stage_dir / "communication_matrix.json"
         out_matrix_csv = stage_dir / "communication_matrix.csv"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, out_json)
-        _assert_under_dir(stage_dir, out_dot)
-        _assert_under_dir(stage_dir, out_mmd)
-        _assert_under_dir(stage_dir, out_ref_json)
-        _assert_under_dir(stage_dir, out_comm_json)
-        _assert_under_dir(stage_dir, out_comm_nodes_csv)
-        _assert_under_dir(stage_dir, out_comm_edges_csv)
-        _assert_under_dir(stage_dir, out_comm_cypher)
-        _assert_under_dir(stage_dir, out_comm_schema_cypher)
-        _assert_under_dir(stage_dir, out_comm_queries_cypher)
-        _assert_under_dir(stage_dir, out_matrix_json)
-        _assert_under_dir(stage_dir, out_matrix_csv)
+        assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, out_dot)
+        assert_under_dir(stage_dir, out_mmd)
+        assert_under_dir(stage_dir, out_ref_json)
+        assert_under_dir(stage_dir, out_comm_json)
+        assert_under_dir(stage_dir, out_comm_nodes_csv)
+        assert_under_dir(stage_dir, out_comm_edges_csv)
+        assert_under_dir(stage_dir, out_comm_cypher)
+        assert_under_dir(stage_dir, out_comm_schema_cypher)
+        assert_under_dir(stage_dir, out_comm_queries_cypher)
+        assert_under_dir(stage_dir, out_matrix_json)
+        assert_under_dir(stage_dir, out_matrix_csv)
 
         surfaces_path = run_dir / "stages" / "surfaces" / "surfaces.json"
         endpoints_path = run_dir / "stages" / "endpoints" / "endpoints.json"

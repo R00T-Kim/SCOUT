@@ -46,6 +46,110 @@ _DT_NULL = 0
 _DF_BIND_NOW = 0x8
 
 
+def extract_dynstr_bytes(path: Path, max_read: int = 2 * 1024 * 1024) -> bytes:
+    """Extract the .dynstr section bytes from an ELF binary.
+
+    Returns empty bytes if the file is not ELF or .dynstr is not found.
+    """
+    try:
+        size = path.stat().st_size
+        if size < 52 or size > max_read:
+            if size > max_read:
+                # Read only the header portions needed, not the whole file.
+                # We still need section headers which may be at end of file,
+                # so for oversized files just return empty.
+                return b""
+            return b""
+        with path.open("rb") as f:
+            data = f.read(max_read)
+    except OSError:
+        return b""
+
+    if len(data) < 52 or data[:4] != _ELF_MAGIC:
+        return b""
+
+    ei_class = data[4]
+    ei_data = data[5]
+
+    if ei_class not in (_ELFCLASS32, _ELFCLASS64):
+        return b""
+    if ei_data not in (_ELFDATA2LSB, _ELFDATA2MSB):
+        return b""
+
+    is_64 = ei_class == _ELFCLASS64
+    endian = "<" if ei_data == _ELFDATA2LSB else ">"
+
+    try:
+        if is_64:
+            if len(data) < 64:
+                return b""
+            (e_shoff,) = struct.unpack_from(endian + "Q", data, 40)
+            (e_shentsize,) = struct.unpack_from(endian + "H", data, 58)
+            (e_shnum,) = struct.unpack_from(endian + "H", data, 60)
+            (e_shstrndx,) = struct.unpack_from(endian + "H", data, 62)
+        else:
+            (e_shoff,) = struct.unpack_from(endian + "I", data, 32)
+            (e_shentsize,) = struct.unpack_from(endian + "H", data, 46)
+            (e_shnum,) = struct.unpack_from(endian + "H", data, 48)
+            (e_shstrndx,) = struct.unpack_from(endian + "H", data, 50)
+    except struct.error:
+        return b""
+
+    if e_shoff == 0 or e_shnum == 0 or e_shentsize == 0:
+        return b""
+
+    # Locate .shstrtab (section name string table)
+    shstrtab_data: bytes = b""
+    if e_shstrndx < e_shnum:
+        shstr_sh_start = e_shoff + e_shstrndx * e_shentsize
+        try:
+            if is_64:
+                (sh_offset,) = struct.unpack_from(endian + "Q", data, shstr_sh_start + 24)
+                (sh_size,) = struct.unpack_from(endian + "Q", data, shstr_sh_start + 32)
+            else:
+                (sh_offset,) = struct.unpack_from(endian + "I", data, shstr_sh_start + 16)
+                (sh_size,) = struct.unpack_from(endian + "I", data, shstr_sh_start + 20)
+            if sh_offset + sh_size <= len(data):
+                shstrtab_data = data[sh_offset : sh_offset + sh_size]
+        except struct.error:
+            pass
+
+    if not shstrtab_data:
+        return b""
+
+    # Walk section headers looking for .dynstr
+    for i in range(e_shnum):
+        sh_start = e_shoff + i * e_shentsize
+        try:
+            if is_64:
+                if sh_start + 64 > len(data):
+                    break
+                (sh_name,) = struct.unpack_from(endian + "I", data, sh_start)
+                (sh_type,) = struct.unpack_from(endian + "I", data, sh_start + 4)
+                (sh_offset,) = struct.unpack_from(endian + "Q", data, sh_start + 24)
+                (sh_size,) = struct.unpack_from(endian + "Q", data, sh_start + 32)
+            else:
+                if sh_start + 40 > len(data):
+                    break
+                (sh_name,) = struct.unpack_from(endian + "I", data, sh_start)
+                (sh_type,) = struct.unpack_from(endian + "I", data, sh_start + 4)
+                (sh_offset,) = struct.unpack_from(endian + "I", data, sh_start + 16)
+                (sh_size,) = struct.unpack_from(endian + "I", data, sh_start + 20)
+        except struct.error:
+            break
+
+        if sh_type != _SHT_STRTAB:
+            continue
+        if sh_name >= len(shstrtab_data):
+            continue
+        name_end = shstrtab_data.find(b"\x00", sh_name)
+        sec_name = shstrtab_data[sh_name:name_end] if name_end >= 0 else b""
+        if sec_name == b".dynstr" and sh_offset + sh_size <= len(data):
+            return data[sh_offset : sh_offset + sh_size]
+
+    return b""
+
+
 def parse_elf_hardening(path: Path) -> ELFHardening | None:
     """Parse ELF binary for security hardening properties.
     Returns None if not a valid ELF file."""
@@ -184,56 +288,28 @@ def parse_elf_hardening(path: Path) -> ELFHardening | None:
     stripped: bool | None = None
     has_symtab = False
 
-    # Find .shstrtab for section name lookup, and scan sections
-    dynstr_data: bytes = b""
+    # Use extract_dynstr_bytes for .dynstr, but we still need to walk
+    # section headers for .symtab detection (stripped check).
+    dynstr_data = extract_dynstr_bytes(path)
 
     if e_shoff > 0 and e_shnum > 0 and e_shentsize > 0:
-        # First, get the section name string table
-        shstrtab_data: bytes = b""
-        if e_shstrndx < e_shnum:
-            shstr_sh_start = e_shoff + e_shstrndx * e_shentsize
-            try:
-                if is_64:
-                    (sh_offset,) = struct.unpack_from(endian + "Q", data, shstr_sh_start + 24)
-                    (sh_size,) = struct.unpack_from(endian + "Q", data, shstr_sh_start + 32)
-                else:
-                    (sh_offset,) = struct.unpack_from(endian + "I", data, shstr_sh_start + 16)
-                    (sh_size,) = struct.unpack_from(endian + "I", data, shstr_sh_start + 20)
-                if sh_offset + sh_size <= len(data):
-                    shstrtab_data = data[sh_offset : sh_offset + sh_size]
-            except struct.error:
-                pass
-
         for i in range(e_shnum):
             sh_start = e_shoff + i * e_shentsize
             try:
                 if is_64:
                     if sh_start + 64 > len(data):
                         break
-                    (sh_name,) = struct.unpack_from(endian + "I", data, sh_start)
                     (sh_type,) = struct.unpack_from(endian + "I", data, sh_start + 4)
-                    (sh_offset,) = struct.unpack_from(endian + "Q", data, sh_start + 24)
-                    (sh_size,) = struct.unpack_from(endian + "Q", data, sh_start + 32)
                 else:
                     if sh_start + 40 > len(data):
                         break
-                    (sh_name,) = struct.unpack_from(endian + "I", data, sh_start)
                     (sh_type,) = struct.unpack_from(endian + "I", data, sh_start + 4)
-                    (sh_offset,) = struct.unpack_from(endian + "I", data, sh_start + 16)
-                    (sh_size,) = struct.unpack_from(endian + "I", data, sh_start + 20)
             except struct.error:
                 break
 
             if sh_type == _SHT_SYMTAB:
                 has_symtab = True
-            elif sh_type == _SHT_STRTAB:
-                # Check if this is .dynstr by name
-                if shstrtab_data and sh_name < len(shstrtab_data):
-                    name_end = shstrtab_data.find(b"\x00", sh_name)
-                    sec_name = shstrtab_data[sh_name:name_end] if name_end >= 0 else b""
-                    if sec_name == b".dynstr":
-                        if sh_offset + sh_size <= len(data):
-                            dynstr_data = data[sh_offset : sh_offset + sh_size]
+                break
 
     stripped = not has_symtab
 

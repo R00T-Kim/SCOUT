@@ -9,18 +9,9 @@ from pathlib import Path
 from typing import cast
 
 from .mtdparts import parse_mtdparts
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -257,17 +248,17 @@ class CarvingStage:
         partitions_path = stage_dir / "partitions.json"
         roots_path = stage_dir / "roots.json"
 
-        _assert_under_dir(ctx.run_dir, stage_dir)
+        assert_under_dir(ctx.run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, blobs_dir)
+        assert_under_dir(stage_dir, blobs_dir)
         blobs_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, roots_dir)
+        assert_under_dir(stage_dir, roots_dir)
         roots_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, evidence_dir)
+        assert_under_dir(stage_dir, evidence_dir)
         evidence_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, partitions_path)
-        _assert_under_dir(stage_dir, roots_path)
-        _assert_under_dir(stage_dir, log_path)
+        assert_under_dir(stage_dir, partitions_path)
+        assert_under_dir(stage_dir, roots_path)
+        assert_under_dir(stage_dir, log_path)
 
         evidence: list[str] = [
             _rel_to_run_dir(ctx.run_dir, stage_dir),
@@ -461,7 +452,7 @@ class CarvingStage:
             out_path = (
                 blobs_dir / f"{idx:03d}_{name}_off-0x{offset:x}_size-{desired}.bin"
             )
-            _assert_under_dir(blobs_dir, out_path)
+            assert_under_dir(blobs_dir, out_path)
             wrote = _stream_carve(
                 firmware_path=fw,
                 out_path=out_path,
@@ -535,12 +526,12 @@ class CarvingStage:
 
             root_safe = _sanitize_name(root_name, fallback="root")
             root_dir = roots_dir / root_safe
-            _assert_under_dir(roots_dir, root_dir)
+            assert_under_dir(roots_dir, root_dir)
 
             if root_dir.exists():
                 for i in range(1, 1000):
                     alt = roots_dir / f"{root_safe}_{i}"
-                    _assert_under_dir(roots_dir, alt)
+                    assert_under_dir(roots_dir, alt)
                     if not alt.exists():
                         root_dir = alt
                         break
@@ -663,7 +654,7 @@ class CarvingStage:
                     evidence_dir
                     / f"evidence_{hit_idx:03d}_{_sanitize_name(kind)}_off-0x{off:x}_len-{slice_len}.bin"
                 )
-                _assert_under_dir(evidence_dir, out_path)
+                assert_under_dir(evidence_dir, out_path)
                 wrote = _stream_carve(
                     firmware_path=fw,
                     out_path=out_path,

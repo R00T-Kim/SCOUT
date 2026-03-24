@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
 
@@ -50,14 +50,6 @@ _WEB_FILE_EXTENSIONS: frozenset[str] = frozenset({
 _JS_EXTENSIONS: frozenset[str] = frozenset({".js", ".mjs", ".cjs", ".jsx"})
 _HTML_EXTENSIONS: frozenset[str] = frozenset({".html", ".htm", ".php", ".asp", ".aspx", ".jsp"})
 
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -301,7 +293,7 @@ class WebUiStage:
     def run(self, ctx: StageContext) -> StageOutcome:
         run_dir = ctx.run_dir
         stage_dir = run_dir / "stages" / "web_ui"
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
         out_json = stage_dir / "web_ui.json"
 

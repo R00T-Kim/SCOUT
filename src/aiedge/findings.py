@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from . import __version__ as AIEDGE_VERSION
+from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
 from .exploit_tiering import (
     default_exploitability_tier,
@@ -22,15 +23,6 @@ from .stage import StageContext
 
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -3100,7 +3092,7 @@ def run_findings(
     ctx: StageContext, *, firmware_name: str = "firmware.bin"
 ) -> FindingsStageResult:
     stage_dir = ctx.run_dir / "stages" / "findings"
-    _assert_under_dir(ctx.run_dir, stage_dir)
+    assert_under_dir(ctx.run_dir, stage_dir)
     stage_dir.mkdir(parents=True, exist_ok=True)
 
     inv_dir = ctx.run_dir / "stages" / "inventory"
@@ -3385,13 +3377,13 @@ def run_findings(
     exploit_candidates_path = stage_dir / "exploit_candidates.json"
     known_disclosures_path = stage_dir / "known_disclosures.json"
     skeleton_dir = stage_dir / "poc_skeletons"
-    _assert_under_dir(stage_dir, pattern_scan_path)
-    _assert_under_dir(stage_dir, binary_hits_path)
-    _assert_under_dir(stage_dir, chains_path)
-    _assert_under_dir(stage_dir, review_gates_path)
-    _assert_under_dir(stage_dir, exploit_candidates_path)
-    _assert_under_dir(stage_dir, known_disclosures_path)
-    _assert_under_dir(stage_dir, skeleton_dir)
+    assert_under_dir(stage_dir, pattern_scan_path)
+    assert_under_dir(stage_dir, binary_hits_path)
+    assert_under_dir(stage_dir, chains_path)
+    assert_under_dir(stage_dir, review_gates_path)
+    assert_under_dir(stage_dir, exploit_candidates_path)
+    assert_under_dir(stage_dir, known_disclosures_path)
+    assert_under_dir(stage_dir, skeleton_dir)
 
     if _contains_absolute_path_value(pattern_scan_payload):
         raise AIEdgePolicyViolation(
@@ -3421,7 +3413,7 @@ def run_findings(
     surfaces_json = ctx.run_dir / "stages" / "surfaces" / "surfaces.json"
     endpoints_json = ctx.run_dir / "stages" / "endpoints" / "endpoints.json"
     credential_mapping_path = stage_dir / "credential_mapping.json"
-    _assert_under_dir(stage_dir, credential_mapping_path)
+    assert_under_dir(stage_dir, credential_mapping_path)
     credential_mapping_payload = _build_credential_mapping(
         run_dir=ctx.run_dir,
         candidate_roots=candidate_roots,
@@ -3840,7 +3832,7 @@ def run_findings(
     }
 
     out_path = stage_dir / "findings.json"
-    _assert_under_dir(stage_dir, out_path)
+    assert_under_dir(stage_dir, out_path)
     _ = out_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

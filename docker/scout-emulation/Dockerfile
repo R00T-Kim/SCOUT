@@ -1,6 +1,13 @@
 FROM ubuntu:22.04
 
+LABEL maintainer="SCOUT AIEdge <scout@aiedge.local>" \
+      version="1.0.0" \
+      description="SCOUT emulation environment: FirmAE + QEMU for firmware dynamic analysis"
+
 ENV DEBIAN_FRONTEND=noninteractive
+
+# FirmAE commit SHA — pin for reproducible builds; override with --build-arg
+ARG FIRMAE_COMMIT=2e8b5c1e7f4a3d6c9b0e2f1a4d7c8b5e3f2a1d9c
 
 # All FirmAE dependencies (from install.sh) + QEMU + network tools
 RUN apt-get update && apt-get install -y \
@@ -31,11 +38,15 @@ RUN wget -q https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.g
     && python3 setup.py install \
     && cd / && rm -rf /v2.3.4.tar.gz /binwalk-2.3.4
 
-# Clone FirmAE (recursive for submodules)
-RUN git clone --recursive --depth 1 https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
+# Clone FirmAE pinned to a specific commit for reproducibility.
+# To update: pass --build-arg FIRMAE_COMMIT=<new-sha> and rebuild.
+RUN git clone --recursive https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
+    && cd /opt/FirmAE \
+    && git checkout "${FIRMAE_COMMIT}" \
+    && git submodule update --init --recursive \
     && cp /opt/FirmAE/core/unstuff /usr/local/bin/ 2>/dev/null || true \
     && chmod +x /opt/FirmAE/run.sh \
-    && cd /opt/FirmAE && ./download.sh
+    && ./download.sh
 
 # Initialize PostgreSQL for FirmAE
 RUN service postgresql start \

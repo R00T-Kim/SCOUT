@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
@@ -21,15 +22,6 @@ _GZIP_MAGIC = b"\x1f\x8b"
 _BZIP_MAGIC = b"BZh"
 _ARCHIVE_EXTRACT_MAX_DEPTH = 6
 _SQUASHFS_EXTRACT_MAX_DEPTH = 4
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -475,7 +467,7 @@ def _recursive_archive_extraction(
 
     details["attempted"] = True
     layer_root = extracted_dir / "__recursive_layers"
-    _assert_under_dir(run_dir, layer_root)
+    assert_under_dir(run_dir, layer_root)
     if layer_root.exists():
         shutil.rmtree(layer_root, ignore_errors=True)
     layer_root.mkdir(parents=True, exist_ok=True)
@@ -511,7 +503,7 @@ def _recursive_archive_extraction(
 
             layer_index += 1
             out_dir = layer_root / f"layer_{layer_index:03d}_{kind}"
-            _assert_under_dir(run_dir, out_dir)
+            assert_under_dir(run_dir, out_dir)
             out_dir.mkdir(parents=True, exist_ok=True)
 
             ok_extract, reason = _extract_archive_candidate(
@@ -691,8 +683,8 @@ def _recursive_nested_extraction(
 
     ubi_out_root = extracted_dir / "__ubi_recursive"
     squash_out_root = extracted_dir / "__recursive_squashfs"
-    _assert_under_dir(run_dir, ubi_out_root)
-    _assert_under_dir(run_dir, squash_out_root)
+    assert_under_dir(run_dir, ubi_out_root)
+    assert_under_dir(run_dir, squash_out_root)
     if ubi_out_root.exists():
         shutil.rmtree(ubi_out_root, ignore_errors=True)
     if squash_out_root.exists():
@@ -736,7 +728,7 @@ def _recursive_nested_extraction(
         if not ubireader:
             break
         out_dir = ubi_out_root / f"ubi_{idx:02d}"
-        _assert_under_dir(run_dir, out_dir)
+        assert_under_dir(run_dir, out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         evidence.append(_evidence_path(run_dir, out_dir))
         argv = [ubireader, "-o", str(out_dir), str(ubi_path)]
@@ -810,7 +802,7 @@ def _recursive_nested_extraction(
                 continue
             squash_index += 1
             out_dir = squash_out_root / f"root_{squash_index:02d}"
-            _assert_under_dir(run_dir, out_dir)
+            assert_under_dir(run_dir, out_dir)
             out_dir.mkdir(parents=True, exist_ok=True)
             argv = [unsquashfs, "-d", str(out_dir), str(sq_path)]
             if offset > 0:
@@ -937,7 +929,7 @@ class ExtractionStage:
             )
 
         stage_dir = ctx.run_dir / "stages" / "extraction"
-        _assert_under_dir(ctx.run_dir, stage_dir)
+        assert_under_dir(ctx.run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
 
         reasons: list[str] = []
@@ -957,7 +949,7 @@ class ExtractionStage:
         details["minimum_expected_file_count"] = int(max(0, self.min_extracted_files))
 
         log_path = stage_dir / "binwalk.log"
-        _assert_under_dir(stage_dir, log_path)
+        assert_under_dir(stage_dir, log_path)
         extracted_dir = stage_dir / f"_{fw.name}.extracted"
         binwalk = shutil.which("binwalk")
         details["binwalk_available"] = bool(binwalk)

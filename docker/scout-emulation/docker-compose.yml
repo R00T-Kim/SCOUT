@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  scout-emulation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scout-emulation:latest
+    privileged: true
+    volumes:
+      - firmware_data:/data
+      - ../../aiedge-runs:/aiedge-runs
+    environment:
+      - AIEDGE_FIRMAE_ROOT=/opt/FirmAE
+    networks:
+      - scout-net
+
+volumes:
+  firmware_data:
+
+networks:
+  scout-net:
+    driver: bridge

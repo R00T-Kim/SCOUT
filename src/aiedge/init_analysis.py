@@ -6,20 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from .policy import AIEdgePolicyViolation
-
-
-# ---------------------------------------------------------------------------
-# Path safety
-# ---------------------------------------------------------------------------
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
+from .path_safety import assert_under_dir
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -760,7 +747,7 @@ def analyze_init_services(
 
     # Write output artifact
     out_path = stage_dir / "init_services.json"
-    _assert_under_dir(run_dir, out_path)
+    assert_under_dir(run_dir, out_path)
     out_path.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

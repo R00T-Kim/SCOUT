@@ -9,7 +9,7 @@ from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 
 from .confidence_caps import calibrated_confidence, evidence_level
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
@@ -164,15 +164,6 @@ _ENDPOINT_PATTERN_SPECS: tuple[tuple[str, re.Pattern[str], float], ...] = (
         0.60,
     ),
 )
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = _safe_resolve(base_dir) or base_dir.absolute()
-    resolved = _safe_resolve(target) or target.absolute()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _safe_resolve(path: Path) -> Path | None:
@@ -592,9 +583,9 @@ class EndpointsStage:
         stage_dir = run_dir / "stages" / "endpoints"
         out_json = stage_dir / "endpoints.json"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, out_json)
 
         roots, limits, inventory_present, inventory_path = _load_inventory_roots(
             run_dir

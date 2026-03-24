@@ -11,21 +11,7 @@ import json
 import os
 from pathlib import Path
 
-
-# ---------------------------------------------------------------------------
-# Environment helpers
-# ---------------------------------------------------------------------------
-
-def _env_int(name: str, *, default: int, min_val: int, max_val: int) -> int:
-    """Read an integer environment variable with bounds clamping."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        v = int(raw)
-    except ValueError:
-        return default
-    return max(min_val, min(max_val, v))
+from .path_safety import env_int
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +170,8 @@ def select_fuzz_targets(
         ``matched_symbols``.
     """
     if max_targets is None:
-        max_targets = _env_int(
-            "AIEDGE_FUZZ_MAX_TARGETS", default=3, min_val=1, max_val=20
+        max_targets = env_int(
+            "AIEDGE_FUZZ_MAX_TARGETS", default=3, min_value=1, max_value=20
         )
 
     # --- binary analysis -------------------------------------------------

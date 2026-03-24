@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import cast
 
 from .ghidra_bridge import analyze_binary, ghidra_available
-from .path_safety import assert_under_dir, rel_to_run_dir, sha256_text
+from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_text
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -50,18 +50,6 @@ _RISKY_SYMBOLS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _env_int(name: str, *, default: int, min_val: int, max_val: int) -> int:
-    """Read an integer environment variable, clamped to [min_val, max_val]."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        v = int(raw)
-    except ValueError:
-        return default
-    return max(min_val, min(max_val, v))
 
 
 def _write_json(run_dir: Path, dest: Path, data: object) -> None:
@@ -215,11 +203,11 @@ class GhidraAnalysisStage:
         # ------------------------------------------------------------------
         # 3. Select and prioritise binaries
         # ------------------------------------------------------------------
-        max_binaries = _env_int(
-            "AIEDGE_GHIDRA_MAX_BINARIES", default=10, min_val=1, max_val=50
+        max_binaries = env_int(
+            "AIEDGE_GHIDRA_MAX_BINARIES", default=10, min_value=1, max_value=50
         )
         timeout_per = float(
-            _env_int("AIEDGE_GHIDRA_TIMEOUT_S", default=300, min_val=30, max_val=1800)
+            env_int("AIEDGE_GHIDRA_TIMEOUT_S", default=300, min_value=30, max_value=1800)
         )
 
         selected = sorted(hits, key=_binary_priority)[:max_binaries]

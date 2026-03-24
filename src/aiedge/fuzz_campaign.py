@@ -27,7 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .path_safety import assert_under_dir, rel_to_run_dir, sha256_file
+from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_file
 from .policy import AIEdgePolicyViolation
 from .stage import StageContext, StageOutcome
 
@@ -36,15 +36,6 @@ from .stage import StageContext, StageOutcome
 # Environment helpers
 # ---------------------------------------------------------------------------
 
-def _env_int(name: str, *, default: int, min_val: int, max_val: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        v = int(raw)
-    except ValueError:
-        return default
-    return max(min_val, min(max_val, v))
 
 
 def _afl_image() -> str:
@@ -52,11 +43,115 @@ def _afl_image() -> str:
 
 
 def _fuzz_budget_s() -> int:
-    return _env_int("AIEDGE_FUZZ_BUDGET_S", default=300, min_val=30, max_val=86400)
+    return env_int("AIEDGE_FUZZ_BUDGET_S", default=300, min_value=30, max_value=86400)
 
 
 def _max_targets() -> int:
-    return _env_int("AIEDGE_FUZZ_MAX_TARGETS", default=3, min_val=1, max_val=20)
+    return env_int("AIEDGE_FUZZ_MAX_TARGETS", default=3, min_value=1, max_value=20)
+
+
+# ---------------------------------------------------------------------------
+# AFL++ performance environment variables
+# ---------------------------------------------------------------------------
+
+def _build_afl_perf_env(target: dict) -> dict[str, str]:
+    """Build AFL++ environment variables for performance optimisation.
+
+    Returns a dict of ``AFL_*`` variables that improve throughput in
+    Docker/QEMU mode.  These are additive — they do not conflict with
+    the harness ``env`` dict.
+
+    Optimisations (per Airbus AFL++ research — potential 10-100x speedup):
+
+    * ``AFL_SKIP_CPUFREQ``   — bypass CPU governor check inside containers.
+    * ``AFL_NO_AFFINITY``    — do not pin to CPUs (containers may have none).
+    * ``AFL_AUTORESUME``     — resume interrupted campaigns automatically.
+    * ``AFL_FAST_CAL``       — faster initial seed calibration pass.
+
+    Optional target-specific knobs:
+
+    * ``AFL_ENTRYPOINT``           — skip process init, jump to main logic.
+    * ``AFL_QEMU_INST_RANGES``     — limit QEMU instrumentation to code ranges.
+    """
+    env: dict[str, str] = {
+        "AFL_SKIP_CPUFREQ": "1",
+        "AFL_NO_AFFINITY": "1",
+        "AFL_AUTORESUME": "1",
+        "AFL_FAST_CAL": "1",
+    }
+
+    # If target has a known entrypoint offset (e.g. from Ghidra analysis),
+    # AFL++ will skip process initialisation and start fuzzing from that
+    # address.  This avoids expensive libc/firmware init on every exec.
+    entrypoint = target.get("entrypoint_offset")
+    if entrypoint:
+        env["AFL_ENTRYPOINT"] = str(entrypoint)
+
+    # If target has known code ranges (from Ghidra), limit QEMU
+    # instrumentation to only those ranges.  Reduces overhead from
+    # instrumenting library code that is not interesting.
+    code_ranges = target.get("code_ranges")
+    if code_ranges:
+        env["AFL_QEMU_INST_RANGES"] = str(code_ranges)
+
+    return env
+
+
+# ---------------------------------------------------------------------------
+# Multi-instance campaign configuration
+# ---------------------------------------------------------------------------
+
+_MULTI_INSTANCE_MIN_BUDGET_S = 600  # require >= 10 minutes for multi-instance
+
+
+def _build_multi_instance_configs(
+    target: dict,
+    budget_s: int,
+    run_dir: Path,
+) -> list[dict]:
+    """Generate configs for master + worker AFL++ instances.
+
+    Multi-instance fuzzing uses AFL++'s ``-M`` / ``-S`` flags to run
+    cooperative instances sharing a single output directory.  Each instance
+    uses a different strategy for broader coverage:
+
+    * **main**    — master instance with ``AFL_FINAL_SYNC=1``.
+    * **qasan**   — worker with ``AFL_USE_QASAN=1`` (memory safety checks).
+    * **worker1** — standard worker for extra throughput.
+
+    Only enabled when *budget_s* >= 600 (10 minutes).  For shorter budgets
+    a single instance is more efficient.
+
+    Args:
+        target: Target descriptor dict.
+        budget_s: Available time budget in seconds.
+        run_dir: Root run directory (unused for now, reserved for future
+            per-instance output separation).
+
+    Returns:
+        List of config dicts, each with ``instance_name``, ``afl_flags``,
+        and ``extra_env``.  Empty list if budget is insufficient.
+    """
+    if budget_s < _MULTI_INSTANCE_MIN_BUDGET_S:
+        return []
+
+    return [
+        {
+            "instance_name": "main",
+            "afl_flags": ["-M", "main"],
+            "extra_env": {"AFL_FINAL_SYNC": "1"},
+        },
+        {
+            "instance_name": "qasan",
+            "afl_flags": ["-S", "qasan"],
+            "extra_env": {"AFL_USE_QASAN": "1"},
+        },
+        {
+            "instance_name": "worker1",
+            "afl_flags": ["-S", "worker1"],
+            "extra_env": {},
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +257,20 @@ def _run_campaign(
         json.dumps(harness_cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
+    # --- generate NVRAM faker stub (C source for cross-compilation) ------
+    # Many firmware binaries block on nvram_get() without real hardware.
+    # The stub is compiled inside the Docker container at campaign start.
+    fuzz_harness.generate_nvram_faker_stub(target_dir)
+
+    # --- generate persistent mode wrapper --------------------------------
+    # The wrapper sets up LD_PRELOAD (desock + nvram faker) and library
+    # paths, then execs the target.  Avoids fork overhead for heavy init.
+    fuzz_harness.generate_persistent_harness(
+        target_path=path,
+        input_mode=harness_cfg.get("mode", "stdin"),
+        harness_dir=target_dir,
+    )
+
     # --- actual time budget for this target ------------------------------
     actual_budget = min(budget_s, int(remaining_budget_fn()))
     if actual_budget < 30:
@@ -172,48 +281,50 @@ def _run_campaign(
             "limitations": ["budget_exhausted"],
         }
 
+    # --- resolve binary path inside the container mount ------------------
+    # `path` from the target descriptor is inventory-relative (e.g. "usr/bin/httpd").
+    # The Docker command only mounts run_dir, so we must supply an absolute path
+    # that exists under that mount.
+    resolved_path: str
+    raw_path = Path(path)
+    if raw_path.is_absolute() and raw_path.exists():
+        # Already an absolute path on the host — use it directly.
+        resolved_path = str(raw_path)
+    else:
+        # Try under the rootfs produced by the extraction stage.
+        rootfs_candidate = run_dir / "stages" / "extraction" / "rootfs" / path
+        if rootfs_candidate.exists():
+            resolved_path = str(rootfs_candidate)
+        else:
+            # Fall back to run_dir / path (e.g. if caller already prefixed stages/).
+            rundir_candidate = run_dir / path
+            resolved_path = str(rundir_candidate)
+    # Security invariant: resolved path must remain inside run_dir.
+    try:
+        assert_under_dir(run_dir, Path(resolved_path))
+    except AIEdgePolicyViolation:
+        return {
+            "target": path,
+            "skipped": True,
+            "skip_reason": "path_outside_run_dir",
+            "limitations": ["path_outside_run_dir"],
+        }
+
     # --- build docker command --------------------------------------------
     image = _afl_image()
     arch = target.get("arch", "unknown")
 
-    # Volume mount: expose the rootfs directory containing the binary
-    # We mount run_dir so seeds/output/dict are accessible.
-    cmd: list[str] = [
-        "docker", "run", "--rm",
-        "--network", "none",
-        "--privileged",                        # needed for AFL++ fork server
-        "--ulimit", "core=0",
-        "-v", f"{run_dir}:{run_dir}",
-        image,
-        "afl-fuzz",
-        "-Q",                                  # QEMU mode
-        "-i", str(seeds_dir),
-        "-o", str(output_dir),
-        "-x", str(dict_path),
-        "-t", "1000+",                         # timeout per run (+: adaptive)
-        "-m", "256",                           # memory limit MB
-        "-V", str(actual_budget),              # time limit seconds
-        "--",
-        path,
-    ]
-
-    # Append extra args (e.g. @@ for file mode)
-    cmd.extend(harness_cfg.get("extra_args", []))
-
     # Pass harness environment into the container
     env_vars = harness_cfg.get("env", {})
-    for k, v in env_vars.items():
-        cmd = ["docker", "run", "--rm",
-               "--network", "none", "--privileged",
-               "--ulimit", "core=0",
-               "-e", f"{k}={v}",
-               ] + cmd[7:]  # splice after initial docker run options
 
-    # Simpler rebuild to avoid the splice bug above
+    # Merge AFL++ performance optimisation env vars (entrypoint, inst ranges)
+    perf_env = _build_afl_perf_env(target)
+    env_vars = {**perf_env, **env_vars}  # harness env takes precedence
+
     docker_run_base: list[str] = [
         "docker", "run", "--rm",
         "--network", "none",
-        "--privileged",
+        "--privileged",                        # needed for AFL++ fork server
         "--ulimit", "core=0",
         "-v", f"{run_dir}:{run_dir}",
     ]
@@ -223,16 +334,23 @@ def _run_campaign(
 
     afl_args: list[str] = [
         "afl-fuzz",
-        "-Q",
+        "-Q",                                  # QEMU mode
         "-i", str(seeds_dir),
         "-o", str(output_dir),
         "-x", str(dict_path),
-        "-t", "1000+",
-        "-m", "256",
-        "-V", str(actual_budget),
-        "--",
-        path,
+        "-t", "1000+",                         # timeout per run (+: adaptive)
+        "-m", "256",                           # memory limit MB
+        "-V", str(actual_budget),              # time limit seconds
     ]
+
+    # CMPLOG mode: dramatically improves coverage of magic-byte comparisons
+    # and multi-byte string checks.  Uses the same binary as the CMPLOG
+    # target (``-c 0``).  Enabled by default; disable per-target with
+    # ``enable_cmplog: false`` in the target descriptor.
+    if target.get("enable_cmplog", True):
+        afl_args.extend(["-c", "0"])
+
+    afl_args.extend(["--", resolved_path])
     afl_args.extend(harness_cfg.get("extra_args", []))
 
     full_cmd = docker_run_base + afl_args
@@ -275,6 +393,9 @@ def _run_campaign(
             except Exception:
                 pass
 
+    # --- multi-instance config (informational, not yet launched) ----------
+    multi_configs = _build_multi_instance_configs(target, actual_budget, run_dir)
+
     return {
         "target": path,
         "basename": basename,
@@ -292,6 +413,15 @@ def _run_campaign(
         "crashes_dir": rel_to_run_dir(run_dir, crashes_dir) if crashes_dir.is_dir() else None,
         "limitations": limitations,
         "skipped": False,
+        # Performance optimisation metadata
+        "perf_features": {
+            "cmplog_enabled": target.get("enable_cmplog", True),
+            "entrypoint_set": bool(target.get("entrypoint_offset")),
+            "inst_ranges_set": bool(target.get("code_ranges")),
+            "afl_fast_cal": True,
+            "multi_instance_available": len(multi_configs) > 0,
+            "multi_instance_configs": multi_configs if multi_configs else None,
+        },
     }
 
 

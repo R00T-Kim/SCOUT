@@ -9,18 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO, cast
 
+from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -136,7 +128,7 @@ def discover_ota_candidates(
         nested_root = Path(nested_tmp_ctx.name)
     else:
         nested_root = scratch_dir
-        _assert_under_dir(scratch_dir, nested_root)
+        assert_under_dir(scratch_dir, nested_root)
         nested_root.mkdir(parents=True, exist_ok=True)
 
     nested_seq = 0
@@ -197,7 +189,7 @@ def discover_ota_candidates(
                         nested_file = (
                             nested_root / f"nested-{depth + 1}-{nested_seq}.zip"
                         )
-                        _assert_under_dir(nested_root, nested_file)
+                        assert_under_dir(nested_root, nested_file)
                         try:
                             if int(info.file_size) > int(cfg.max_streamed_member_bytes):
                                 raise AIEdgePolicyViolation(
@@ -277,13 +269,13 @@ class OtaStage:
         input_dir = stage_dir / "input"
         nested_dir = input_dir / "_nested"
 
-        _assert_under_dir(ctx.run_dir, stage_dir)
+        assert_under_dir(ctx.run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(ctx.run_dir, input_dir)
+        assert_under_dir(ctx.run_dir, input_dir)
         input_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(ctx.run_dir, nested_dir)
+        assert_under_dir(ctx.run_dir, nested_dir)
         nested_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, ota_json_path)
+        assert_under_dir(stage_dir, ota_json_path)
 
         source_name = self.source_input_path or self.input_path.name
         suffix = Path(source_name).suffix.lower()

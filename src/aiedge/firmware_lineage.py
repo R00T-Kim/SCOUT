@@ -6,18 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -64,10 +55,10 @@ class FirmwareLineageStage:
         firmware_path = run_dir / "input" / "firmware.bin"
         neighbor_path = run_dir / "input" / "neighbor_firmware.bin"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, lineage_path)
-        _assert_under_dir(stage_dir, lineage_diff_path)
+        assert_under_dir(stage_dir, lineage_path)
+        assert_under_dir(stage_dir, lineage_diff_path)
 
         limitations: list[str] = []
 

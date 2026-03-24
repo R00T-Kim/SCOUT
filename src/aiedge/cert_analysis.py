@@ -20,7 +20,7 @@ import struct
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -98,19 +98,6 @@ _EC_CURVE_BITS: dict[str, int] = {
 _MAX_FILES_SCANNED = 500
 _MAX_CERTS_ANALYZED = 200
 _MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024  # 4 MB guard
-
-
-# ---------------------------------------------------------------------------
-# Path safety helpers (local copy per SCOUT convention)
-# ---------------------------------------------------------------------------
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -918,7 +905,7 @@ def analyze_certificates(
     """
     # Safety: stage_dir must be inside run_dir
     out_path = stage_dir / "cert_analysis.json"
-    _assert_under_dir(run_dir, out_path)
+    assert_under_dir(run_dir, out_path)
 
     now_utc = datetime.now(timezone.utc)
 
@@ -1049,7 +1036,7 @@ def analyze_certificates(
 
     # Write output artifact
     stage_dir.mkdir(parents=True, exist_ok=True)
-    _assert_under_dir(run_dir, out_path)
+    assert_under_dir(run_dir, out_path)
     out_path.write_text(
         json.dumps(result, sort_keys=True, indent=2, ensure_ascii=False),
         encoding="utf-8",

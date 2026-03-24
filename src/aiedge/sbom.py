@@ -47,6 +47,33 @@ _CPE_VENDOR: dict[str, tuple[str, str]] = {
     "lighttpd": ("lighttpd", "lighttpd"),
     "glibc":    ("gnu", "glibc"),
     "musl":     ("musl_libc", "musl"),
+    "uclibc-ng":     ("uclibc-ng_project", "uclibc-ng"),
+    "uclibc":        ("uclibc_project", "uclibc"),
+    "wolfssl":       ("wolfssl", "wolfssl"),
+    "mbedtls":       ("arm", "mbedtls"),
+    "sqlite":        ("sqlite", "sqlite"),
+    "sqlite3":       ("sqlite", "sqlite3"),
+    "lua":           ("lua", "lua"),
+    "libexpat":      ("libexpat_project", "libexpat"),
+    "libxml2":       ("xmlsoft", "libxml2"),
+    "miniupnpd":     ("miniupnp_project", "miniupnpd"),
+    "hostapd":       ("w1.fi", "hostapd"),
+    "wpa_supplicant":("w1.fi", "wpa_supplicant"),
+    "avahi":         ("avahi", "avahi"),
+    "boa":           ("boa", "boa"),
+    "goahead":       ("embedthis", "goahead"),
+    "thttpd":        ("acme", "thttpd"),
+    "mini_httpd":    ("acme", "mini_httpd"),
+    "uhttpd":        ("openwrt", "uhttpd"),
+    "u-boot":        ("denx", "u-boot"),
+    "zlib":          ("zlib", "zlib"),
+    "xz":            ("tukaani", "xz"),
+    "pppd":          ("samba", "pppd"),
+    "xl2tpd":        ("xelerance", "xl2tpd"),
+    "iptables":      ("netfilter", "iptables"),
+    "iproute2":      ("iproute2_project", "iproute2"),
+    "libpcap":       ("tcpdump", "libpcap"),
+    "libz":          ("zlib", "libz"),
 }
 
 # Binary version patterns: (canonical_name, regex, confidence)
@@ -59,6 +86,35 @@ _BINARY_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     ("openssl",  re.compile(r"OpenSSL\s+(\d+\.\d+\.\d+[a-z]?)"),         0.85),
     ("curl",     re.compile(r"curl/(\d+\.\d+\.\d+\S*)"),                 0.85),
     ("openssh",  re.compile(r"OpenSSH_(\d+\.\d+[p\d]*)"),                0.85),
+    # Crypto/TLS
+    ("wolfssl",  re.compile(r"wolfSSL\s+(\d+\.\d+\.\d+)"),                0.85),
+    ("mbedtls",  re.compile(r"mbed TLS\s+(\d+\.\d+\.\d+)"),              0.85),
+    ("mbedtls",  re.compile(r"mbedtls[/-](\d+\.\d+\.\d+)"),              0.85),
+    # Web servers
+    ("uhttpd",   re.compile(r"uhttpd\s+v?(\d+\.\d+)"),                   0.85),
+    ("goahead",  re.compile(r"GoAhead[/-](\d+\.\d+\.\d+)"),              0.85),
+    ("boa",      re.compile(r"Boa/(\d+\.\d+\.\d+)"),                     0.85),
+    ("thttpd",   re.compile(r"thttpd/(\d+\.\d+)"),                       0.85),
+    ("mini_httpd", re.compile(r"mini_httpd/(\d+\.\d+)"),                  0.85),
+    # Network services
+    ("miniupnpd",     re.compile(r"miniupnpd\s+v?(\d+\.\d+)"),           0.85),
+    ("hostapd",       re.compile(r"hostapd\s+v?(\d+\.\d+)"),             0.85),
+    ("wpa_supplicant", re.compile(r"wpa_supplicant\s+v?(\d+\.\d+)"),     0.85),
+    ("avahi",         re.compile(r"avahi-daemon\s+(\d+\.\d+\.\d+)"),     0.85),
+    ("pppd",          re.compile(r"pppd\s+version\s+(\d+\.\d+\.\d+)"),   0.85),
+    # Database/Scripting
+    ("sqlite3",  re.compile(r"SQLite\s+(?:version\s+)?(\d+\.\d+\.\d+)"), 0.85),
+    ("lua",      re.compile(r"Lua\s+(\d+\.\d+\.\d+)"),                   0.85),
+    # System
+    ("u-boot",   re.compile(r"U-Boot\s+(\d{4}\.\d{2})"),                 0.85),
+    ("zlib",     re.compile(r"zlib\s+(\d+\.\d+\.\d+)"),                  0.85),
+    ("uclibc-ng", re.compile(r"uClibc(?:-ng)?\s+(\d+\.\d+\.\d+)"),      0.85),
+    ("xz",       re.compile(r"XZ Utils\s+(\d+\.\d+\.\d+)"),             0.85),
+    # Parsers
+    ("libexpat", re.compile(r"expat_(\d+\.\d+\.\d+)"),                   0.85),
+    ("libxml2",  re.compile(r"libxml2[/-](\d+\.\d+\.\d+)"),              0.85),
+    # Packet capture
+    ("libpcap",  re.compile(r"libpcap\s+version\s+(\d+\.\d+\.\d+)"),    0.85),
 ]
 
 # SO library version patterns: filename → (canonical_name, version_regex)
@@ -68,6 +124,16 @@ _SO_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = [
     ("glibc",    "libc",      re.compile(r"libc\.so\.(\d+\.\d[\.\d]*)")),
     ("libpthread","libpthread",re.compile(r"libpthread\.so\.(\d+[\.\d]*)")),
     ("libz",     "libz",      re.compile(r"libz\.so\.(\d+[\.\d]*)")),
+    ("uclibc-ng", "libuClibc", re.compile(r"libuClibc[.-](\d+\.\d+\.\d+)")),
+    ("wolfssl",  "libwolfssl", re.compile(r"libwolfssl\.so\.(\d+\.\d+\.\d+)")),
+    ("mbedtls",  "libmbedtls", re.compile(r"libmbedtls\.so\.(\d+)")),
+    ("mbedtls",  "libmbedcrypto", re.compile(r"libmbedcrypto\.so\.(\d+)")),
+    ("sqlite3",  "libsqlite3", re.compile(r"libsqlite3\.so\.(\d+\.\d+\.\d+)")),
+    ("lua",      "liblua",    re.compile(r"liblua\.so\.(\d+\.\d+)")),
+    ("libexpat", "libexpat",  re.compile(r"libexpat\.so\.(\d+\.\d+\.\d+)")),
+    ("libxml2",  "libxml2",   re.compile(r"libxml2\.so\.(\d+\.\d+\.\d+)")),
+    ("libpcap",  "libpcap",   re.compile(r"libpcap\.so\.(\d+\.\d+\.\d+)")),
+    ("avahi",    "libavahi",  re.compile(r"libavahi[.-](\d+\.\d+\.\d+)")),
 ]
 
 
@@ -459,6 +525,225 @@ def _collect_so_files_from_inventory(inventory: dict[str, object]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# VEX (Vulnerability Exploitability eXchange) generation
+# ---------------------------------------------------------------------------
+
+# Maps reachability classification → (vex_state, justification_or_None)
+_REACHABILITY_TO_VEX: dict[str, tuple[str, str | None]] = {
+    "directly_reachable":   ("exploitable",          None),
+    "potentially_reachable": ("affected",             None),
+    "unreachable":           ("not_affected",         "code_not_reachable"),
+}
+# Default when reachability data is absent or classification is unknown
+_VEX_DEFAULT_STATE = "under_investigation"
+
+
+def _build_vex_vulnerabilities(
+    run_dir: Path,
+    components: list[dict[str, JsonValue]],
+) -> list[dict[str, JsonValue]]:
+    """Build CycloneDX VEX vulnerability entries from CVE scan + reachability data.
+
+    Loads:
+        stages/cve_scan/cve_matches.json   — CVE matches per component
+        stages/reachability/reachability.json — reachability per component
+
+    Both inputs are optional; missing files are silently skipped.
+    Returns an empty list when no CVE data is available.
+    """
+    # ------------------------------------------------------------------
+    # Load CVE matches
+    # ------------------------------------------------------------------
+    cve_matches_path = run_dir / "stages" / "cve_scan" / "cve_matches.json"
+    cve_data = _safe_json_load(cve_matches_path)
+    if cve_data is None:
+        return []
+
+    matches_any = cve_data.get("matches")
+    if not isinstance(matches_any, list) or not matches_any:
+        return []
+
+    # ------------------------------------------------------------------
+    # Load reachability (optional)
+    # ------------------------------------------------------------------
+    reach_path = run_dir / "stages" / "reachability" / "reachability.json"
+    reach_data = _safe_json_load(reach_path)
+
+    # Build lookup: (component_lower, version) → reachability_string
+    # and a secondary: component_lower → reachability_string (version-agnostic fallback)
+    reach_by_comp_ver: dict[tuple[str, str], str] = {}
+    reach_by_comp: dict[str, str] = {}
+
+    if reach_data is not None:
+        results_any = reach_data.get("results")
+        if isinstance(results_any, list):
+            for entry in results_any:
+                if not isinstance(entry, dict):
+                    continue
+                comp_any = entry.get("component")
+                ver_any = entry.get("version")
+                r_any = entry.get("reachability")
+                if isinstance(comp_any, str) and isinstance(r_any, str):
+                    comp_key = comp_any.lower()
+                    ver_key = str(ver_any) if ver_any is not None else ""
+                    reach_by_comp_ver[(comp_key, ver_key)] = r_any
+                    # Keep the most-specific reachability per component name
+                    # (prefer directly_reachable > potentially_reachable > others)
+                    existing = reach_by_comp.get(comp_key)
+                    if existing is None or r_any == "directly_reachable":
+                        reach_by_comp[comp_key] = r_any
+
+    # ------------------------------------------------------------------
+    # Build bom-ref lookup from components list
+    # ------------------------------------------------------------------
+    # Map (name_lower, version) → bom-ref
+    comp_ref_map: dict[tuple[str, str], str] = {}
+    for cdx_comp in components:
+        if not isinstance(cdx_comp, dict):
+            continue
+        ref_any = cdx_comp.get("bom-ref")
+        name_any = cdx_comp.get("name")
+        ver_any = cdx_comp.get("version")
+        if isinstance(ref_any, str) and isinstance(name_any, str):
+            comp_ref_map[(name_any.lower(), str(ver_any) if ver_any else "")] = ref_any
+
+    # ------------------------------------------------------------------
+    # Aggregate CVE matches: cve_id → {metadata, set of affected components}
+    # ------------------------------------------------------------------
+    cve_agg: dict[str, dict[str, object]] = {}
+
+    for match in matches_any:
+        if not isinstance(match, dict):
+            continue
+        cve_id_any = match.get("cve_id")
+        if not isinstance(cve_id_any, str) or not cve_id_any:
+            continue
+        cve_id: str = cve_id_any
+
+        comp_any = match.get("component")
+        ver_any = match.get("version")
+        score_any = match.get("cvss_v3_score")
+        sev_any = match.get("cvss_v3_severity")
+        desc_any = match.get("description")
+
+        comp_name = str(comp_any) if comp_any else ""
+        comp_ver = str(ver_any) if ver_any else ""
+
+        if cve_id not in cve_agg:
+            cve_agg[cve_id] = {
+                "cvss_score": float(score_any) if isinstance(score_any, (int, float)) else 0.0,
+                "cvss_severity": str(sev_any).lower() if isinstance(sev_any, str) else "unknown",
+                "description": str(desc_any)[:300] if isinstance(desc_any, str) else "",
+                "affected_components": [],  # list of (comp_name, comp_ver)
+            }
+
+        affected: list[tuple[str, str]] = cve_agg[cve_id]["affected_components"]  # type: ignore[assignment]
+        if (comp_name, comp_ver) not in affected:
+            affected.append((comp_name, comp_ver))
+
+    # ------------------------------------------------------------------
+    # Build VEX entries
+    # ------------------------------------------------------------------
+    vex_entries: list[dict[str, JsonValue]] = []
+
+    for cve_id, meta in sorted(cve_agg.items()):
+        affected_components: list[tuple[str, str]] = meta["affected_components"]  # type: ignore[assignment]
+
+        # Determine the most-severe reachability across affected components.
+        # Priority: exploitable (0) > affected (1) > not_affected (2).
+        # under_investigation is the fallback when no reachability data exists.
+        _state_priority = {
+            "exploitable": 0,
+            "affected": 1,
+            "not_affected": 2,
+        }
+        best_state: str | None = None  # None means "no reachability data seen yet"
+        best_justification: str | None = None
+        best_detail = ""
+
+        for comp_name, comp_ver in affected_components:
+            comp_key = comp_name.lower()
+            reach_class = reach_by_comp_ver.get(
+                (comp_key, comp_ver),
+                reach_by_comp.get(comp_key, ""),
+            )
+            if not reach_class:
+                continue  # no reachability data for this component
+
+            state, justification = _REACHABILITY_TO_VEX.get(
+                reach_class, (_VEX_DEFAULT_STATE, None)
+            )
+
+            # Replace best if this is the first entry with data, or if more alarming
+            if best_state is None or _state_priority.get(state, 99) < _state_priority.get(best_state, 99):
+                best_state = state
+                best_justification = justification
+                if reach_class == "directly_reachable":
+                    best_detail = f"{comp_name} {comp_ver} is directly reachable from the attack surface".strip()
+                elif reach_class == "potentially_reachable":
+                    best_detail = f"{comp_name} {comp_ver} is potentially reachable (3+ hops from attack surface)".strip()
+                elif reach_class == "unreachable":
+                    best_detail = f"{comp_name} {comp_ver} was not found reachable in the communication graph".strip()
+
+        # Fall back to under_investigation when no reachability data was found
+        if best_state is None:
+            best_state = _VEX_DEFAULT_STATE
+            best_justification = None
+
+        if not best_detail:
+            best_detail = "Reachability analysis not available; manual review required"
+
+        # Build analysis sub-object
+        analysis: dict[str, JsonValue] = {
+            "detail": best_detail,
+            "state": best_state,
+        }
+        if best_justification is not None:
+            analysis["justification"] = best_justification
+
+        # Build affects list — link to SBOM bom-refs
+        affects: list[dict[str, JsonValue]] = []
+        for comp_name, comp_ver in affected_components:
+            bom_ref = comp_ref_map.get((comp_name.lower(), comp_ver))
+            if bom_ref is None:
+                # Fallback: reconstruct the bom-ref using the same formula
+                bom_ref = _bom_ref(comp_name, comp_ver)
+            affects.append({"ref": bom_ref})
+
+        # CVSS method string
+        cvss_score: float = meta["cvss_score"]  # type: ignore[assignment]
+        cvss_severity: str = meta["cvss_severity"]  # type: ignore[assignment]
+        # NVD returns v3.1 scores primarily
+        cvss_method = "CVSSv31"
+
+        entry: dict[str, JsonValue] = {
+            "id": cve_id,
+            "source": {
+                "name": "NVD",
+                "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+            },
+            "ratings": [
+                {
+                    "source": {"name": "NVD"},
+                    "score": cvss_score,
+                    "severity": cvss_severity,
+                    "method": cvss_method,
+                }
+            ],
+            "analysis": cast(JsonValue, analysis),
+            "affects": cast(JsonValue, affects),
+        }
+
+        desc_str: str = meta["description"]  # type: ignore[assignment]
+        if desc_str:
+            entry["description"] = desc_str
+
+        vex_entries.append(entry)
+
+    return vex_entries
+
+
+# ---------------------------------------------------------------------------
 # Stage
 # ---------------------------------------------------------------------------
 
@@ -575,10 +860,11 @@ class SbomStage:
         # Emit CycloneDX 1.6 BOM
         # ------------------------------------------------------------------ #
         timestamp = _iso_utc_now()
+        cyclonedx_components = [c.to_cyclonedx() for c in all_components]
         bom: dict[str, JsonValue] = {
             "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
             "bomFormat": "CycloneDX",
-            "components": [c.to_cyclonedx() for c in all_components],
+            "components": cyclonedx_components,
             "metadata": {
                 "component": {
                     "bom-ref": "firmware-root",
@@ -593,6 +879,11 @@ class SbomStage:
             "specVersion": "1.6",
             "version": 1,
         }
+
+        # VEX: embed vulnerability entries when CVE scan data is available
+        vex_vulns = _build_vex_vulnerabilities(run_dir, cyclonedx_components)
+        if vex_vulns:
+            bom["vulnerabilities"] = cast(JsonValue, vex_vulns)
 
         # ------------------------------------------------------------------ #
         # Emit CPE index

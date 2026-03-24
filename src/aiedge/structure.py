@@ -9,18 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -319,12 +310,12 @@ class StructureStage:
         log_path = stage_dir / "structure.log"
         out_json = stage_dir / "structure.json"
 
-        _assert_under_dir(ctx.run_dir, stage_dir)
+        assert_under_dir(ctx.run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, dtb_dir)
+        assert_under_dir(stage_dir, dtb_dir)
         dtb_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, log_path)
-        _assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, log_path)
+        assert_under_dir(stage_dir, out_json)
 
         evidence: list[str] = [
             _rel_to_run_dir(ctx.run_dir, stage_dir),
@@ -463,7 +454,7 @@ class StructureStage:
 
                 name = f"dtb_{i:03d}_off-0x{off:x}_size-{extract_size}.dtb"
                 dtb_path = dtb_dir / name
-                _assert_under_dir(dtb_dir, dtb_path)
+                assert_under_dir(dtb_dir, dtb_path)
 
                 h = hashlib.sha256()
                 try:
@@ -472,7 +463,7 @@ class StructureStage:
                     continue
 
                 tmp_path = dtb_path.with_suffix(dtb_path.suffix + ".tmp")
-                _assert_under_dir(dtb_dir, tmp_path)
+                assert_under_dir(dtb_dir, tmp_path)
 
                 wrote = 0
                 try:
@@ -527,7 +518,7 @@ class StructureStage:
                 dts_path: Path | None = None
                 if dtc_path:
                     dts_path = dtb_path.with_suffix(".dts")
-                    _assert_under_dir(dtb_dir, dts_path)
+                    assert_under_dir(dtb_dir, dts_path)
                     argv = [
                         dtc_path,
                         "-I",

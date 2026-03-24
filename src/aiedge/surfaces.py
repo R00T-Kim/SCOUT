@@ -7,18 +7,9 @@ from pathlib import Path
 from typing import cast
 
 from .confidence_caps import calibrated_confidence, evidence_level
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = _safe_resolve(base_dir) or base_dir.absolute()
-    resolved = _safe_resolve(target) or target.absolute()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _safe_resolve(path: Path) -> Path | None:
@@ -406,9 +397,9 @@ class SurfacesStage:
         stage_dir = run_dir / "stages" / "surfaces"
         out_json = stage_dir / "surfaces.json"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, out_json)
 
         inventory_path = run_dir / "stages" / "inventory" / "inventory.json"
         endpoints_path = run_dir / "stages" / "endpoints" / "endpoints.json"
@@ -598,7 +589,7 @@ class SurfacesStage:
 
         # --- Source→Sink path tracing ---
         source_sink_json = stage_dir / "source_sink_graph.json"
-        _assert_under_dir(run_dir, source_sink_json)
+        assert_under_dir(run_dir, source_sink_json)
         ss_paths, ss_limitations = _build_source_sink_graph(
             run_dir=run_dir,
             endpoints_obj=endpoints_obj,

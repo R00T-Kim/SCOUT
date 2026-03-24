@@ -11,18 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -242,7 +233,7 @@ def _extract_newc_cpio(
     timeout_s: float,
 ) -> _CpioOutcome:
     out_dir.mkdir(parents=True, exist_ok=True)
-    _assert_under_dir(run_dir, out_dir)
+    assert_under_dir(run_dir, out_dir)
 
     extracted_files = 0
     extracted_dirs = 0
@@ -316,7 +307,7 @@ def _extract_newc_cpio(
         kind = mode & _S_IFMT
         rel_path = PurePosixPath(name_n)
         dest = out_dir.joinpath(*rel_path.parts)
-        _assert_under_dir(out_dir, dest)
+        assert_under_dir(out_dir, dest)
 
         if kind == _S_IFDIR:
             dest.mkdir(parents=True, exist_ok=True)
@@ -338,7 +329,7 @@ def _extract_newc_cpio(
                 pos = _align(data_end, 4)
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            _assert_under_dir(out_dir, dest.parent)
+            assert_under_dir(out_dir, dest.parent)
             _ = dest.write_bytes(payload[data_start:data_end])
             extracted_files += 1
             total_written += filesize
@@ -355,7 +346,7 @@ def _extract_newc_cpio(
                 pos = _align(data_end, 4)
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            _assert_under_dir(out_dir, dest.parent)
+            assert_under_dir(out_dir, dest.parent)
             try:
                 if dest.exists() or dest.is_symlink():
                     dest.unlink()
@@ -580,7 +571,7 @@ class OtaBootTriageStage:
             boot_ramdisk,
             recovery_ramdisk,
         ]:
-            _assert_under_dir(ctx.run_dir, p)
+            assert_under_dir(ctx.run_dir, p)
 
         stage_dir.mkdir(parents=True, exist_ok=True)
         boot_ramdisk.mkdir(parents=True, exist_ok=True)

@@ -5,18 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -103,9 +95,9 @@ class FunctionalSpecStage:
         stage_dir = run_dir / "stages" / "functional_spec"
         out_json = stage_dir / "functional_spec.json"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, out_json)
 
         surfaces_path = run_dir / "stages" / "surfaces" / "surfaces.json"
         inventory_path = run_dir / "stages" / "inventory" / "inventory.json"

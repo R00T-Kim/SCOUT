@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from .confidence_caps import calibrated_confidence, evidence_level
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
@@ -19,15 +19,6 @@ ATTACK_SURFACE_BENCHMARK_FIXTURE_RELATIVE_PATH = (
 ATTACK_SURFACE_METRICS_RELATIVE_PATH = (
     "stages/attack_surface/attack_surface_metrics.json"
 )
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = _safe_resolve(base_dir) or base_dir.absolute()
-    resolved = _safe_resolve(target) or target.absolute()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _safe_resolve(path: Path) -> Path | None:
@@ -269,7 +260,7 @@ def _write_attack_surface_metrics_artifact(
         return None
 
     metrics_path = stage_dir / "attack_surface_metrics.json"
-    _assert_under_dir(run_dir, metrics_path)
+    assert_under_dir(run_dir, metrics_path)
     _ = metrics_path.write_text(
         json.dumps(metrics_payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
@@ -765,9 +756,9 @@ class AttackSurfaceStage:
         stage_dir = run_dir / "stages" / "attack_surface"
         out_json = stage_dir / "attack_surface.json"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, out_json)
 
         surfaces_path = run_dir / "stages" / "surfaces" / "surfaces.json"
         endpoints_path = run_dir / "stages" / "endpoints" / "endpoints.json"

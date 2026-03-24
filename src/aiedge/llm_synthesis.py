@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir, env_int
 from .exploit_tiering import default_exploitability_tier
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -31,15 +31,6 @@ _LLM_CHAIN_RETRYABLE_STDERR_TOKENS: tuple[str, ...] = (
     "502",
     "429",
 )
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -118,19 +109,6 @@ def _env_float(name: str, *, default: float, min_value: float, max_value: float)
     return value
 
 
-def _env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except Exception:
-        return default
-    if value < min_value:
-        return min_value
-    if value > max_value:
-        return max_value
-    return value
 
 
 def _truncate_text(text: str, *, max_chars: int = 12000) -> str:
@@ -203,7 +181,7 @@ def _run_codex_chain_builder_exec(
         min_value=10.0,
         max_value=300.0,
     )
-    max_attempts = _env_int(
+    max_attempts = env_int(
         "AIEDGE_LLM_CHAIN_MAX_ATTEMPTS",
         default=max(1, int(_LLM_CHAIN_RETRY_MAX_ATTEMPTS)),
         min_value=1,
@@ -486,9 +464,9 @@ class LLMSynthesisStage:
         stage_dir = run_dir / "stages" / "llm_synthesis"
         out_json = stage_dir / "llm_synthesis.json"
 
-        _assert_under_dir(run_dir, stage_dir)
+        assert_under_dir(run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        _assert_under_dir(stage_dir, out_json)
+        assert_under_dir(stage_dir, out_json)
 
         if self.no_llm:
             skipped_payload: dict[str, JsonValue] = {

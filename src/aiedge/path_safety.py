@@ -13,6 +13,7 @@ Usage::
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from .policy import AIEdgePolicyViolation
@@ -95,3 +96,23 @@ def sha256_text(text: str) -> str:
         Lowercase hexadecimal SHA-256 digest string.
     """
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def env_int(name: str, *, default: int, min_value: int, max_value: int) -> int:
+    """Read an integer from environment variable *name* with clamping.
+
+    Returns *default* if the variable is unset or not a valid integer.
+    The result is clamped to [*min_value*, *max_value*].
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    if value < int(min_value):
+        return int(min_value)
+    if value > int(max_value):
+        return int(max_value)
+    return int(value)

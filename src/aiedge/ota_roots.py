@@ -7,18 +7,10 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import cast
 
-from .policy import AIEdgePolicyViolation
+from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -270,7 +262,7 @@ class OtaRootsStage:
             vendor_root,
             product_root,
         ]:
-            _assert_under_dir(ctx.run_dir, p)
+            assert_under_dir(ctx.run_dir, p)
 
         roots_dir.mkdir(parents=True, exist_ok=True)
         system_root.mkdir(parents=True, exist_ok=True)
@@ -430,7 +422,7 @@ class OtaRootsStage:
 
             for node, rel in unique_candidates:
                 dest_path = root_dir / rel
-                _assert_under_dir(root_dir, dest_path)
+                assert_under_dir(root_dir, dest_path)
 
                 rel_key = _rel_to_run_dir(ctx.run_dir, dest_path)
                 if rel_key in seen_dest_rel:
@@ -463,7 +455,7 @@ class OtaRootsStage:
                     continue
 
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
-                _assert_under_dir(root_dir, dest_path.parent)
+                assert_under_dir(root_dir, dest_path.parent)
 
                 req = f"dump -p {_debugfs_quote(node.path)} {_debugfs_quote(str(dest_path))}"
                 try:

@@ -8,18 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from .emulation_gdb import probe_with_gdb
+from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -264,11 +257,11 @@ class EmulationStage:
 
     def run(self, ctx: StageContext) -> StageOutcome:
         stage_dir = ctx.run_dir / "stages" / "emulation"
-        _assert_under_dir(ctx.run_dir, stage_dir)
+        assert_under_dir(ctx.run_dir, stage_dir)
         stage_dir.mkdir(parents=True, exist_ok=True)
 
         log_path = stage_dir / "emulation.log"
-        _assert_under_dir(stage_dir, log_path)
+        assert_under_dir(stage_dir, log_path)
 
         roots = _read_inventory_roots(ctx.run_dir)
         if not roots:
@@ -371,18 +364,23 @@ class EmulationStage:
             _ = log_path.write_text(
                 "\n".join(log_sections), encoding="utf-8"
             )
+            gdb_port = int(os.environ.get("AIEDGE_QEMU_GDB_PORT", "1234"))
+            try:
+                gdb_info = probe_with_gdb("127.0.0.1", gdb_port, timeout_s=10.0)
+            except Exception:
+                gdb_info = None
+            t2_details: dict[str, JsonValue] = {
+                "reason": "",
+                "used_tier": used_tier,
+                "qemu_probes": cast(JsonValue, t2_probes),
+                "log": _rel_to_run_dir(ctx.run_dir, log_path),
+                "evidence": evidence,
+            }
+            if gdb_info is not None:
+                t2_details["gdb_probe"] = cast(JsonValue, gdb_info)
             return StageOutcome(
                 status="ok",
-                details=cast(
-                    dict[str, JsonValue],
-                    {
-                        "reason": "",
-                        "used_tier": used_tier,
-                        "qemu_probes": cast(JsonValue, t2_probes),
-                        "log": _rel_to_run_dir(ctx.run_dir, log_path),
-                        "evidence": evidence,
-                    },
-                ),
+                details=cast(dict[str, JsonValue], t2_details),
                 limitations=[],
             )
 

@@ -13,18 +13,10 @@ from pathlib import Path, PurePosixPath
 from typing import IO, cast
 
 from .ota import OtaDiscoveryLimits
+from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
-
-
-def _assert_under_dir(base_dir: Path, target: Path) -> None:
-    base = base_dir.resolve()
-    resolved = target.resolve()
-    if not resolved.is_relative_to(base):
-        raise AIEdgePolicyViolation(
-            f"Refusing to write outside run dir: target={resolved} base={base}"
-        )
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -152,13 +144,13 @@ def extract_payload_and_properties(
     input_dir: Path,
     limits: OtaDiscoveryLimits,
 ) -> tuple[Path, Path, str | None]:
-    _assert_under_dir(input_dir, input_dir / "update.zip")
-    _assert_under_dir(input_dir, input_dir / "payload.bin")
+    assert_under_dir(input_dir, input_dir / "update.zip")
+    assert_under_dir(input_dir, input_dir / "payload.bin")
 
     update_zip_path = input_dir / "update.zip"
     payload_path = input_dir / "payload.bin"
     nested_dir = input_dir / "_nested"
-    _assert_under_dir(input_dir, nested_dir)
+    assert_under_dir(input_dir, nested_dir)
     nested_dir.mkdir(parents=True, exist_ok=True)
 
     current_archive_path = firmware_zip_path
@@ -195,7 +187,7 @@ def extract_payload_and_properties(
                     f"streamed member too large at {archive_label}: {member_n}: file_size={int(info.file_size)} max_streamed_member_bytes={int(limits.max_streamed_member_bytes)}"
                 )
             nested_path = nested_dir / f"chain-{depth + 1}.zip"
-            _assert_under_dir(input_dir, nested_path)
+            assert_under_dir(input_dir, nested_path)
             with zf.open(info, "r") as src, nested_path.open("wb") as dst:
                 _ = _copy_stream_limited(
                     src,
@@ -375,7 +367,7 @@ class OtaPayloadStage:
             partitions_dir,
             tools_dir,
         ]:
-            _assert_under_dir(ctx.run_dir, p)
+            assert_under_dir(ctx.run_dir, p)
 
         stage_dir.mkdir(parents=True, exist_ok=True)
         input_dir.mkdir(parents=True, exist_ok=True)
@@ -573,7 +565,7 @@ class OtaPayloadStage:
         tool_modcache = tool_go / "pkg" / "mod"
 
         for p in [tool_home, tool_go, tool_bin_dir, tool_cache, tool_modcache]:
-            _assert_under_dir(tools_dir, p)
+            assert_under_dir(tools_dir, p)
             p.mkdir(parents=True, exist_ok=True)
 
         env = os.environ.copy()
