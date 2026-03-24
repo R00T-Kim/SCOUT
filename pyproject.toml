@@ -3,12 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aiedge"
-version = "0.0.0"
-description = "Internal AI Edge firmware agent (v1 scaffold)"
+name = "scout-firmware"
+version = "1.0.0"
+description = "Deterministic firmware-to-exploit evidence engine with hash-anchored artifact chains"
 dependencies = []
 
 [project.scripts]
+scout = "aiedge.__main__:main"
 aiedge = "aiedge.__main__:main"
 
 [tool.setuptools]

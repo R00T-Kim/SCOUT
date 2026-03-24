@@ -56,15 +56,16 @@
 - 샌드박스/호스트 정책에 따라 `serve --once`가 포트 바인딩 권한 문제로 실패할 수 있음 (`Operation not permitted`).
 - 다층 벤더 포맷은 재귀 SquashFS로 많이 개선되었으나, 암호화된 포맷이나 특수 커스텀 헤더는 여전히 수동 추출 필요.
   - 현재는 `--rootfs` 우회가 보완 경로이며, 포맷 전용 extractor 체인 확장은 계속 필요.
-- 바이너리 보안 속성(NX/PIE/RELRO/Canary)이 순수 Python으로 수집되며 findings 점수에 반영. 디컴파일/CFG 기반 정밀 분석 통합은 미완.
-- Ghidra/AFL++ 연동은 `stage_registry.py`에 등록되어 `--stages ghidra_analysis,fuzzing`으로 수동 실행 가능하나, `run.py` 자동 실행 순서에는 미포함. 향후 `run.py` 업데이트 필요.
+- 바이너리 보안 속성(NX/PIE/RELRO/Canary)이 순수 Python `.dynstr` 파싱으로 수집되며 findings 점수에 반영. FORTIFY_SOURCE 탐지 포함. 디컴파일/CFG 기반 정밀 분석은 Ghidra 연동으로 보완.
+- **Ghidra 분석**: `run.py` 자동 실행에 optional로 포함 (Ghidra 미설치 시 graceful skip). `--stages ghidra_analysis`로도 수동 실행 가능.
+- **AFL++ 퍼징**: 기본 파이프라인에 포함되지 않음 (선택 기능). `--stages fuzzing`으로 수동 실행. Docker + AFL++ 이미지 필요.
 - Reachability에서 CVE 컴포넌트명과 graph 노드 ID 형식 불일치(`curl` vs `component:curl`)로 일부 `no_graph_data` 발생. 매칭 로직 개선 필요.
 
 ## 다음 우선순위
 
-1) `run.py`에 신규 스테이지(sbom, cve_scan, reachability, ghidra_analysis, fuzzing) 자동 실행 순서 통합
-2) Reachability 컴포넌트-노드 ID 매칭 로직 개선 (CPE 이름 → graph 노드 ID 정규화)
-3) 벤더 포맷 전용 extraction chain 확장 (QNAP/Synology/ASUS 계열 깊은 중첩 포맷)
-4) FirmAE 호환 펌웨어 커버리지 확대 (Tier 1 에뮬레이션 성공률 향상)
-5) Ghidra dataflow 결과를 source-sink 그래프와 findings confidence에 통합
-6) 퍼징 크래시를 exploit_autopoc PoC seed로 자동 연계
+1) Reachability 컴포넌트-노드 ID 매칭 로직 개선 (CPE 이름 → graph 노드 ID 정규화)
+2) 벤더 포맷 전용 extraction chain 확장 (QNAP/Synology/ASUS 계열 깊은 중첩 포맷)
+3) FirmAE 호환 펌웨어 커버리지 확대 (Tier 1 에뮬레이션 성공률 향상)
+4) Ghidra dataflow 결과를 source-sink 그래프와 findings confidence에 통합
+5) 퍼징 크래시를 exploit_autopoc PoC seed로 자동 연계
+6) Public benchmark corpus 확장 (현재 seed fixture → 실제 공개 펌웨어 corpus)

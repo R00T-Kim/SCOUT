@@ -135,7 +135,7 @@
 | :mag: | **바이너리 분석** | ELF 하드닝 감사 (NX/PIE/RELRO/Canary) + 정밀 `.dynstr` 심볼 탐지 + FORTIFY_SOURCE + Ghidra 헤드리스 디컴파일(선택) |
 | :dart: | **공격면 분석** | Source-to-sink 추적, IPC 감지 (5종), 자격증명 자동 매핑 |
 | :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한 검사 |
-| :test_tube: | **퍼징** | AFL++ 파이프라인 + CMPLOG, persistent mode, NVRAM faker, 바이너리 스코어링, 하네스 생성, 크래시 트리아지 |
+| :test_tube: | **퍼징** *(선택)* | AFL++ 파이프라인 + CMPLOG, persistent mode, NVRAM faker, 바이너리 스코어링, 하네스 생성, 크래시 트리아지 — Docker + AFL++ 이미지 필요 |
 | :bug: | **에뮬레이션** | 3-Tier (FirmAE / QEMU user-mode / rootfs 검사) + GDB 원격 디버깅 |
 | :robot: | **MCP 서버** | Model Context Protocol로 12개 도구 노출 -- Claude Code/Desktop 연동 |
 | :brain: | **LLM 드라이버** | Codex CLI + Claude API + Ollama -- 비용 추적 및 예산 제한 |

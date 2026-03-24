@@ -25,6 +25,10 @@ from .firmware_profile import FirmwareProfileStage
 from .threat_model import ThreatModelStage
 from .llm_synthesis import LLMSynthesisStage
 from .attribution import AttributionStage
+from .sbom import SbomStage
+from .cve_scan import CveScanStage
+from .reachability import make_reachability_stage
+from .web_ui import WebUiStage
 from .llm_codex import run_codex_exec_summary
 from .ota import OtaStage
 from .ota_payload import OtaPayloadStage
@@ -3257,12 +3261,26 @@ def analyze_run(
             string_scan_max_files=scan_max_files,
             string_scan_max_total_matches=scan_max_matches,
         ),
+        SbomStage(
+            run_dir=info.firmware_dest.parent,
+            case_id=source_input_path,
+            remaining_budget_s=remaining_s,
+            no_llm=no_llm,
+        ),
+        CveScanStage(
+            run_dir=info.firmware_dest.parent,
+            case_id=source_input_path,
+            remaining_budget_s=remaining_s,
+            no_llm=no_llm,
+        ),
         EndpointsStage(
             max_files=scan_max_files,
             max_total_matches=scan_max_matches,
         ),
         SurfacesStage(),
+        WebUiStage(),
         GraphStage(),
+        make_reachability_stage(info, source_input_path, remaining_s, no_llm),
         AttackSurfaceStage(),
         FunctionalSpecStage(),
         ThreatModelStage(),
@@ -3270,6 +3288,12 @@ def analyze_run(
         LLMSynthesisStage(no_llm=no_llm),
         make_emulation_stage(),
     ]
+    # Optional: Ghidra headless analysis (requires Ghidra installation)
+    try:
+        from .ghidra_analysis import GhidraAnalysisStage
+        stages.append(GhidraAnalysisStage())
+    except Exception:
+        pass
     try:
         from .exploit_chain import ExploitChainStage, ExploitGateStage
         from .dynamic_validation import DynamicValidationStage

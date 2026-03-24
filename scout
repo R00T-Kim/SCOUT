@@ -9,19 +9,25 @@ fi
 
 if [[ "${1:-}" == "" ]]; then
   cat <<'EOF'
-Usage: ./scout <aiedge-args...>
+Usage: ./scout <command> [options]
+
+Commands
+  analyze <firmware>           Full firmware analysis pipeline
+  analyze-8mb <firmware>       Truncated 8MB canonical track
+  stages <run_dir>             Rerun specific stages on existing run
+  serve <run_dir>              Launch web report viewer
+  mcp --project-id <id>        Start MCP server for AI agents
+  tui <run_dir>                Terminal UI dashboard
 
 Examples
-  ./scout tui                  # latest run, auto mode
-  ./scout tui -w               # latest run, watch mode
-  ./scout tui -i               # latest run, interactive mode
-  ./scout ti                   # alias: tui -i
-  ./scout tw                   # alias: tui -w
-  ./scout to                   # alias: tui -m once
-  ./scout tui aiedge-runs/<run_id> -w -t 2 -n 20
-  ./scout t                    # alias: tui
-  ./scout run firmware.bin --profile exploit
-  ./scout report aiedge-runs/<run_id>
+  ./scout analyze firmware.bin                     # full analysis
+  ./scout analyze firmware.bin --no-llm            # deterministic only
+  ./scout analyze firmware.bin --rootfs /path/to   # pre-extracted rootfs
+  ./scout serve aiedge-runs/<run_id> --port 8080   # web viewer
+  ./scout tui aiedge-runs/<run_id> -w -t 2         # TUI watch mode
+  ./scout ti                                       # TUI interactive (latest)
+  ./scout tw                                       # TUI watch (latest)
+  ./scout t                                        # TUI (latest)
 EOF
   exit 0
 fi

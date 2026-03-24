@@ -135,7 +135,7 @@
 | :mag: | **Binary Analysis** | ELF hardening audit (NX/PIE/RELRO/Canary) + precise `.dynstr` symbol detection + FORTIFY_SOURCE + optional Ghidra headless decompilation |
 | :dart: | **Attack Surface** | Source-to-sink tracing, IPC detection (5 types), credential auto-mapping |
 | :shield: | **Security Assessment** | X.509 certificate scanning, boot service auditing, filesystem permission checks |
-| :test_tube: | **Fuzzing** | AFL++ pipeline with CMPLOG, persistent mode, NVRAM faker, binary scoring, harness generation, crash triage |
+| :test_tube: | **Fuzzing** *(optional)* | AFL++ pipeline with CMPLOG, persistent mode, NVRAM faker, binary scoring, harness generation, crash triage — requires Docker + AFL++ image |
 | :bug: | **Emulation** | 3-tier (FirmAE / QEMU user-mode / rootfs inspection) + GDB remote debugging |
 | :robot: | **MCP Server** | 12 tools exposed via Model Context Protocol for Claude Code/Desktop integration |
 | :brain: | **LLM Drivers** | Codex CLI + Claude API + Ollama -- with cost tracking and budget limits |
