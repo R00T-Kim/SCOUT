@@ -1,11 +1,11 @@
-# AIEdge 8MB Track Runbook
+# SCOUT 8MB Track Runbook
 
 This runbook describes the canonical 8MB firmware track used for deterministic end-to-end analysis, lab-gated exploit workflow checks, and performance regression measurement.
 
 ## Canonical Input
 
 - Canonical firmware snapshot:
-  - `/home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin`
+  - `aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin`
   - sha256 prefix: `387d97fd9251`
   - size: `8388608`
 
@@ -13,15 +13,15 @@ This runbook describes the canonical 8MB firmware track used for deterministic e
 
 ```bash
 ./scout analyze-8mb \
-  /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
+  aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
   --case-id 8mb-analysis \
   --no-llm
 ```
 또는 직접 실행:
 
 ```bash
-PYTHONPATH=/home/rootk1m/SCOUT/src python3 -m aiedge analyze-8mb \
-  /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
+PYTHONPATH=src python3 -m aiedge analyze-8mb \
+  aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
   --case-id 8mb-analysis \
   --no-llm
 ```
@@ -50,7 +50,7 @@ Exploit profile is now the default. Gate fields (`--exploit-flag lab`, `--exploi
 
 ```bash
 ./scout analyze-8mb \
-  /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
+  aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
   --case-id 8mb-exploit \
   --no-llm \
   --stages exploit_gate,exploit_chain,exploit_policy
@@ -58,9 +58,9 @@ Exploit profile is now the default. Gate fields (`--exploit-flag lab`, `--exploi
 또는 직접 실행:
 
 ```bash
-PYTHONPATH=/home/rootk1m/SCOUT/src \
+PYTHONPATH=src \
 python3 -m aiedge analyze-8mb \
-  /home/rootk1m/SCOUT/aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
+  aiedge-runs/2026-02-12_1633_sha256-387d97fd9251/input/firmware.bin \
   --case-id 8mb-exploit \
   --no-llm \
   --stages exploit_gate,exploit_chain,exploit_policy
@@ -75,7 +75,7 @@ Notes:
 Run analysis twice under identical environment and compare bundles:
 
 ```bash
-PYTHONPATH=/home/rootk1m/SCOUT/src \
+PYTHONPATH=src \
 python3 - <<'PY'
 from pathlib import Path
 from aiedge.determinism import assert_bundles_equal, collect_run_bundle
@@ -92,16 +92,16 @@ PY
 Generate a machine-readable perf summary JSON:
 
 ```bash
-RUNS=3 TIME_BUDGET_S=120 /home/rootk1m/SCOUT/scripts/perf_8mb_track.sh
+RUNS=3 TIME_BUDGET_S=120 scripts/perf_8mb_track.sh
 ```
 
 ## E2E Script
 
 ```bash
-/home/rootk1m/SCOUT/scripts/e2e_aiedge_8mb_track.sh
+scripts/e2e_aiedge_8mb_track.sh
 ```
 
-- `WORK_DIR` defaults to a new temporary directory (`mktemp -d`). Override it by exporting `WORK_DIR` (for example: `WORK_DIR=/tmp/aiedge-8mb-e2e /home/rootk1m/SCOUT/scripts/e2e_aiedge_8mb_track.sh`).
+- `WORK_DIR` defaults to a new temporary directory (`mktemp -d`). Override it by exporting `WORK_DIR` (for example: `WORK_DIR=/tmp/aiedge-8mb-e2e scripts/e2e_aiedge_8mb_track.sh`).
 - Expected outputs under `$WORK_DIR`:
   - `evidence_index.json`: top-level index of generated artifacts and flow run directories; the script prints `[OK] evidence index: <path>` when written.
   - `repro_bundle.json`: deterministic reproduction bundle (canonical firmware identity, replay commands, run dirs, bundle digests).
@@ -119,7 +119,7 @@ Isolation checks covered by this flow:
 Verify that a finalized run report satisfies completeness and canonical 8MB identity checks:
 
 ```bash
-python3 /home/rootk1m/SCOUT/scripts/verify_aiedge_final_report.py --run-dir <run-dir>
+python3 scripts/verify_aiedge_final_report.py --run-dir <run-dir>
 ```
 
 - Success emits one line prefixed with `[OK]`.

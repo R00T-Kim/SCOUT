@@ -4,7 +4,7 @@
 
 ## 현재 구현됨
 
-- AIEdge CLI: `./scout analyze`, `./scout stages` (래퍼 권장)
+- SCOUT CLI: `./scout analyze`, `./scout stages` (래퍼 권장)
 - 동일 기능은 `python3 -m aiedge analyze`, `python3 -m aiedge stages`로 직접 실행 가능
 - Stage evidence store(run_dir): StageFactory stage는 `stages/<name>/stage.json` 기반 artifact hashing을 사용하고, findings는 `run_findings()`가 `stages/findings/*.json`을 직접 생성
 - `analyze`/`analyze-8mb`에 `--rootfs <DIR>` 지원 (사전 추출 rootfs 직접 ingest)
@@ -46,7 +46,9 @@
 - **GDB RSP 클라이언트** (`emulation_gdb.py`): 순수 stdlib GDB Remote Serial Protocol 클라이언트. QEMU `-g` stub에 연결하여 레지스터/메모리 읽기, 브레이크포인트, 백트레이스.
 - **Ghidra headless 연동** (`ghidra_bridge.py`, `ghidra_analysis.py`): 선택적 Ghidra 디컴파일/xref/데이터플로우 분석. SHA-256 캐시. 미설치 시 graceful skip. `AIEDGE_GHIDRA_HOME`, `AIEDGE_GHIDRA_MAX_BINARIES`.
 - **AFL++ 퍼징 파이프라인**: `fuzz_target.py`(스코어링 0-100), `fuzz_harness.py`(딕셔너리/시드/하네스), `fuzz_campaign.py`(AFL++ Docker QEMU mode), `fuzz_triage.py`(크래시 분류/exploitability). 미설치 시 graceful skip. `AIEDGE_AFLPP_IMAGE`, `AIEDGE_FUZZ_BUDGET_S`.
-- **Executive Report 생성** (`report_export.py`): Markdown executive report 자동 생성. 파이프라인 요약, 상위 리스크, SBOM/CVE 테이블, 공격 표면, 크레덴셜 findings.
+- **SARIF 2.1.0 Export** (`sarif_export.py`): Findings를 OASIS SARIF 2.1.0 포맷으로 자동 변환. GitHub Code Scanning, VS Code SARIF Viewer 호환. `stages/findings/sarif.json` 산출. 파이프라인 완료 시 자동 생성.
+- **SLSA L2 Provenance** (`provenance.py`): in-toto v0.1 attestation 자동 생성. firmware_handoff, analyst_digest, verified_chain을 subject로 포함. `provenance.intoto.jsonl` 산출. 파이프라인 완료 시 자동 생성.
+- **Executive Report 생성** (`report_export.py`): Markdown executive report 자동 생성. 파이프라인 요약, 상위 리스크, SBOM/CVE 테이블, 공격 표면, 크레덴셜 findings. 파이프라인 완료 시 `report/executive_report.md` 자동 생성.
 - **웹 뷰어 UX 대폭 개선**: 싱글 패널 뷰(사이드바 클릭 → 해당 패널만 표시), KPI 바(Critical/High/Components/CVEs/Endpoints 상시 표시), SBOM/CVE/Reachability/Security Assessment 4개 패널 추가, 페이지네이션(SBOM 30/page, CVE 20/page), 그래프 Python 사전 레이아웃(150 노드 균형 선택, 호버 시 연결 정보 표시), viewer.html 1.5MB→567KB 경량화.
 - **공유 유틸리티** (`path_safety.py`): `assert_under_dir`, `rel_to_run_dir`, `sha256_file`, `sha256_text` 공유 모듈.
 - 파이프라인 29 → 34 stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.

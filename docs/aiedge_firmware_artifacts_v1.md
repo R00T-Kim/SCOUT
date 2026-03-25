@@ -1,4 +1,4 @@
-# AIEdge Firmware Artifacts v1 (Deterministic JSON)
+# SCOUT Firmware Artifacts v1 (Deterministic JSON)
 
 This document locks the v1 artifact contracts for firmware profiling + robust inventory.
 

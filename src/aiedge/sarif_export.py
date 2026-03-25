@@ -232,7 +232,7 @@ def _finding_to_result(finding: dict[str, Any]) -> dict[str, Any]:
 def findings_to_sarif(
     findings: list[dict[str, Any]],
     run_dir: Path,
-    tool_version: str = "0.0.0",
+    tool_version: str = "1.0.0",
 ) -> dict[str, Any]:
     """Convert a list of SCOUT findings to a complete SARIF 2.1.0 document.
 
@@ -294,7 +294,7 @@ def export_sarif(
     output_path: Path,
     run_dir: Path,
     *,
-    tool_version: str = "0.0.0",
+    tool_version: str = "1.0.0",
 ) -> Path:
     """Read findings JSON, convert to SARIF, and write to *output_path*.
 

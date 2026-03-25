@@ -1,4 +1,4 @@
-# AIEdge Report Contract (report/report.json)
+# SCOUT Report Contract (report/report.json)
 
 This document describes the machine-consumable report fields that gate whether results are safe to consume.
 

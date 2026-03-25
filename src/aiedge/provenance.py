@@ -166,7 +166,7 @@ def _no_llm_from_manifest(manifest: dict[str, object]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def generate_attestation(run_dir: Path, tool_version: str = "0.0.0") -> dict[str, object]:
+def generate_attestation(run_dir: Path, tool_version: str = "1.0.0") -> dict[str, object]:
     """Create an in-toto Statement v0.1 attestation for a SCOUT analysis run.
 
     Reads ``manifest.json``, all ``stages/*/stage.json`` files, and the
@@ -234,7 +234,7 @@ def generate_attestation(run_dir: Path, tool_version: str = "0.0.0") -> dict[str
 def write_attestation(
     run_dir: Path,
     output_path: Path | None = None,
-    tool_version: str = "0.0.0",
+    tool_version: str = "1.0.0",
 ) -> Path:
     """Generate an attestation and write it to disk.
 

@@ -218,7 +218,6 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 | `./scout analyze <firmware>` | Full firmware analysis pipeline |
 | `./scout analyze-8mb <firmware>` | Truncated 8MB canonical track |
 | `./scout stages <run_dir>` | Rerun specific stages on existing run |
-| `./scout diff <old_run> <new_run>` | Compare two analysis runs |
 | `./scout mcp --project-id <id>` | Start MCP stdio server |
 | `./scout serve <run_dir>` | Launch web report viewer |
 | `./scout tui <run_dir>` | Terminal UI dashboard |
@@ -303,10 +302,10 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AIEDGE_QG_MIN_FINDINGS` | -- | Override minimum findings threshold |
-| `AIEDGE_QG_MIN_PRECISION` | -- | Override minimum precision threshold |
-| `AIEDGE_QG_MAX_FPR` | -- | Override maximum false positive rate |
-| `AIEDGE_QG_MIN_SBOM_COMPONENTS` | -- | Override minimum SBOM components |
+| `AIEDGE_QG_PRECISION_MIN` | `0.9` | Minimum precision threshold |
+| `AIEDGE_QG_RECALL_MIN` | `0.6` | Minimum recall threshold |
+| `AIEDGE_QG_FPR_MAX` | `0.1` | Maximum false positive rate |
+| `AIEDGE_QG_ABSTAIN_MAX` | `0.25` | Maximum abstention rate |
 
 </details>
 
@@ -394,6 +393,8 @@ cosign verify-attestation --type slsaprovenance \
 | [Analyst Digest](docs/analyst_digest_contract.md) | Digest schema and verdict semantics |
 | [Verified Chain](docs/verified_chain_contract.md) | Evidence requirements for verified chains |
 | [Duplicate Gate](docs/aiedge_duplicate_gate_contract.md) | Cross-run duplicate suppression rules |
+| [Determinism Policy](docs/determinism_policy.md) | Replay gate rules and relaxation policy |
+| [Quality SLO](docs/quality_slo.md) | Precision, recall, FPR thresholds |
 | [Runbook](docs/runbook.md) | Operator flow for digest-first review |
 
 ---
@@ -438,6 +439,6 @@ MIT
 
 <br />
 
-<a href="https://github.com/rootk1m/SCOUT">github.com/rootk1m/SCOUT</a>
+<a href="https://github.com/R00T-Kim/SCOUT">github.com/R00T-Kim/SCOUT</a>
 
 </div>

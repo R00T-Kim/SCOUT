@@ -43,7 +43,7 @@ Optional unrelated-session safety verification:
      - `analysis` profile with authorization: expects exit `0` and checks newest `reports/20*` has `firmware_handoff.json` containing `profile=analysis`, policy keys, non-empty `aiedge.run_dir`, non-empty `aiedge.run_id`, and non-empty `bundles[].artifacts` where each artifact exists under that run directory.
       - For the same analysis handoff `run_dir`, validates `report/report.json` through `aiedge.schema.validate_report`.
       - Ensures report contract gating fields exist (`run_completion`, `ingestion_integrity`, `report_completeness`).
-      - Captures analysis `bundles` count, runs adapter rerun command `python3 /home/rootk1m/01_CYAI_Lab/01_Projects/Terminator/aiedge_handoff_adapter.py stages --handoff "$analysis_handoff" --stages tooling --log-file "$after_analysis/session.log"`, accepts adapter exit `0` or `10`, requires `stages/tooling/attempts/attempt-2/stage.json`, and asserts `bundles` length increases.
+      - Captures analysis `bundles` count, runs adapter rerun command `python3 <TERMINATOR_ROOT>/aiedge_handoff_adapter.py stages --handoff "$analysis_handoff" --stages tooling --log-file "$after_analysis/session.log"`, accepts adapter exit `0` or `10`, requires `stages/tooling/attempts/attempt-2/stage.json`, and asserts `bundles` length increases.
      - `exploit` profile without required vars: expects exit `1`.
      - `exploit` profile with required vars: expects exit `0` and checks newest `reports/20*` has `firmware_handoff.json` with `profile=exploit`, `exploit_gate`, non-empty `aiedge.run_dir`, and `bundles[].artifacts` existing under that run directory.
 5. Ownership tracking artifact:
@@ -75,7 +75,7 @@ Path: `$WORK_DIR/terminator_owned_sessions.json`
     {
       "e2e_run_id": "e2e-<uuid>",
       "terminator_bg_pid": 12345,
-      "report_dir": "/home/rootk1m/01_CYAI_Lab/01_Projects/Terminator/reports/20260101_010203"
+      "report_dir": "<TERMINATOR_ROOT>/reports/20260101_010203"
     }
   ]
 }

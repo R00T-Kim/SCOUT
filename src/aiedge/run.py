@@ -38,6 +38,9 @@ from .tooling import ToolingStage
 from . import reporting
 from . import __version__ as _AIEDGE_ENGINE_VERSION
 from .policy import AIEdgePolicyViolation
+from .sarif_export import export_sarif as _export_sarif
+from .provenance import write_attestation as _write_attestation
+from .report_export import generate_executive_report as _generate_executive_report
 from .schema import (
     JsonValue,
     REQUIRED_FINAL_STAGES,
@@ -815,6 +818,38 @@ def _collect_handoff_bundles(run_dir: Path) -> list[dict[str, JsonValue]]:
             )
 
     return bundles
+
+
+def _write_post_pipeline_artifacts(run_dir: Path) -> None:
+    """Generate SARIF export, executive report, and SLSA provenance attestation.
+
+    Each step is independently guarded so a failure in one does not block the
+    others or the overall pipeline.
+    """
+    # 1. SARIF 2.1.0 export
+    try:
+        findings_json = run_dir / "stages" / "findings" / "findings.json"
+        if findings_json.is_file():
+            _export_sarif(
+                findings_json,
+                run_dir / "stages" / "findings" / "sarif.json",
+                run_dir,
+                tool_version=_AIEDGE_ENGINE_VERSION,
+            )
+    except Exception:
+        pass
+
+    # 2. Executive Markdown report
+    try:
+        _generate_executive_report(run_dir)
+    except Exception:
+        pass
+
+    # 3. SLSA L2 provenance attestation (last — hashes all prior artifacts)
+    try:
+        _write_attestation(run_dir, tool_version=_AIEDGE_ENGINE_VERSION)
+    except Exception:
+        pass
 
 
 def _write_firmware_handoff(
@@ -3229,6 +3264,7 @@ def analyze_run(
                 )
                 _ = reporting.write_report_json(report_dir, report)
                 _ = reporting.write_report_html(report_dir, report)
+        _write_post_pipeline_artifacts(info.run_dir)
         return combine_overall_status("skipped", inv_status, emu_status)
 
     extraction_timeout_s = min(
@@ -4199,6 +4235,8 @@ def analyze_run(
             )
             _ = reporting.write_report_json(report_dir, report)
             _ = reporting.write_report_html(report_dir, report)
+
+    _write_post_pipeline_artifacts(info.run_dir)
 
     extraction_status = cast(str, report["extraction"].get("status", "failed"))
     inventory_status = cast(str, report["inventory"].get("status", "failed"))

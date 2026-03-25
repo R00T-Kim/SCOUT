@@ -218,7 +218,6 @@ Firmware --> Unpack --> Profile --> Inventory --> [Ghidra] --> SBOM --> CVE Scan
 | `./scout analyze <firmware>` | 전체 펌웨어 분석 파이프라인 |
 | `./scout analyze-8mb <firmware>` | 8MB 트런케이션 트랙 |
 | `./scout stages <run_dir>` | 기존 런에서 특정 스테이지 재실행 |
-| `./scout diff <old_run> <new_run>` | 두 분석 런 비교 |
 | `./scout mcp --project-id <id>` | MCP stdio 서버 시작 |
 | `./scout serve <run_dir>` | 웹 리포트 뷰어 실행 |
 | `./scout tui <run_dir>` | 터미널 UI 대시보드 |

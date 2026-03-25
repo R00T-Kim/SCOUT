@@ -1,4 +1,4 @@
-# AIEdge Duplicate Gate Contract (Phase 1)
+# SCOUT Duplicate Gate Contract
 
 This document defines the fingerprint contract, duplicate taxonomy, and registry schema used for cross-run dedupe of claims/findings.
 

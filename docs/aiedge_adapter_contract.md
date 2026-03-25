@@ -1,4 +1,4 @@
-# AIEdge Stage Adapter Contract (JSON-first)
+# SCOUT Stage Adapter Contract (JSON-first)
 
 Contract goal: let an external orchestrator (e.g., Terminator) request AIEdge stage execution/re-execution using a stable JSON request/response format. This contract is intentionally JSON-first; logs are not an API.
 
