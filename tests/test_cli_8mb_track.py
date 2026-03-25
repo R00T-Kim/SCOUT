@@ -26,6 +26,10 @@ def _truncated_root_new_firm() -> Path:
     return _repo_root() / "new_firm.bin"
 
 
+@pytest.mark.skipif(
+    not (_truncated_root_new_firm()).is_file(),
+    reason="requires local firmware fixture",
+)
 def test_analyze_8mb_rejects_non_canonical_input(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -48,6 +52,10 @@ def test_analyze_8mb_rejects_non_canonical_input(
     assert "8MB track requires the canonical snapshot" in captured.err
 
 
+@pytest.mark.skipif(
+    not (_canonical_8mb()).is_file(),
+    reason="requires local canonical 8MB firmware fixture",
+)
 def test_analyze_8mb_uses_separate_runs_root_and_marks_manifest(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
