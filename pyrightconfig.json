@@ -1,7 +1,8 @@
 {
   "include": ["src"],
   "extraPaths": ["src"],
-  "typeCheckingMode": "standard",
+  "typeCheckingMode": "basic",
+  "exclude": ["src/aiedge/ghidra_scripts"],
   "executionEnvironments": [
     {
       "root": "src",

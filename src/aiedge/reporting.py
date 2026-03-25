@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import html
 import hashlib
+import html
 import importlib.util
 import json
 import re
@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Callable, cast
-
 from zoneinfo import ZoneInfo
 
 from .exploit_tiering import is_valid_exploitability_tier
@@ -17,14 +16,13 @@ from .schema import (
     ANALYST_DIGEST_AGGREGATION_RULE,
     ANALYST_DIGEST_REASON_CODES,
     ANALYST_DIGEST_SCHEMA_VERSION,
-    ANALYST_DIGEST_VERDICTS,
     ANALYST_DIGEST_STATE_PRECEDENCE,
+    ANALYST_DIGEST_VERDICTS,
     ANALYST_REPORT_SCHEMA_VERSION,
     JsonValue,
     empty_report,
     validate_analyst_digest,
 )
-
 
 ANALYST_REPORT_REQUIRED_SECTIONS: tuple[str, ...] = (
     "attribution",

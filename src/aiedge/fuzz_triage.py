@@ -17,13 +17,11 @@ still recorded (hash + size give useful de-dupe data even without replay).
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from pathlib import Path
 
 from .path_safety import assert_under_dir, sha256_file
-
 
 # ---------------------------------------------------------------------------
 # Signal classification tables

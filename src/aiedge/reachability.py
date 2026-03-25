@@ -425,7 +425,7 @@ class ReachabilityStage:
 
     def run(self, ctx: StageContext) -> StageOutcome:  # noqa: C901 (acceptable complexity)
         run_dir = ctx.run_dir
-        started_at = time.monotonic()
+        time.monotonic()
         limitations: list[str] = []
         status = "ok"
 
@@ -601,7 +601,7 @@ class ReachabilityStage:
         _write_stage_json(run_dir, stage_dir, status, details_out, limitations)
 
         return StageOutcome(
-            status=cast("StageStatus", status),  # type: ignore[arg-type]
+            status=cast("StageStatus", status),  # type: ignore[arg-type]  # noqa: F821
             details=details_out,
             limitations=limitations,
         )

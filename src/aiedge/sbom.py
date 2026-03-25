@@ -10,7 +10,6 @@ Environment variables:
     AIEDGE_SBOM_MAX_COMPONENTS  — cap on component count (default 500)
 """
 
-import hashlib
 import json
 import os
 import re
@@ -25,7 +24,6 @@ from .path_safety import assert_under_dir, rel_to_run_dir, sha256_file, sha256_t
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
-
 
 # ---------------------------------------------------------------------------
 # Constants

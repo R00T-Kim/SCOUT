@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import tempfile
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -18,11 +18,10 @@ from .fingerprinting import (
 from .schema import JsonValue
 from .terminator_feedback import (
     TerminatorVerdict,
-    load_feedback_registry,
     _fingerprint_prefix,
     _resolve_feedback_dir,
+    load_feedback_registry,
 )
-
 
 DUPLICATE_GATE_SCHEMA_VERSION = "duplicate-gate-v1"
 DUPLICATE_GATE_ANALYSIS_FAIL_OPEN = "DUPLICATE_GATE_ANALYSIS_FAIL_OPEN"
@@ -477,7 +476,7 @@ def apply_duplicate_gate(
         registry = _load_registry(registry_path, created_at=seen_at)
         records_any = registry.get("records")
         records = cast(dict[str, dict[str, JsonValue]], records_any)
-    
+
         max_records = _parse_positive_int_env(
             "AIEDGE_DUPLICATE_REGISTRY_MAX_RECORDS", _DEFAULT_MAX_RECORDS
         )
@@ -488,7 +487,7 @@ def apply_duplicate_gate(
         t_force_retriage = _parse_threshold_env(
             "AIEDGE_DUPLICATE_GATE_T_FORCE_RETRIAGE", _DEFAULT_T_FORCE_RETRIAGE
         )
-    
+
         out_findings: list[dict[str, JsonValue]] = []
         new: list[dict[str, JsonValue]] = []
         suppressed: list[dict[str, JsonValue]] = []
@@ -496,12 +495,12 @@ def apply_duplicate_gate(
         novelty_table: list[dict[str, JsonValue]] = []
         ranking: list[dict[str, JsonValue]] = []
         warnings: list[str] = []
-    
+
         for idx, finding in enumerate(findings):
             finding_id_any = finding.get("id")
             finding_id = finding_id_any if isinstance(finding_id_any, str) else ""
             claim_path = f"findings[{idx}]"
-    
+
             try:
                 fingerprint = claim_fingerprint_sha256(cast(dict[str, object], finding))
             except Exception as exc:
@@ -519,7 +518,7 @@ def apply_duplicate_gate(
                     }
                 )
                 continue
-    
+
             fingerprint_meta: dict[str, JsonValue] = {
                 "claim_path": claim_path,
                 "finding_id": finding_id,
@@ -532,7 +531,7 @@ def apply_duplicate_gate(
                 finding=finding,
                 claim_family=claim_family,
             )
-    
+
             existing = records.get(fingerprint)
             if existing is not None:
                 previous_evidence_hashes = _coerce_hash_list(
@@ -567,11 +566,11 @@ def apply_duplicate_gate(
                     auto_reason_codes.append(_AUTO_REOPEN_EVIDENCE_HASH_DELTA)
                 if lineage_diff_hash_delta:
                     auto_reason_codes.append(_AUTO_REOPEN_LINEAGE_DIFF_DELTA)
-    
+
                 should_auto_reopen = bool(auto_reason_codes) and novelty_score >= t_reopen
                 if should_auto_reopen:
                     auto_reason_codes.append(_AUTO_REOPEN_NOVELTY_THRESHOLD_MET)
-    
+
                 source_entries = _normalize_sources(
                     existing.get("sources"),
                     max_sources_per_record=max_sources_per_record,
@@ -661,7 +660,7 @@ def apply_duplicate_gate(
                         }
                     )
                     continue
-    
+
                 suppressed.append(fingerprint_meta)
                 existing["last_classification"] = "exact_fingerprint_duplicate"
                 novelty_table.append(
@@ -680,7 +679,7 @@ def apply_duplicate_gate(
                     }
                 )
                 continue
-    
+
             out_findings.append(dict(finding))
             new.append(fingerprint_meta)
             novelty_table.append(
@@ -716,7 +715,7 @@ def apply_duplicate_gate(
                 "last_novelty_score": 1.0,
                 "last_classification": "exact_fingerprint_duplicate",
             }
-    
+
         pruned_records = _prune_records(records, max_records=max_records)
         registry_payload = {
             "schema_version": DUPLICATE_REGISTRY_SCHEMA_VERSION,

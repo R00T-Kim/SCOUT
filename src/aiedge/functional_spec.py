@@ -10,7 +10,6 @@ from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
 
-
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
     try:
         return str(path.resolve().relative_to(run_dir.resolve()))

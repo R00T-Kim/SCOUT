@@ -476,7 +476,7 @@ def _build_issues(
         risk_level = str(svc.get("risk_level", "info"))
         if risk_level == "info":
             # Only emit info-level issues for auto-restart and debug services
-            classification = str(svc.get("classification", ""))
+            str(svc.get("classification", ""))
             risk_reason = str(svc.get("risk_reason", ""))
             if risk_reason == "debug_service_at_boot":
                 issue_type = "debug_service_at_boot"

@@ -13,7 +13,6 @@ from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
-
 DEFAULT_MAX_FILES = 2000
 DEFAULT_MAX_BYTES_PER_FILE = 256 * 1024
 DEFAULT_MAX_TOTAL_MATCHES = 5000

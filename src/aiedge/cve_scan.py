@@ -331,7 +331,7 @@ def _fetch_nvd(
     try:
         with urllib.request.urlopen(req, timeout=timeout_s, context=ctx) as resp:  # type: ignore[call-arg]
             body = resp.read()
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError:
         raise
     except urllib.error.URLError:
         raise

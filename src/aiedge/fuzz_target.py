@@ -8,11 +8,9 @@ presence, hardening absence, and known CVE history.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from .path_safety import env_int
-
 
 # ---------------------------------------------------------------------------
 # Scoring constants

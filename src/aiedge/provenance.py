@@ -128,7 +128,7 @@ def _manifest_timestamps(manifest: dict[str, object]) -> tuple[str, str]:
 
     # Best-effort: scan stage manifests for the latest finished_at.
     finished_on = started_on
-    stages_dir = Path(manifest.get("run_dir", "")) if False else None  # unused branch
+    Path(manifest.get("run_dir", "")) if False else None  # unused branch
     return started_on, finished_on
 
 

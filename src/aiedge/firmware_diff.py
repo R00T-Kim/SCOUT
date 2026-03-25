@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from .path_safety import assert_under_dir, sha256_file
-from .policy import AIEdgePolicyViolation
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -479,7 +478,7 @@ def _build_security_posture_diff(
     ]
 
     # Also check added config files as security-relevant (new attack surface)
-    added_paths: list[str] = [
+    [
         entry["path"]
         for entry in fs_diff.get("added", [])
         if Path(entry["path"]).suffix in _CONFIG_EXTENSIONS

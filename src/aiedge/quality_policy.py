@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import cast
 
+
 def _threshold_float(env_name: str, default: float) -> float:
     raw = os.environ.get(env_name)
     if raw is None:

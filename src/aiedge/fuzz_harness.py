@@ -17,7 +17,6 @@ from pathlib import Path
 
 from .path_safety import assert_under_dir
 
-
 # ---------------------------------------------------------------------------
 # Protocol keyword constants
 # ---------------------------------------------------------------------------

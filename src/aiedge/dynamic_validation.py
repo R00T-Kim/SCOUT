@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import errno
-
 import json
 import os
 import re
@@ -15,6 +12,8 @@ import stat
 import struct
 import subprocess
 import time
+from collections.abc import Iterable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from http.client import HTTPResponse
 from pathlib import Path
@@ -1127,7 +1126,7 @@ def _scan_roots_for_binary(
     max_candidates: int = _QEMU_MAX_BINARY_CANDIDATES,
     max_scan_files: int = _QEMU_MAX_SCAN_FILES,
 ) -> list[Path]:
-    max_binary_candidates = max(1, int(max_candidates))
+    max(1, int(max_candidates))
     wanted_names = {
         "busybox",
         "sh",

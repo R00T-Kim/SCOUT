@@ -2,31 +2,30 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol, cast
 
-from .carving import CarvingStage
 from .attack_surface import AttackSurfaceStage
 from .attribution import AttributionStage
+from .carving import CarvingStage
 from .endpoints import EndpointsStage
 from .extraction import ExtractionStage
-from .firmware_profile import FirmwareProfileStage
 from .firmware_lineage import FirmwareLineageStage
+from .firmware_profile import FirmwareProfileStage
+from .functional_spec import FunctionalSpecStage
 from .graph import GraphStage
 from .inventory import InventoryStage
 from .llm_synthesis import LLMSynthesisStage
-from .functional_spec import FunctionalSpecStage
-from .surfaces import SurfacesStage
-from .web_ui import WebUiStage
 from .ota import OtaStage
 from .ota_payload import OtaPayloadStage
-from .threat_model import ThreatModelStage
 from .path_safety import env_int
 from .stage import Stage
 from .structure import StructureStage
+from .surfaces import SurfacesStage
+from .threat_model import ThreatModelStage
 from .tooling import ToolingStage
+from .web_ui import WebUiStage
 
 
 class _RunInfoLike(Protocol):

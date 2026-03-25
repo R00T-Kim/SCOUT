@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .path_safety import assert_under_dir, env_int
 from .exploit_tiering import default_exploitability_tier
+from .path_safety import assert_under_dir, env_int
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 

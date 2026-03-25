@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import csv
-import json
 import ipaddress
+import json
 import os
 import re
 import stat
 from dataclasses import dataclass
-from urllib.parse import urlsplit
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
 from .confidence_caps import calibrated_confidence, evidence_level
 from .path_safety import assert_under_dir
@@ -1258,7 +1258,7 @@ def _service_matches_observation(
 ) -> bool:
     if not endpoint_ports:
         return True if observed_ports else False
-    service_protocols = {p: True for p, _ in observed_ports}
+    {p: True for p, _ in observed_ports}
     if not observed_ports:
         return False
     for port in endpoint_ports:
@@ -1461,7 +1461,7 @@ class GraphStage:
                     observation=observation,
                     evidence_refs=merged_refs,
                 )
-    
+
         surfaces_any = None if surfaces_obj is None else surfaces_obj.get("surfaces")
         if isinstance(surfaces_any, list):
             for surface_any in cast(list[object], surfaces_any):

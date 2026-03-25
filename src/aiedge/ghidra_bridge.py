@@ -20,7 +20,6 @@ from pathlib import Path
 from .path_safety import assert_under_dir, sha256_file
 from .policy import AIEdgePolicyViolation
 
-
 # ---------------------------------------------------------------------------
 # Public availability check
 # ---------------------------------------------------------------------------

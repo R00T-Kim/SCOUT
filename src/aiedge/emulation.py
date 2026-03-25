@@ -10,7 +10,6 @@ from typing import cast
 
 from .emulation_gdb import probe_with_gdb
 from .path_safety import assert_under_dir
-from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
 

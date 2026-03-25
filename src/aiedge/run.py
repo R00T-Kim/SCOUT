@@ -9,48 +9,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, cast
 
+from . import __version__ as _AIEDGE_ENGINE_VERSION
+from . import reporting
+from .attack_surface import AttackSurfaceStage
+from .attribution import AttributionStage
+from .carving import CarvingStage
+from .cve_scan import CveScanStage
 from .duplicate_gate import (
     DuplicateRegistryError,
     apply_duplicate_gate,
 )
+from .endpoints import EndpointsStage
 from .extraction import ExtractionStage
 from .findings import run_findings
-from .inventory import InventoryStage
-from .endpoints import EndpointsStage
-from .surfaces import SurfacesStage
-from .graph import GraphStage
-from .attack_surface import AttackSurfaceStage
-from .functional_spec import FunctionalSpecStage
 from .firmware_profile import FirmwareProfileStage
-from .threat_model import ThreatModelStage
-from .llm_synthesis import LLMSynthesisStage
-from .attribution import AttributionStage
-from .sbom import SbomStage
-from .cve_scan import CveScanStage
-from .reachability import make_reachability_stage
-from .web_ui import WebUiStage
+from .functional_spec import FunctionalSpecStage
+from .graph import GraphStage
+from .inventory import InventoryStage
 from .llm_codex import run_codex_exec_summary
+from .llm_synthesis import LLMSynthesisStage
 from .ota import OtaStage
 from .ota_payload import OtaPayloadStage
-from .carving import CarvingStage
-from .structure import StructureStage
-from .tooling import ToolingStage
-from . import reporting
-from . import __version__ as _AIEDGE_ENGINE_VERSION
 from .policy import AIEdgePolicyViolation
-from .sarif_export import export_sarif as _export_sarif
 from .provenance import write_attestation as _write_attestation
+from .reachability import make_reachability_stage
 from .report_export import generate_executive_report as _generate_executive_report
+from .sarif_export import export_sarif as _export_sarif
+from .sbom import SbomStage
 from .schema import (
-    JsonValue,
     REQUIRED_FINAL_STAGES,
     TERMINAL_STAGE_STATUSES,
+    JsonValue,
     empty_report,
     validate_handoff,
 )
 from .stage import RunReport, Stage, StageContext, StageResult, run_stages
 from .stage_registry import stage_factories
-
+from .structure import StructureStage
+from .surfaces import SurfacesStage
+from .threat_model import ThreatModelStage
+from .tooling import ToolingStage
+from .web_ui import WebUiStage
 
 DEFAULT_EGRESS_ALLOWLIST: tuple[str, ...] = (
     "pypi.org",

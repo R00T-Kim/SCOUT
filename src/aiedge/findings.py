@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import cast
 
 from . import __version__ as AIEDGE_VERSION
-from .path_safety import assert_under_dir
-from .policy import AIEdgePolicyViolation
 from .exploit_tiering import (
     default_exploitability_tier,
     exploitability_tier_rank,
     is_valid_exploitability_tier,
 )
+from .path_safety import assert_under_dir
+from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext
 
@@ -3348,8 +3348,10 @@ def run_findings(
     # --- Terminator feedback scoring calibration ---
     try:
         from .terminator_feedback import (
-            load_feedback_registry as _load_fb_registry,
             apply_scoring_calibration as _apply_fb_calibration,
+        )
+        from .terminator_feedback import (
+            load_feedback_registry as _load_fb_registry,
         )
 
         _fb_dir = Path(os.environ.get("AIEDGE_FEEDBACK_DIR", "aiedge-feedback"))

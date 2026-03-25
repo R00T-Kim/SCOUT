@@ -17,9 +17,8 @@ import re
 import stat
 from pathlib import Path
 
-from .path_safety import assert_under_dir, rel_to_run_dir, sha256_file, sha256_text
+from .path_safety import assert_under_dir, sha256_file, sha256_text
 from .policy import AIEdgePolicyViolation  # noqa: F401 (re-exported via import)
-
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -23,13 +23,13 @@ from typing import Callable, Protocol, cast
 from urllib.parse import urlparse
 
 from . import __version__
+from .codex_probe import resolve_llm_gate_input
 from .corpus import (
     CorpusValidationError,
     corpus_summary,
     format_summary,
     load_corpus_manifest,
 )
-from .codex_probe import resolve_llm_gate_input
 from .quality_metrics import (
     QualityMetricsError,
     build_quality_delta_report,
@@ -792,8 +792,8 @@ def _collect_runtime_communication_summary(
                 and src_node.get("type") == "component"
                 and dst_node.get("type") == "host"
             ):
-                comp = _safe_node_value(_safe_ascii_label(src))
-                host = _safe_node_value(_safe_ascii_label(cast(str, dst)))
+                comp = _safe_node_value(_safe_ascii_label(src))  # noqa: F821
+                host = _safe_node_value(_safe_ascii_label(cast(str, dst)))  # noqa: F821
                 component_hosts.setdefault(comp, set()).add(host)
                 host_components.setdefault(host, set()).add(comp)
             continue
@@ -1590,7 +1590,7 @@ def _build_tui_snapshot_lines(
         )
         rows = cast(list[object], runtime_model.get("rows", []))
         runtime_system_map_any = runtime_summary.get("runtime_system_map", [])
-        runtime_system_map = (
+        (
             [cast(dict[str, object], x) for x in cast(list[object], runtime_system_map_any)]
             if isinstance(runtime_system_map_any, list)
             else []
@@ -2077,7 +2077,7 @@ def _safe_curses_addstr(
     text: str,
     attr: int = 0,
 ) -> None:
-    win = cast("curses._CursesWindow", window)
+    win = cast("curses._CursesWindow", window)  # noqa: F821
     max_y, max_x = win.getmaxyx()
     if y < 0 or y >= max_y or x >= max_x:
         return

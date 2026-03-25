@@ -5,7 +5,6 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Final, cast
 
-
 FINGERPRINT_VERSION: Final[str] = "claim-fp-v1"
 DUPLICATE_TAXONOMY_VERSION: Final[str] = "duplicate-taxonomy-v1"
 DUPLICATE_REGISTRY_SCHEMA_VERSION: Final[str] = "duplicate-registry-v1"

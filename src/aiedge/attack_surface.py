@@ -12,7 +12,6 @@ from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
-
 ATTACK_SURFACE_BENCHMARK_FIXTURE_RELATIVE_PATH = (
     "benchmarks/attack_surface_accuracy/benchmark_fixture.json"
 )

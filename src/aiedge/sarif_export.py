@@ -12,7 +12,6 @@ from typing import Any
 
 from .path_safety import assert_under_dir
 
-
 # ---------------------------------------------------------------------------
 # Severity → SARIF level mapping
 # ---------------------------------------------------------------------------

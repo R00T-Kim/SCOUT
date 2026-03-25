@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import cast
 
 from .path_safety import assert_under_dir
-from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
 
