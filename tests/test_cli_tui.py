@@ -239,7 +239,7 @@ def test_tui_cli_watch_renders_only_when_snapshot_changes(
         ]
     )
 
-    from aiedge import __main__ as cli
+    from aiedge import cli_tui as _cli_tui_mod
 
     def fake_snapshot_lines(*, run_dir: Path, limit: int) -> list[str]:
         _ = (run_dir, limit)
@@ -252,8 +252,6 @@ def test_tui_cli_watch_renders_only_when_snapshot_changes(
         sleep_count["value"] += 1
         if sleep_count["value"] >= 3:
             raise KeyboardInterrupt
-
-    from aiedge import cli_tui as _cli_tui_mod
 
     monkeypatch.setattr(_cli_tui_mod, "_build_tui_snapshot_lines", fake_snapshot_lines)
     monkeypatch.setattr(_cli_tui_mod.time, "sleep", fake_sleep)
