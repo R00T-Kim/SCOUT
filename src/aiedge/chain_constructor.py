@@ -634,6 +634,8 @@ class ChainConstructorStage:
 
         # --- Step 2: Cross-binary chains via IPC ---
         cross_binary_chains: list[dict[str, JsonValue]] = []
+
+        # Step 2a: Graph-based IPC chains (from communication_graph.json)
         if ipc_edges:
             # Build adjacency from IPC edges
             ipc_adj: dict[str, list[dict[str, object]]] = {}
@@ -641,23 +643,6 @@ class ChainConstructorStage:
                 src_node = str(edge.get("source", ""))
                 if src_node:
                     ipc_adj.setdefault(src_node, []).append(edge)
-
-            # Check for shared symbols across binaries
-            shared_strings: dict[str, list[str]] = {}  # symbol -> [binaries]
-            for bbin in ba_binaries:
-                bin_name = str(bbin.get("binary", ""))
-                bsyms = bbin.get("symbols")
-                if isinstance(bsyms, list):
-                    for sym in cast(list[object], bsyms):
-                        if isinstance(sym, str) and len(sym) >= 3:
-                            shared_strings.setdefault(sym, []).append(bin_name)
-
-            # Find shared strings across 2+ binaries
-            cross_strings: dict[str, list[str]] = {
-                s: sorted(set(bins))
-                for s, bins in shared_strings.items()
-                if len(set(bins)) >= 2
-            }
 
             # Build cross-binary chains from IPC-connected findings
             for src_binary, edges in ipc_adj.items():
@@ -712,11 +697,362 @@ class ChainConstructorStage:
                         if chain_id >= _MAX_CHAINS:
                             break
 
-        all_chains = static_chains + cross_binary_chains
+        # Step 2b: Independent cross-binary IPC detection via shared strings
+        # This works even when graph stage has 0 IPC edges by detecting
+        # shared .rodata strings, nvram patterns, socket paths, and file IPC.
+        cross_binary_ipc_chains: list[dict[str, JsonValue]] = []
+
+        # Build shared symbol/string map across all binaries
+        shared_strings: dict[str, list[str]] = {}  # symbol -> [binaries]
+        for bbin in ba_binaries:
+            bin_name = str(bbin.get("binary", ""))
+            bsyms = bbin.get("symbols")
+            if isinstance(bsyms, list):
+                for sym in cast(list[object], bsyms):
+                    if isinstance(sym, str) and len(sym) >= 3:
+                        shared_strings.setdefault(sym, []).append(bin_name)
+
+        # Find strings shared across 2+ binaries
+        cross_strings: dict[str, list[str]] = {
+            s: sorted(set(bins))
+            for s, bins in shared_strings.items()
+            if len(set(bins)) >= 2
+        }
+
+        # Known IPC pattern detectors
+        _NVRAM_SYMS: frozenset[str] = frozenset({
+            "nvram_get", "nvram_set", "nvram_safe_get",
+            "nvram_bufget", "nvram_bufset",
+            "acosNvramConfig_get", "acosNvramConfig_set",
+        })
+        _SOCKET_PATH_PREFIXES: tuple[str, ...] = (
+            "/tmp/", "/var/run/", "/dev/",
+        )
+        _FILE_IPC_PREFIXES: tuple[str, ...] = (
+            "/tmp/", "/var/tmp/", "/dev/shm/",
+        )
+        _DBUS_PREFIXES: tuple[str, ...] = (
+            "org.freedesktop.", "com.", "net.",
+        )
+
+        def _detect_ipc_mechanism(
+            shared_sym: str,
+            bins: list[str],
+        ) -> tuple[str, str] | None:
+            """Classify a shared symbol into an IPC mechanism.
+
+            Returns (ipc_mechanism, shared_key) or None.
+            """
+            sym_lower = shared_sym.lower()
+
+            # nvram-based IPC
+            if sym_lower in {s.lower() for s in _NVRAM_SYMS}:
+                return ("nvram_shared", shared_sym)
+
+            # Unix socket IPC
+            if any(shared_sym.startswith(p) for p in _SOCKET_PATH_PREFIXES):
+                if ".sock" in sym_lower or "socket" in sym_lower:
+                    return ("unix_socket", shared_sym)
+
+            # File-based IPC via /tmp or /var paths
+            if any(shared_sym.startswith(p) for p in _FILE_IPC_PREFIXES):
+                return ("file_ipc", shared_sym)
+
+            # D-Bus interface IPC
+            if any(shared_sym.startswith(p) for p in _DBUS_PREFIXES):
+                if "." in shared_sym and len(shared_sym) > 8:
+                    return ("dbus", shared_sym)
+
+            # Shared config keys that look like IPC
+            if sym_lower in {
+                "admin_pass", "admin_password", "http_passwd",
+                "login_passwd", "wan_ipaddr", "lan_ipaddr",
+                "wl_ssid", "wps_pin",
+            }:
+                return ("nvram_shared", shared_sym)
+
+            return None
+
+        # Also load string_hits.json for additional shared string data
+        sh_path = run_dir / "stages" / "inventory" / "string_hits.json"
+        sh_data = _load_json_file(sh_path)
+        string_hit_samples: list[dict[str, object]] = []
+        if isinstance(sh_data, dict):
+            samples_any = cast(dict[str, object], sh_data).get("samples")
+            if isinstance(samples_any, list):
+                for s in cast(list[object], samples_any):
+                    if isinstance(s, dict):
+                        string_hit_samples.append(cast(dict[str, object], s))
+
+        # Build file->strings map from string_hits for cross-binary detection
+        file_strings: dict[str, set[str]] = {}
+        for sh_sample in string_hit_samples:
+            sh_file = str(sh_sample.get("file", ""))
+            sh_match = str(sh_sample.get("match", ""))
+            if sh_file and sh_match:
+                file_strings.setdefault(sh_file, set()).add(sh_match)
+
+        # Track seen binary pairs to avoid duplicates
+        seen_pairs: set[tuple[str, str]] = set()
+
+        # Strategy 1: Detect IPC via shared symbols across binaries
+        for shared_sym, bins in cross_strings.items():
+            if chain_id >= _MAX_CHAINS:
+                break
+            ipc_result = _detect_ipc_mechanism(shared_sym, bins)
+            if ipc_result is None:
+                continue
+
+            ipc_mechanism, shared_key = ipc_result
+
+            # Build chains between all pairs of binaries sharing this IPC
+            for i, bin_a in enumerate(bins):
+                if chain_id >= _MAX_CHAINS:
+                    break
+                for bin_b in bins[i + 1:]:
+                    if chain_id >= _MAX_CHAINS:
+                        break
+                    pair_key = (
+                        min(bin_a, bin_b), max(bin_a, bin_b),
+                    )
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+
+                    findings_a = findings_by_binary.get(bin_a, [])
+                    findings_b = findings_by_binary.get(bin_b, [])
+                    if not findings_a and not findings_b:
+                        continue
+
+                    chain_id += 1
+                    # Determine which binary is the "writer" (source)
+                    # and which is the "reader" (sink)
+                    a_has_source = any(_is_source(f) for f in findings_a)
+                    b_has_sink = any(_is_sink(f) for f in findings_b)
+
+                    if a_has_source and b_has_sink:
+                        src_bin, dst_bin = bin_a, bin_b
+                        src_f, dst_f = findings_a, findings_b
+                    elif any(_is_source(f) for f in findings_b) and any(
+                        _is_sink(f) for f in findings_a
+                    ):
+                        src_bin, dst_bin = bin_b, bin_a
+                        src_f, dst_f = findings_b, findings_a
+                    else:
+                        src_bin, dst_bin = bin_a, bin_b
+                        src_f, dst_f = findings_a, findings_b
+
+                    src_label = (
+                        _finding_label(src_f[0], "source") if src_f
+                        else "input"
+                    )
+                    dst_label = (
+                        _finding_label(dst_f[0], "sink") if dst_f
+                        else "sink"
+                    )
+
+                    steps: list[dict[str, object]] = []
+                    if src_f:
+                        steps.append({
+                            "finding_id": _finding_id(src_f[0]),
+                            "binary": src_bin,
+                            "primitive": f"input_via_{src_label}",
+                            "evidence": (
+                                f"Source finding in {src_bin}"
+                            ),
+                        })
+                    steps.append({
+                        "ipc": (
+                            f"{ipc_mechanism}('{shared_key}')"
+                        ),
+                        "binary_a": src_bin,
+                        "binary_b": dst_bin,
+                        "primitive": f"ipc_via_{ipc_mechanism}",
+                        "evidence": (
+                            f"Shared {ipc_mechanism} key "
+                            f"'{shared_key}' in both binaries"
+                        ),
+                    })
+                    if dst_f:
+                        steps.append({
+                            "finding_id": _finding_id(dst_f[0]),
+                            "binary": dst_bin,
+                            "primitive": f"sink_via_{dst_label}",
+                            "evidence": (
+                                f"Sink finding in {dst_bin}"
+                            ),
+                        })
+
+                    # Higher confidence when both source and sink
+                    # are confirmed
+                    conf = 0.35
+                    if src_f and dst_f:
+                        conf = 0.45
+                    if a_has_source and b_has_sink:
+                        conf = 0.50
+
+                    cross_binary_ipc_chains.append({
+                        "id": f"chain_{chain_id:03d}",
+                        "description": (
+                            f"Cross-binary IPC chain: "
+                            f"{src_bin} --[{ipc_mechanism}: "
+                            f"{shared_key}]--> {dst_bin}"
+                        ),
+                        "chain_type": "cross_binary_ipc",
+                        "binary_a": src_bin,
+                        "binary_b": dst_bin,
+                        "ipc_mechanism": ipc_mechanism,
+                        "shared_key": shared_key,
+                        "steps": cast(
+                            list[JsonValue],
+                            cast(list[object], steps),
+                        ),
+                        "confidence": _clamp01(conf),
+                        "missing_evidence": cast(
+                            list[JsonValue],
+                            cast(list[object], [
+                                "IPC data flow dynamic verification",
+                                "Cross-process taint confirmation",
+                                "Runtime IPC channel monitoring",
+                            ]),
+                        ),
+                        "method": "shared_string_ipc",
+                    })
+
+        # Strategy 2: Detect nvram IPC across binaries that both
+        # import nvram_get/nvram_set even without shared .rodata keys
+        nvram_bins: list[str] = []
+        for bbin in ba_binaries:
+            bin_name = str(bbin.get("binary", ""))
+            bsyms = bbin.get("symbols")
+            if isinstance(bsyms, list):
+                sym_set = {
+                    str(s) for s in cast(list[object], bsyms)
+                    if isinstance(s, str)
+                }
+                if sym_set & _NVRAM_SYMS:
+                    nvram_bins.append(bin_name)
+
+        if len(nvram_bins) >= 2:
+            # Find pairs where one has input APIs and the other has
+            # sink APIs
+            for i, nv_a in enumerate(nvram_bins):
+                if chain_id >= _MAX_CHAINS:
+                    break
+                syms_a = set(
+                    cast(
+                        list[str],
+                        next(
+                            (
+                                b.get("symbols", [])
+                                for b in ba_binaries
+                                if str(b.get("binary", "")) == nv_a
+                            ),
+                            [],
+                        ),
+                    )
+                )
+                a_input = bool(syms_a & _INPUT_SYMBOLS)
+                a_sink = bool(syms_a & _SINK_SYMBOLS)
+
+                for nv_b in nvram_bins[i + 1:]:
+                    if chain_id >= _MAX_CHAINS:
+                        break
+                    pair_key = (min(nv_a, nv_b), max(nv_a, nv_b))
+                    if pair_key in seen_pairs:
+                        continue
+
+                    syms_b = set(
+                        cast(
+                            list[str],
+                            next(
+                                (
+                                    b.get("symbols", [])
+                                    for b in ba_binaries
+                                    if str(b.get("binary", "")) == nv_b
+                                ),
+                                [],
+                            ),
+                        )
+                    )
+                    b_input = bool(syms_b & _INPUT_SYMBOLS)
+                    b_sink = bool(syms_b & _SINK_SYMBOLS)
+
+                    # Only build chain if there is a plausible
+                    # input -> nvram -> sink flow
+                    if (a_input and b_sink) or (b_input and a_sink):
+                        seen_pairs.add(pair_key)
+                        chain_id += 1
+                        if a_input and b_sink:
+                            src_bin, dst_bin = nv_a, nv_b
+                        else:
+                            src_bin, dst_bin = nv_b, nv_a
+
+                        cross_binary_ipc_chains.append({
+                            "id": f"chain_{chain_id:03d}",
+                            "description": (
+                                f"Cross-binary nvram chain: "
+                                f"{src_bin} --[nvram]--> {dst_bin}"
+                            ),
+                            "chain_type": "cross_binary_ipc",
+                            "binary_a": src_bin,
+                            "binary_b": dst_bin,
+                            "ipc_mechanism": "nvram_shared",
+                            "shared_key": "nvram_api",
+                            "steps": cast(
+                                list[JsonValue],
+                                cast(list[object], [
+                                    {
+                                        "primitive": "input_capture",
+                                        "binary": src_bin,
+                                        "evidence": (
+                                            f"{src_bin} imports input "
+                                            f"APIs + nvram_set"
+                                        ),
+                                    },
+                                    {
+                                        "ipc": "nvram_set → nvram_get",
+                                        "primitive": "nvram_ipc",
+                                        "evidence": (
+                                            "Both binaries import "
+                                            "nvram get/set APIs"
+                                        ),
+                                    },
+                                    {
+                                        "primitive": "sink_execution",
+                                        "binary": dst_bin,
+                                        "evidence": (
+                                            f"{dst_bin} imports sink "
+                                            f"APIs + nvram_get"
+                                        ),
+                                    },
+                                ]),
+                            ),
+                            "confidence": _clamp01(0.40),
+                            "missing_evidence": cast(
+                                list[JsonValue],
+                                cast(list[object], [
+                                    "Specific nvram key identification",
+                                    "Data flow from input to nvram_set",
+                                    "Data flow from nvram_get to sink",
+                                ]),
+                            ),
+                            "method": "nvram_api_ipc",
+                        })
+
+        if not cross_binary_ipc_chains and not cross_binary_chains:
+            limitations.append(
+                "No cross-binary IPC chains detected "
+                "(graph IPC edges: 0, shared-string IPC: 0)"
+            )
+
+        all_chains = (
+            static_chains + cross_binary_chains + cross_binary_ipc_chains
+        )
 
         # Collect cross_strings for LLM prompt
         cross_strings_for_prompt: dict[str, list[str]] = {}
-        if ipc_edges and 'cross_strings' in locals():
+        if cross_strings:
             cross_strings_for_prompt = dict(
                 list(cross_strings.items())[:10]
             )
@@ -788,6 +1124,7 @@ class ChainConstructorStage:
                 "total_chains": len(all_chains),
                 "same_binary": len(static_chains),
                 "cross_binary": len(cross_binary_chains),
+                "cross_binary_ipc": len(cross_binary_ipc_chains),
                 "llm_generated": len(llm_chains),
             },
             "limitations": cast(
@@ -804,6 +1141,7 @@ class ChainConstructorStage:
             "total_chains": len(all_chains),
             "same_binary": len(static_chains),
             "cross_binary": len(cross_binary_chains),
+            "cross_binary_ipc": len(cross_binary_ipc_chains),
             "llm_generated": len(llm_chains),
         }
         return StageOutcome(

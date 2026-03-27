@@ -2556,6 +2556,11 @@ def analyze_run(
         cls = cast(type[Stage], getattr(mod, "EnhancedSourceStage"))
         return cls(no_llm=no_llm)
 
+    def _make_csource_identification(no_llm: bool) -> Stage:
+        mod = importlib.import_module("aiedge.csource_identification")
+        cls = cast(type[Stage], getattr(mod, "CSourceIdentificationStage"))
+        return cls(no_llm=no_llm)
+
     def _make_semantic_classifier(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.semantic_classifier")
         cls = cast(type[Stage], getattr(mod, "SemanticClassifierStage"))
@@ -2654,6 +2659,7 @@ def analyze_run(
             ),
             SurfacesStage(),
             _make_enhanced_source(no_llm),
+            _make_csource_identification(no_llm),
             _make_semantic_classifier(no_llm),
             GraphStage(),
             AttackSurfaceStage(),
@@ -2671,7 +2677,8 @@ def analyze_run(
 
         # Apply results for v2.0 stages that lack dedicated handlers
         _v2_stage_names = {
-            "enhanced_source", "semantic_classification", "taint_propagation",
+            "enhanced_source", "csource_identification",
+            "semantic_classification", "taint_propagation",
             "fp_verification", "adversarial_triage",
         }
         for _sr in inv_rep.stage_results:
@@ -3468,6 +3475,9 @@ def analyze_run(
             max_total_matches=scan_max_matches,
         ),
         SurfacesStage(),
+        _make_enhanced_source(no_llm),
+        _make_csource_identification(no_llm),
+        _make_semantic_classifier(no_llm),
         WebUiStage(),
         GraphStage(),
         make_reachability_stage(info, source_input_path, remaining_s, no_llm),
@@ -3476,6 +3486,9 @@ def analyze_run(
         ThreatModelStage(),
         AttributionStage(),
         LLMSynthesisStage(no_llm=no_llm),
+        _make_taint_propagation(no_llm),
+        _make_fp_verification(no_llm),
+        _make_adversarial_triage(no_llm),
         make_emulation_stage(),
     ]
     # Optional stages (import may fail if dependencies are not available)
@@ -4291,6 +4304,16 @@ def analyze_run(
             _apply_stage_result_to_report(
                 report, exploit_stage_res, budget_s=budget_s
             )
+
+    # Apply results for v2.0 stages that lack dedicated handlers
+    _v2_stage_names_main = {
+        "enhanced_source", "csource_identification",
+        "semantic_classification", "taint_propagation",
+        "fp_verification", "adversarial_triage",
+    }
+    for _sr2 in rep.stage_results:
+        if _sr2.stage in _v2_stage_names_main:
+            _apply_stage_result_to_report(report, _sr2, budget_s=budget_s)
 
     existing_limits = normalize_limitations_list(report.get("limitations"))
     report["limitations"] = cast(

@@ -20,7 +20,11 @@ Environment variables:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+import os
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -32,6 +36,8 @@ from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_text
 from .policy import AIEdgePolicyViolation
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -131,6 +137,251 @@ def _resolve_binary_path(hit: dict[str, object], run_dir: Path) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
+# PyGhidra fallback
+# ---------------------------------------------------------------------------
+
+_MAX_FUNCTIONS_PER_BINARY = 500
+
+
+def _pyghidra_available() -> bool:
+    """Return True if pyghidra can be imported."""
+    try:
+        import pyghidra as _pg  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _run_pyghidra_decompile(
+    binary_path: Path,
+    output_dir: Path,
+    run_dir: Path,
+    timeout_s: float = 300.0,
+) -> dict[str, object]:
+    """Decompile a binary using the pyghidra API (Ghidra 12+ fallback).
+
+    Writes ``decompile_all.json`` and ``xref_graph.json`` into
+    ``output_dir/<sha256>/``.  Returns the same dict shape as
+    :func:`ghidra_bridge.analyze_binary`.
+    """
+    h = hashlib.sha256()
+    with open(binary_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            h.update(chunk)
+    binary_hash = h.hexdigest()
+
+    cache_dir = output_dir / binary_hash
+    try:
+        assert_under_dir(run_dir, cache_dir)
+    except AIEdgePolicyViolation as exc:
+        return {
+            "status": "failed",
+            "binary_hash": binary_hash,
+            "binary_path": str(binary_path),
+            "result_files": {},
+            "duration_s": 0.0,
+            "error": f"path_containment_violation: {exc}",
+        }
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    decompile_out = cache_dir / "decompile_all.json"
+    xref_out = cache_dir / "xref_graph.json"
+
+    # We run pyghidra in a subprocess to isolate JVM state and enforce timeout
+    script = _PYGHIDRA_SCRIPT.format(
+        binary_path=str(binary_path),
+        decompile_out=str(decompile_out),
+        xref_out=str(xref_out),
+        max_functions=_MAX_FUNCTIONS_PER_BINARY,
+    )
+
+    # Ensure GHIDRA_INSTALL_DIR is set for pyghidra.start()
+    env = os.environ.copy()
+    ghidra_home = env.get("AIEDGE_GHIDRA_HOME", "")
+    if ghidra_home and "GHIDRA_INSTALL_DIR" not in env:
+        env["GHIDRA_INSTALL_DIR"] = ghidra_home
+
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            ["python3", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=env,
+        )
+        if proc.returncode != 0:
+            _log.warning(
+                "pyghidra subprocess failed for %s: %s",
+                binary_path.name,
+                (proc.stderr or proc.stdout)[:500],
+            )
+    except subprocess.TimeoutExpired:
+        _log.warning("pyghidra timed out for %s after %.0fs", binary_path.name, timeout_s)
+    except Exception as exc:
+        _log.warning("pyghidra launch failed for %s: %s", binary_path.name, exc)
+
+    duration = time.monotonic() - t0
+
+    result_files: dict[str, str | None] = {}
+    for name, path in [("decompile_all.json", decompile_out), ("xref_graph.json", xref_out)]:
+        if path.is_file():
+            try:
+                result_files[name] = str(path.relative_to(run_dir))
+            except ValueError:
+                result_files[name] = str(path)
+        else:
+            result_files[name] = None
+
+    succeeded_count = sum(1 for v in result_files.values() if v is not None)
+    if succeeded_count == len(result_files) and succeeded_count > 0:
+        status = "ok"
+    elif succeeded_count > 0:
+        status = "partial"
+    else:
+        status = "failed"
+
+    return {
+        "status": status,
+        "binary_hash": binary_hash,
+        "binary_path": str(binary_path),
+        "result_files": result_files,
+        "duration_s": round(duration, 2),
+        "error": None,
+        "method": "pyghidra",
+    }
+
+
+# Inline Python script executed in a subprocess for JVM isolation
+_PYGHIDRA_SCRIPT = r'''
+import json, sys, os
+
+binary_path = r"{binary_path}"
+decompile_out = r"{decompile_out}"
+xref_out = r"{xref_out}"
+max_functions = {max_functions}
+
+try:
+    import pyghidra
+    pyghidra.start()
+    from ghidra.app.decompiler import DecompInterface
+
+    functions_data = []
+    xref_data = []
+
+    with pyghidra.open_program(binary_path) as flat:
+        prog = flat.getCurrentProgram()
+        decomp = DecompInterface()
+        decomp.openProgram(prog)
+
+        func = flat.getFirstFunction()
+        count = 0
+        while func and count < max_functions:
+            entry = str(func.getEntryPoint())
+            fname = func.getName()
+            body = ""
+            try:
+                results = decomp.decompileFunction(func, 30, None)
+                if results and results.decompileCompleted():
+                    c = results.getDecompiledFunction()
+                    if c:
+                        body = c.getC()
+            except Exception:
+                pass
+
+            functions_data.append({{
+                "name": fname,
+                "address": entry,
+                "body": body,
+            }})
+
+            # Collect cross-references (callers -> callee)
+            try:
+                refs = func.getCallingFunctions(None)
+                if refs:
+                    for caller in refs:
+                        xref_data.append({{
+                            "caller": caller.getName(),
+                            "caller_addr": str(caller.getEntryPoint()),
+                            "callee": fname,
+                            "callee_addr": entry,
+                        }})
+            except Exception:
+                pass
+
+            func = flat.getFunctionAfter(func)
+            count += 1
+
+        decomp.dispose()
+
+    with open(decompile_out, "w") as f:
+        json.dump(functions_data, f, indent=2)
+    with open(xref_out, "w") as f:
+        json.dump(xref_data, f, indent=2)
+
+except Exception as e:
+    print(f"pyghidra error: {{e}}", file=sys.stderr)
+    sys.exit(1)
+'''
+
+
+def _aggregate_decompiled_functions(
+    stage_dir: Path,
+    run_dir: Path,
+    analysis_results: list[dict[str, object]],
+) -> bool:
+    """Aggregate all decompiled functions into a single JSON file.
+
+    Returns True if the file was written successfully.
+    """
+    all_functions: list[dict[str, str]] = []
+
+    results_dir = stage_dir / "results"
+    if not results_dir.is_dir():
+        return False
+
+    for result in analysis_results:
+        binary_name = str(result.get("binary", ""))
+        result_files = result.get("result_files", {})
+        if not isinstance(result_files, dict):
+            continue
+        decompile_rel = result_files.get("decompile_all.json")
+        if not decompile_rel:
+            continue
+        decompile_path = run_dir / decompile_rel
+        if not decompile_path.is_file():
+            continue
+        try:
+            data = json.loads(decompile_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, list):
+            continue
+        for entry in data:
+            if isinstance(entry, dict):
+                all_functions.append({
+                    "name": str(entry.get("name", "")),
+                    "binary": binary_name,
+                    "address": str(entry.get("address", "")),
+                    "body": str(entry.get("body", "")),
+                })
+
+    if not all_functions:
+        return False
+
+    out_path = stage_dir / "decompiled_functions.json"
+    try:
+        assert_under_dir(run_dir, out_path)
+        out_path.write_text(
+            json.dumps({"functions": all_functions}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return True
+    except (OSError, AIEdgePolicyViolation):
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Stage
 # ---------------------------------------------------------------------------
 
@@ -159,10 +410,12 @@ class GhidraAnalysisStage:
         # ------------------------------------------------------------------
         # 1. Availability check — skip gracefully when Ghidra is absent
         # ------------------------------------------------------------------
-        if not ghidra_available():
+        _has_headless = ghidra_available()
+        _has_pyghidra = _pyghidra_available()
+        if not _has_headless and not _has_pyghidra:
             return StageOutcome(
                 status="skipped",
-                details={"reason": "analyzeHeadless not found; set AIEDGE_GHIDRA_HOME"},
+                details={"reason": "Neither analyzeHeadless nor pyghidra available; set AIEDGE_GHIDRA_HOME"},
                 limitations=["ghidra_not_installed"],
             )
 
@@ -261,12 +514,49 @@ class GhidraAnalysisStage:
                 )
                 continue
 
-            result = analyze_binary(
-                binary_path=bin_path,
-                output_dir=results_dir,
-                run_dir=run_dir,
-                timeout_s=timeout_per,
-            )
+            result: dict[str, object] | None = None
+
+            # Try analyzeHeadless first (works with older Ghidra versions)
+            if _has_headless:
+                result = analyze_binary(
+                    binary_path=bin_path,
+                    output_dir=results_dir,
+                    run_dir=run_dir,
+                    timeout_s=timeout_per,
+                )
+                # Check if all result_files are null (analyzeHeadless failed)
+                rf = result.get("result_files", {})
+                all_null = (
+                    isinstance(rf, dict)
+                    and rf
+                    and all(v is None for v in rf.values())
+                )
+                if result.get("status") == "failed" or all_null:
+                    if _has_pyghidra:
+                        _log.info(
+                            "analyzeHeadless failed for %s, trying pyghidra fallback",
+                            bin_path.name,
+                        )
+                        result = None  # fall through to pyghidra
+
+            # PyGhidra fallback (Ghidra 12+ with pyghidra)
+            if result is None and _has_pyghidra:
+                result = _run_pyghidra_decompile(
+                    binary_path=bin_path,
+                    output_dir=results_dir,
+                    run_dir=run_dir,
+                    timeout_s=timeout_per,
+                )
+
+            if result is None:
+                result = {
+                    "status": "failed",
+                    "binary_hash": "",
+                    "binary_path": str(bin_path),
+                    "result_files": {},
+                    "duration_s": 0.0,
+                    "error": "no_ghidra_backend_available",
+                }
 
             analysis_results.append(
                 {
@@ -276,6 +566,7 @@ class GhidraAnalysisStage:
                     "result_files": result.get("result_files", {}),
                     "duration_s": result.get("duration_s", 0.0),
                     "error": result.get("error"),
+                    "method": result.get("method", "analyzeHeadless"),
                 }
             )
 
@@ -319,6 +610,12 @@ class GhidraAnalysisStage:
         except (OSError, AIEdgePolicyViolation) as exc:
             limitations.append(f"ghidra_analysis.json write failed: {exc}")
             agg_status = "partial"
+
+        # ------------------------------------------------------------------
+        # 7b. Aggregate decompiled functions across all binaries
+        # ------------------------------------------------------------------
+        if _aggregate_decompiled_functions(stage_dir, run_dir, analysis_results):
+            _log.info("Wrote aggregated decompiled_functions.json")
 
         # ------------------------------------------------------------------
         # 8. Build StageOutcome details (JSON-serialisable)

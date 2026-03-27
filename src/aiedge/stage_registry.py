@@ -628,6 +628,18 @@ def _make_chain_construction_stage(
     return ChainConstructorStage(no_llm=no_llm)
 
 
+def _make_csource_identification_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .csource_identification import CSourceIdentificationStage
+
+    _ = info, source_input_path, remaining_s
+    return CSourceIdentificationStage(no_llm=no_llm)
+
+
 # All stages registered here are included in the full pipeline in run.py:analyze_run().
 # firmware_lineage runs after ExtractionStage (depends on extraction output).
 # fuzzing runs in the exploit section (manifest_profile == "exploit") near DynamicValidationStage.
@@ -652,6 +664,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "endpoints": _make_endpoints_stage,
     "surfaces": _make_surfaces_stage,
     "enhanced_source": _make_enhanced_source_stage,
+    "csource_identification": _make_csource_identification_stage,
     "taint_propagation": _make_taint_propagation_stage,
     "fp_verification": _make_fp_verification_stage,
     "adversarial_triage": _make_adversarial_triage_stage,
