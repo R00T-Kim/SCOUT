@@ -51,4 +51,14 @@ case "${1:-}" in
     ;;
 esac
 
+# Auto-detect Ghidra if not explicitly set
+if [[ -z "${AIEDGE_GHIDRA_HOME:-}" ]]; then
+  for candidate in /opt/ghidra_* /usr/local/ghidra* /usr/share/ghidra*; do
+    if [[ -d "$candidate" && -f "$candidate/support/analyzeHeadless" ]]; then
+      export AIEDGE_GHIDRA_HOME="$candidate"
+      break
+    fi
+  done
+fi
+
 exec env PYTHONPATH="${PYTHONPATH_VALUE}" python3 -m aiedge "$@"

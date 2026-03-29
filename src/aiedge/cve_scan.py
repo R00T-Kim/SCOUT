@@ -549,25 +549,84 @@ def _extract_cve_entry(
 # SBOM loader
 # ---------------------------------------------------------------------------
 
+def _build_fallback_cpe_index(
+    run_dir: Path,
+) -> tuple[list[dict[str, object]], list[str]]:
+    """Build synthetic CPE entries from attribution + firmware_profile."""
+    limitations: list[str] = []
+    components: list[dict[str, object]] = []
+
+    vendor = ""
+    product = ""
+    attr_path = run_dir / "stages" / "attribution" / "attribution.json"
+    if attr_path.is_file():
+        try:
+            attr = json.loads(attr_path.read_text(encoding="utf-8"))
+            if isinstance(attr, dict):
+                vendor = str(
+                    attr.get("vendor", attr.get("manufacturer", ""))
+                ).lower().strip()
+                product = str(
+                    attr.get("product", attr.get("model", ""))
+                ).lower().strip()
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    version = ""
+    fp_path = run_dir / "stages" / "firmware_profile" / "firmware_profile.json"
+    if fp_path.is_file():
+        try:
+            fp = json.loads(fp_path.read_text(encoding="utf-8"))
+            if isinstance(fp, dict):
+                version = str(
+                    fp.get("firmware_version", fp.get("version", ""))
+                ).strip()
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if vendor and product:
+        cpe = (
+            f"cpe:2.3:o:{vendor}:{product}:"
+            f"{version or '*'}:*:*:*:*:*:*:*"
+        )
+        components.append({
+            "name": product,
+            "version": version or "unknown",
+            "cpe": cpe,
+            "source": "inventory_fallback",
+        })
+        limitations.append(
+            "Using inventory-derived CPE entries (SBOM unavailable)"
+        )
+
+    return components, limitations
+
+
 def _load_cpe_index(run_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
     """Load CPE index from the sbom stage output."""
     limitations: list[str] = []
     cpe_path = run_dir / "stages" / "sbom" / "cpe_index.json"
     if not cpe_path.is_file():
         limitations.append(
-            "SBOM CPE index not found at stages/sbom/cpe_index.json; cve_scan skipped"
+            "SBOM CPE index not found at stages/sbom/cpe_index.json"
         )
-        return [], limitations
+        fallback, fb_lim = _build_fallback_cpe_index(run_dir)
+        limitations.extend(fb_lim)
+        return fallback, limitations
 
     try:
         raw = cast(object, json.loads(cpe_path.read_text(encoding="utf-8")))
     except Exception as exc:
         limitations.append(f"SBOM CPE index unreadable: {type(exc).__name__}: {exc}")
-        return [], limitations
+        fallback, fb_lim = _build_fallback_cpe_index(run_dir)
+        limitations.extend(fb_lim)
+        return fallback, limitations
 
     if not isinstance(raw, dict):
         limitations.append("SBOM CPE index invalid: expected JSON object")
-        return [], limitations
+        fallback, fb_lim = _build_fallback_cpe_index(run_dir)
+        limitations.extend(fb_lim)
+        return fallback, limitations
 
     data = cast(dict[str, object], raw)
     components_any = data.get("components")
@@ -577,12 +636,19 @@ def _load_cpe_index(run_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
             components_any = raw
         else:
             limitations.append("SBOM CPE index: 'components' field missing or not a list")
-            return [], limitations
+            fallback, fb_lim = _build_fallback_cpe_index(run_dir)
+            limitations.extend(fb_lim)
+            return fallback, limitations
 
     components: list[dict[str, object]] = []
     for item_any in cast(list[object], components_any):
         if isinstance(item_any, dict):
             components.append(cast(dict[str, object], item_any))
+
+    if not components:
+        fallback, fb_lim = _build_fallback_cpe_index(run_dir)
+        limitations.extend(fb_lim)
+        return fallback, limitations
 
     return components, limitations
 
@@ -645,6 +711,43 @@ class CveScanStage:
         components, limitations = _load_cpe_index(run_dir)
 
         if not components:
+            # Even without SBOM, try known CVE signature matching
+            sig_matches = self._match_known_cve_signatures(run_dir)
+            if sig_matches:
+                # We have signature-based matches — proceed with those
+                matches_path = stage_dir / "cve_matches.json"
+                matches_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "cve-scan-v1",
+                            "matches": sig_matches,
+                            "source": "known_signature_only",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                assert_under_dir(run_dir, matches_path)
+                limitations.append("No SBOM; results from known CVE signature matching only")
+                outcome = StageOutcome(
+                    status="partial",
+                    details={
+                        "matches": len(sig_matches),
+                        "source": "known_signature_only",
+                    },
+                    limitations=limitations,
+                )
+                self._write_stage_json(
+                    stage_dir=stage_dir,
+                    run_dir=run_dir,
+                    outcome=outcome,
+                    started_at=_iso_utc_now(),
+                    duration_s=time.monotonic() - t_start,
+                    artifacts=[str(matches_path)],
+                )
+                return outcome
+
             outcome = StageOutcome(
                 status="skipped",
                 details={"reason": "no_sbom_components"},
@@ -760,6 +863,79 @@ class CveScanStage:
 
         if network_unavailable and not matches:
             limitations.append("nvd_api_unavailable")
+
+        # ------------------------------------------------------------------ #
+        # Known CVE signature matching
+        # ------------------------------------------------------------------ #
+        try:
+            from .known_cve_signatures import match_known_signatures
+
+            vendor_claims: list[str] = []
+            model_claims: list[str] = []
+            attr_path = run_dir / "stages" / "attribution" / "attribution.json"
+            if attr_path.is_file():
+                try:
+                    _attr = json.loads(attr_path.read_text(encoding="utf-8"))
+                    if isinstance(_attr, dict):
+                        _v = _attr.get("vendor", _attr.get("manufacturer", ""))
+                        _m = _attr.get("product", _attr.get("model", ""))
+                        if _v:
+                            vendor_claims.append(str(_v).lower())
+                        if _m:
+                            model_claims.append(str(_m).lower())
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Also extract from case_id
+            if self.case_id:
+                for tok in self.case_id.lower().replace("-", " ").replace("_", " ").split():
+                    if len(tok) >= 3:
+                        model_claims.append(tok)
+
+            binary_names: set[str] = set()
+            binary_symbols: dict[str, set[str]] = {}
+            ba_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
+            if ba_path.is_file():
+                try:
+                    _ba = json.loads(ba_path.read_text(encoding="utf-8"))
+                    if isinstance(_ba, dict):
+                        for _hit in _ba.get("hits", []):
+                            if not isinstance(_hit, dict):
+                                continue
+                            _p = str(_hit.get("path", ""))
+                            _bn = _p.rsplit("/", 1)[-1].lower() if "/" in _p else _p.lower()
+                            if _bn:
+                                binary_names.add(_bn)
+                                _ms = _hit.get("matched_symbols", [])
+                                if isinstance(_ms, list):
+                                    binary_symbols[_bn] = {
+                                        str(s) for s in _ms if isinstance(s, str)
+                                    }
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            if vendor_claims or model_claims:
+                sig_matches = match_known_signatures(
+                    vendor_claims=vendor_claims,
+                    model_claims=model_claims,
+                    binary_names=binary_names,
+                    binary_symbols=binary_symbols,
+                )
+                existing_cves = {str(m.get("cve_id", "")) for m in matches}
+                for sm in sig_matches:
+                    if str(sm["cve_id"]) in existing_cves:
+                        continue
+                    matches.append({
+                        "component": str(sm.get("entry_point", "")),
+                        "version": "",
+                        "cve_id": str(sm["cve_id"]),
+                        "cvss_v3_score": float(sm.get("cvss_v3_score", 0)),
+                        "match_type": "known_signature",
+                        "match_confidence": float(sm.get("confidence", 0)),
+                        "description": str(sm.get("description", "")),
+                    })
+        except ImportError:
+            pass  # known_cve_signatures module not available
 
         # ------------------------------------------------------------------ #
         # Build finding candidates (CVSS >= 7.0)
@@ -901,6 +1077,99 @@ class CveScanStage:
     # ---------------------------------------------------------------------- #
     # Internal helpers
     # ---------------------------------------------------------------------- #
+
+    def _match_known_cve_signatures(
+        self, run_dir: Path,
+    ) -> list[dict[str, object]]:
+        """Match known CVE signatures using attribution + inventory + case_id."""
+        try:
+            from .known_cve_signatures import match_known_signatures
+        except ImportError:
+            return []
+
+        vendor_claims: list[str] = []
+        model_claims: list[str] = []
+
+        # From attribution
+        attr_path = run_dir / "stages" / "attribution" / "attribution.json"
+        if attr_path.is_file():
+            try:
+                _attr = json.loads(attr_path.read_text(encoding="utf-8"))
+                if isinstance(_attr, dict):
+                    for claim in _attr.get("claims", []):
+                        if isinstance(claim, dict):
+                            v = claim.get("vendor", "")
+                            m = claim.get("product", claim.get("model", ""))
+                            if v:
+                                vendor_claims.append(str(v).lower())
+                            if m:
+                                model_claims.append(str(m).lower())
+                    # Also top-level
+                    v = _attr.get("vendor", _attr.get("manufacturer", ""))
+                    m = _attr.get("product", _attr.get("model", ""))
+                    if v:
+                        vendor_claims.append(str(v).lower())
+                    if m:
+                        model_claims.append(str(m).lower())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # From case_id / firmware filename
+        case_str = str(self.case_id or "").lower()
+        # Also check input firmware path
+        input_dir = run_dir / "input"
+        if input_dir.is_dir():
+            for p in input_dir.iterdir():
+                case_str += " " + p.name.lower()
+
+        # Known vendor keywords
+        _VENDOR_KEYWORDS = {
+            "netgear": "netgear", "dlink": "d-link", "d-link": "d-link",
+            "linksys": "linksys", "asus": "asus", "tplink": "tp-link",
+            "tp-link": "tp-link", "trendnet": "trendnet", "zyxel": "zyxel",
+            "belkin": "belkin",
+        }
+        for kw, vendor in _VENDOR_KEYWORDS.items():
+            if kw in case_str:
+                vendor_claims.append(vendor)
+
+        # Extract model tokens from case_id
+        for tok in case_str.replace("-", " ").replace("_", " ").replace("/", " ").split():
+            if len(tok) >= 2 and any(c.isdigit() for c in tok):
+                model_claims.append(tok.replace(" ", "-"))
+
+        # From inventory
+        binary_names: set[str] = set()
+        binary_symbols: dict[str, set[str]] = {}
+        ba_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
+        if ba_path.is_file():
+            try:
+                _ba = json.loads(ba_path.read_text(encoding="utf-8"))
+                if isinstance(_ba, dict):
+                    for _hit in _ba.get("hits", []):
+                        if not isinstance(_hit, dict):
+                            continue
+                        _p = str(_hit.get("path", ""))
+                        _bn = _p.rsplit("/", 1)[-1].lower() if "/" in _p else _p.lower()
+                        if _bn:
+                            binary_names.add(_bn)
+                            _ms = _hit.get("matched_symbols", [])
+                            if isinstance(_ms, list):
+                                binary_symbols[_bn] = {
+                                    str(s) for s in _ms if isinstance(s, str)
+                                }
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        if not vendor_claims and not model_claims:
+            return []
+
+        return match_known_signatures(
+            vendor_claims=list(set(vendor_claims)),
+            model_claims=list(set(model_claims)),
+            binary_names=binary_names,
+            binary_symbols=binary_symbols,
+        )
 
     def _write_stage_json(
         self,

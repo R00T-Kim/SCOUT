@@ -959,6 +959,10 @@ _WEB_INVENTORY_NAME_TOKENS: tuple[str, ...] = (
     "webapi",
     "webman",
 )
+_WEB_BINARY_NAMES: frozenset[str] = frozenset({
+    "httpd", "lighttpd", "uhttpd", "mini_httpd", "boa",
+    "goahead", "thttpd", "nginx",
+})
 _EXEC_SINK_SYMBOLS: frozenset[str] = frozenset(
     {
         "system",
@@ -986,19 +990,83 @@ def _inventory_ref_evidence(path_s: str, *, note: str | None = None) -> dict[str
     return ev
 
 
+def _correlate_web_binaries(
+    service_candidates: list[object],
+    binary_hits: list[object],
+) -> list[dict[str, object]]:
+    """Match web service candidates to binary_analysis hits and return detailed info."""
+    web_names: set[str] = set()
+    for cand_any in service_candidates:
+        if not isinstance(cand_any, dict):
+            continue
+        cand = cast(dict[str, object], cand_any)
+        kind = str(cand.get("kind", "")).lower()
+        if "web" in kind or "http" in kind or "cgi" in kind:
+            name = str(cand.get("name", "")).lower()
+            if name:
+                web_names.add(name)
+            ev = cand.get("evidence")
+            if isinstance(ev, list):
+                for ev_item_any in cast(list[object], ev):
+                    if isinstance(ev_item_any, dict):
+                        path = str(cast(dict[str, object], ev_item_any).get("path", ""))
+                        if path:
+                            web_names.add(path.rsplit("/", 1)[-1].lower())
+
+    affected: list[dict[str, object]] = []
+    for hit_any in binary_hits:
+        if not isinstance(hit_any, dict):
+            continue
+        hit = cast(dict[str, object], hit_any)
+        path = str(hit.get("path", ""))
+        basename = path.rsplit("/", 1)[-1].lower() if "/" in path else path.lower()
+        syms_any = hit.get("matched_symbols")
+        syms: set[str] = set()
+        if isinstance(syms_any, list):
+            syms = {str(s).lower() for s in cast(list[object], syms_any) if isinstance(s, str)}
+
+        exec_syms = sorted(syms & {s.lower() for s in _EXEC_SINK_SYMBOLS})
+        if not exec_syms:
+            continue
+
+        input_syms = sorted(syms & {"getenv", "recv", "recvfrom", "read", "fgets", "gets"})
+        hardening_raw = hit.get("hardening", {})
+        hardening: dict[str, object] = hardening_raw if isinstance(hardening_raw, dict) else {}
+
+        base_no_ext = basename.rsplit(".", 1)[0] if "." in basename else basename
+        if base_no_ext in _WEB_BINARY_NAMES or basename in web_names:
+            web_role: str = "web_server_binary"
+        elif ".cgi" in basename:
+            web_role = "cgi_script"
+        else:
+            continue  # Only include web-related binaries
+
+        affected.append({
+            "binary": path,
+            "sink_symbols": exec_syms,
+            "input_symbols": input_syms,
+            "hardening": hardening,
+            "web_role": web_role,
+        })
+
+    return affected
+
+
 def _inventory_web_exec_overlap_signals(
     run_dir: Path,
     inv_json_path: Path,
-) -> tuple[int, int, list[dict[str, JsonValue]], list[str]]:
+) -> tuple[int, int, list[dict[str, JsonValue]], list[str], list[dict[str, object]]]:
     inv_any = _safe_load_json(inv_json_path)
     if not isinstance(inv_any, dict):
-        return 0, 0, [], []
+        return 0, 0, [], [], []
     inv_obj = cast(dict[str, object], inv_any)
 
     web_evidence: list[dict[str, JsonValue]] = []
     web_count = 0
+    service_candidates_raw: list[object] = []
     candidates_any = inv_obj.get("service_candidates")
     if isinstance(candidates_any, list):
+        service_candidates_raw = list(cast(list[object], candidates_any))
         for item_any in cast(list[object], candidates_any):
             if not isinstance(item_any, dict):
                 continue
@@ -1039,6 +1107,7 @@ def _inventory_web_exec_overlap_signals(
     limitations: list[str] = []
     exec_count = 0
     exec_evidence: list[dict[str, JsonValue]] = []
+    raw_hits: list[object] = []
     binary_any = _safe_load_json(binary_analysis_path)
     if not isinstance(binary_any, dict):
         limitations.append(
@@ -1047,6 +1116,7 @@ def _inventory_web_exec_overlap_signals(
     else:
         hits_any = cast(dict[str, object], binary_any).get("hits")
         if isinstance(hits_any, list):
+            raw_hits = list(cast(list[object], hits_any))
             for hit_any in cast(list[object], hits_any):
                 if not isinstance(hit_any, dict):
                     continue
@@ -1079,11 +1149,12 @@ def _inventory_web_exec_overlap_signals(
                 if ev is not None:
                     exec_evidence.append(ev)
 
+    affected = _correlate_web_binaries(service_candidates_raw, raw_hits)
     combined = cast(
         list[dict[str, JsonValue]],
         list(web_evidence[:4]) + list(exec_evidence[:4]),
     )
-    return web_count, exec_count, combined, limitations
+    return web_count, exec_count, combined, limitations, affected
 
 
 def _iter_files_count(root: Path, *, max_files: int = 50_000) -> int:
@@ -3136,7 +3207,7 @@ def run_findings(
 
     findings: list[dict[str, JsonValue]] = []
     string_hit_counts = _load_nonzero_string_hit_counts(inv_strings)
-    web_candidate_count, exec_sink_count, web_exec_evidence, web_exec_limits = (
+    web_candidate_count, exec_sink_count, web_exec_evidence, web_exec_limits, web_exec_affected = (
         _inventory_web_exec_overlap_signals(ctx.run_dir, inv_json)
     )
     for limitation in web_exec_limits:
@@ -3646,6 +3717,30 @@ def run_findings(
             )
 
     if web_candidate_count > 0 and exec_sink_count > 0:
+        if web_exec_affected:
+            _desc_parts: list[str] = []
+            for _ab in web_exec_affected[:5]:
+                _bpath = str(_ab.get("binary", ""))
+                _bname = _bpath.rsplit("/", 1)[-1] if "/" in _bpath else _bpath
+                _sinks = ", ".join(
+                    str(s) + "()" for s in cast(list[object], _ab.get("sink_symbols", []))
+                )
+                _h = _ab.get("hardening", {})
+                _h_parts: list[str] = []
+                if isinstance(_h, dict):
+                    if not _h.get("pie"):
+                        _h_parts.append("no PIE")
+                    if not _h.get("canary"):
+                        _h_parts.append("no canary")
+                _h_str = ", ".join(_h_parts) if _h_parts else "unknown hardening"
+                _desc_parts.append(f"{_bname}: {_sinks}. {_h_str}")
+            web_exec_description: str = "; ".join(_desc_parts)
+        else:
+            web_exec_description = (
+                "Inventory indicates both web-entry candidates (for example CGI/web server components) "
+                "and binaries exposing command-execution sinks (system/popen/exec*). "
+                "Prioritize source-to-sink validation for authenticated and unauthenticated web flows."
+            )
         findings.append(
             {
                 "id": "aiedge.findings.web.exec_sink_overlap",
@@ -3653,11 +3748,8 @@ def run_findings(
                 "severity": "high",
                 "confidence": 0.78,
                 "disposition": "suspected",
-                "description": (
-                    "Inventory indicates both web-entry candidates (for example CGI/web server components) "
-                    "and binaries exposing command-execution sinks (system/popen/exec*). "
-                    "Prioritize source-to-sink validation for authenticated and unauthenticated web flows."
-                ),
+                "description": web_exec_description,
+                "affected_binaries": cast(list[JsonValue], cast(list[object], web_exec_affected)),
                 "evidence": cast(
                     list[JsonValue],
                     cast(

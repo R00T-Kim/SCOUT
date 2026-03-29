@@ -49,7 +49,7 @@ _SINK_SYMBOLS: frozenset[str] = frozenset({
     "popen",
 })
 
-_MAX_PATHS = 50
+_MAX_PATHS = 200
 _MAX_ALERTS = 100
 
 
@@ -110,6 +110,19 @@ def _build_taint_prompt(
         '  "sanitizers_found": ["<sanitizer_name>", ...],\n'
         '  "rationale": "<explanation>"\n'
         "}\n"
+    )
+
+
+def _build_http_taint_path(
+    binary: str, input_api: str, sink: str, hardening: str,
+) -> str:
+    """Build a structured taint path description for web server binaries."""
+    basename = binary.rsplit("/", 1)[-1] if "/" in binary else binary
+    return (
+        f"HTTP_REQUEST -> {basename}:{input_api}() -> ... -> {basename}:{sink}(). "
+        f"Web server binary processes HTTP input via {input_api}() which may "
+        f"reach dangerous sink {sink}() without sanitization. "
+        f"Hardening: {hardening or 'unknown'}"
     )
 
 
@@ -273,8 +286,13 @@ class TaintPropagationStage:
         trace_count = 0
 
         # From enhanced_source sources (which now contain matched_sink_apis)
+        # Prioritize web server binaries so they don't get crowded out by _MAX_PATHS
+        sorted_sources = sorted(
+            source_list,
+            key=lambda s: (not bool(s.get("web_server")), -float(s.get("confidence", 0))),
+        )
         seen_static: set[tuple[str, str, str]] = set()
-        for source in source_list:
+        for source in sorted_sources:
             src_api = str(source.get("api", ""))
             src_binary = str(source.get("binary", ""))
             sink_apis_any = source.get("matched_sink_apis")
@@ -313,18 +331,45 @@ class TaintPropagationStage:
                 if has_real_input:
                     conf = 0.55
 
+                # HTTP-aware taint path for web server binaries
+                source_type = str(source.get("source_type", ""))
+                is_web = bool(source.get("web_server", False))
+                if is_web:
+                    conf = 0.60
+                    path_desc = _build_http_taint_path(
+                        src_binary, src_api, sink_sym, hardening_str,
+                    )
+                else:
+                    path_desc = (
+                        f"Static inference: {src_binary} imports both "
+                        f"{src_api}() and {sink_sym}(). "
+                        f"Hardening: {hardening_str or 'unknown'}"
+                    )
+
+                src_basename = (
+                    src_binary.rsplit("/", 1)[-1]
+                    if "/" in src_binary
+                    else src_binary
+                )
+                call_chain: list[dict[str, str]] = []
+                if is_web:
+                    call_chain = [
+                        {"step": "entry", "function": f"{src_basename}:main", "type": "http_handler"},
+                        {"step": "input", "function": f"{src_basename}:{src_api}", "type": "http_param_read"},
+                        {"step": "sink", "function": f"{src_basename}:{sink_sym}", "type": "command_execution"},
+                    ]
+
                 taint_entry: dict[str, JsonValue] = {
                     "source_api": src_api,
                     "source_binary": src_binary,
                     "sink_symbol": sink_sym,
                     "taint_reaches_sink": True,
                     "confidence": _clamp01(conf),
-                    "path_description": (
-                        f"Static inference: {src_binary} imports both "
-                        f"{src_api}() and {sink_sym}(). "
-                        f"Hardening: {hardening_str or 'unknown'}"
-                    ),
+                    "path_description": path_desc,
                     "method": "static_inference",
+                    "source_type": source_type or "generic",
+                    "web_server": is_web,
+                    "call_chain": cast(list[JsonValue], cast(list[object], call_chain)),
                 }
                 taint_results.append(taint_entry)
                 alerts.append({
@@ -333,8 +378,10 @@ class TaintPropagationStage:
                     "source_address": str(source.get("address", "0x0")),
                     "sink_symbol": sink_sym,
                     "confidence": _clamp01(conf),
-                    "path_description": cast(str, taint_entry["path_description"]),
+                    "path_description": path_desc,
                     "method": "static_inference",
+                    "source_type": source_type or "generic",
+                    "web_server": is_web,
                 })
                 trace_count += 1
 

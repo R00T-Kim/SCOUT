@@ -64,6 +64,50 @@ _SINK_APIS_LOWER: frozenset[str] = frozenset(api.lower() for api in SINK_APIS)
 # Mapping from lowercase back to canonical name
 _API_CANONICAL: dict[str, str] = {api.lower(): api for api in INPUT_APIS | SINK_APIS}
 
+# --- Web server auto-detection ---
+_WEB_SERVER_NAMES: frozenset[str] = frozenset({
+    "httpd", "lighttpd", "uhttpd", "mini_httpd", "boa",
+    "goahead", "thttpd", "nginx", "busybox_httpd", "micro_httpd",
+    "cgibin", "prog.cgi", "soapcgi",
+})
+
+_WEB_LISTENER_SYMS: frozenset[str] = frozenset({
+    "listen", "accept", "bind", "socket",
+})
+
+_EXEC_SINK_SYMS: frozenset[str] = frozenset({
+    "system", "popen", "execve", "execv", "execl",
+})
+
+
+def _classify_web_server(
+    path: str,
+    symbols: set[str],
+    ipc_indicators: dict[str, object] | None,
+) -> tuple[bool, float]:
+    """Classify binary as web server and return (is_web, confidence_boost)."""
+    basename = path.rsplit("/", 1)[-1].lower() if "/" in path else path.lower()
+    base_no_ext = basename.rsplit(".", 1)[0] if "." in basename else basename
+
+    has_sink = bool(symbols & _EXEC_SINK_SYMS)
+    has_listener = bool(symbols & _WEB_LISTENER_SYMS)
+    has_getenv = "getenv" in {s.lower() for s in symbols}
+
+    if ipc_indicators and isinstance(ipc_indicators, dict):
+        for key in ("network_symbols", "ipc_symbols"):
+            syms_any = ipc_indicators.get(key)
+            if isinstance(syms_any, (list, set)):
+                net_set = {str(s).lower() for s in syms_any if isinstance(s, str)}
+                has_listener = has_listener or bool(net_set & _WEB_LISTENER_SYMS)
+
+    if base_no_ext in _WEB_SERVER_NAMES and has_sink:
+        return True, 0.20
+    if has_listener and has_getenv and has_sink:
+        return True, 0.15
+    if ".cgi" in basename and has_sink:
+        return True, 0.10
+    return False, 0.0
+
 
 def _load_json_file(path: Path) -> object | None:
     if not path.is_file():
@@ -194,6 +238,28 @@ class EnhancedSourceStage:
                 # Sink APIs only -> still a source at lower confidence
                 confidence = 0.50
 
+            # Web server classification — boost confidence for HTTP binaries
+            ipc_any = bin_obj.get("ipc_indicators")
+            ipc_dict = (
+                cast(dict[str, object], ipc_any)
+                if isinstance(ipc_any, dict)
+                else None
+            )
+            is_web, conf_boost = _classify_web_server(
+                bin_path, symbols, ipc_dict
+            )
+            if is_web:
+                confidence = min(0.90, confidence + conf_boost)
+
+            has_recv = bool(symbols & {"recv", "recvfrom", "recvmsg"})
+            source_type: str
+            if is_web:
+                source_type = "http_input"
+            elif has_recv:
+                source_type = "network_input"
+            else:
+                source_type = "generic"
+
             # Record each input API as a source; if none, use sink APIs
             api_list = matched_input if matched_input else matched_sink
             for api in api_list:
@@ -211,6 +277,8 @@ class EnhancedSourceStage:
                     ),
                     "arch": arch,
                     "hardening": cast(dict[str, JsonValue], hardening),
+                    "source_type": source_type,
+                    "web_server": is_web,
                 })
 
         # --- Fallback: read source_sink_graph.json for additional sources ---

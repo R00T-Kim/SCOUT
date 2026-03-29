@@ -46,7 +46,17 @@ def _find_analyze_headless() -> str | None:
         if candidate.is_file():
             return str(candidate)
     which = shutil.which("analyzeHeadless")
-    return which
+    if which:
+        return which
+    # Auto-detect from common install paths
+    for pattern in ("/opt/ghidra_*", "/usr/local/ghidra*", "/usr/share/ghidra*"):
+        import glob as _glob
+        for d in sorted(_glob.glob(pattern), reverse=True):
+            candidate = Path(d) / "support" / "analyzeHeadless"
+            if candidate.is_file():
+                os.environ["AIEDGE_GHIDRA_HOME"] = d
+                return str(candidate)
+    return None
 
 
 def _scripts_dir() -> Path:

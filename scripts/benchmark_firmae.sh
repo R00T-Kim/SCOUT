@@ -10,16 +10,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}"
 export PYTHONPATH
+AIEDGE_GHIDRA_HOME="${AIEDGE_GHIDRA_HOME:-/opt/ghidra_12.0.2_PUBLIC}"
+export AIEDGE_GHIDRA_HOME
 
 # --- Configuration ---
 DATASET_DIR="${DATASET_DIR:-${REPO_ROOT}/aiedge-inputs/firmae-benchmark}"
 RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/benchmark-results/firmae-$(date +%Y%m%d_%H%M)}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
 TIME_BUDGET_S="${TIME_BUDGET_S:-600}"          # 10 min per firmware
-STAGES="${STAGES:-tooling,extraction,structure,carving,firmware_profile,inventory,sbom,cve_scan,reachability,endpoints,surfaces,graph,attack_surface,findings}"
+STAGES="${STAGES:-}"  # empty = full pipeline (analyze --no-llm)
 NO_LLM="--no-llm"
 PROFILE="analysis"
 MAX_IMAGES="${MAX_IMAGES:-0}"                  # 0 = all
+CLEANUP_RUNS="${CLEANUP_RUNS:-0}"              # 1 = delete run dirs after CSV capture
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -75,6 +78,7 @@ while [[ $# -gt 0 ]]; do
         --max-images)    MAX_IMAGES="$2"; shift 2 ;;
         --8mb)           USE_8MB=1; shift ;;
         --full)          STAGES=""; shift ;;  # empty = all stages
+        --cleanup)       CLEANUP_RUNS=1; shift ;;
         --dry-run)       DRY_RUN=1; shift ;;
         -h|--help)       usage ;;
         *)               echo "Unknown option: $1"; usage ;;
@@ -84,10 +88,11 @@ done
 # --- Discover firmware files ---
 log "Scanning dataset: ${DATASET_DIR}"
 mapfile -t FW_FILES < <(
-    find "$DATASET_DIR" -type f \( \
-        -name "*.bin" -o -name "*.img" -o -name "*.fw" -o \
-        -name "*.chk" -o -name "*.trx" -o -name "*.zip" -o \
-        -name "*.rar" -o -name "*.gz" -o -name "*.bz2" \
+    find -L "$DATASET_DIR" -type f \( \
+        -iname "*.bin" -o -iname "*.img" -o -iname "*.fw" -o \
+        -iname "*.chk" -o -iname "*.trx" -o -iname "*.zip" -o \
+        -iname "*.rar" -o -iname "*.gz" -o -iname "*.bz2" -o \
+        -iname "*.ssa" \
     \) | sort
 )
 
@@ -257,11 +262,26 @@ else: print(0)
         *)       icon="${RED}FAIL${NC}" ;;
     esac
     echo -e "[${idx}/${TOTAL}] ${icon} ${vendor}/${fw_name} (${duration}s) stages=${stages_ok}ok/${stages_partial}p/${stages_failed}f findings=${findings_count} cves=${cve_count}"
+
+    # Archive analysis JSONs and cleanup run dir to save disk
+    if [[ "$CLEANUP_RUNS" == "1" && -n "$run_dir" && -d "$run_dir" ]]; then
+        local archive_dir="${RESULTS_DIR}/archives/${vendor}/${sha_short}"
+        mkdir -p "$archive_dir"
+        # Copy all analysis JSONs (excluding extraction dir)
+        find "$run_dir"/stages -name "*.json" -not -path "*/extraction/*" \
+            -exec cp --parents -t "$archive_dir" {} + 2>/dev/null || true
+        # Copy report and handoff if present
+        cp "$run_dir"/report/*.json "$archive_dir/" 2>/dev/null || true
+        cp "$run_dir"/firmware_handoff.json "$archive_dir/" 2>/dev/null || true
+        cp "$run_dir"/manifest.json "$archive_dir/" 2>/dev/null || true
+        # Delete full run dir
+        rm -rf "$run_dir" 2>/dev/null || true
+    fi
 }
 
 export -f run_one
 export PYTHONPATH RESULTS_DIR LOG_DIR SUMMARY_CSV TIME_BUDGET_S STAGES
-export NO_LLM PROFILE USE_8MB TOTAL
+export NO_LLM PROFILE USE_8MB TOTAL CLEANUP_RUNS
 export RED GREEN YELLOW BLUE NC
 
 log "Starting benchmark..."
@@ -277,12 +297,19 @@ if command -v parallel &>/dev/null && [[ $PARALLEL_JOBS -gt 1 ]]; then
     done | parallel --colsep ' ' -j "$PARALLEL_JOBS" --line-buffer \
         run_one {1} {2}
 else
-    log "Running sequentially (install GNU parallel for ${PARALLEL_JOBS}x speedup)"
+    log "Using bash background jobs (${PARALLEL_JOBS} concurrent)"
     idx=0
+    active=0
     for fw in "${FW_FILES[@]}"; do
         idx=$((idx + 1))
-        run_one "$idx" "$fw"
+        run_one "$idx" "$fw" &
+        active=$((active + 1))
+        if [[ $active -ge $PARALLEL_JOBS ]]; then
+            wait -n 2>/dev/null || true
+            active=$((active - 1))
+        fi
     done
+    wait || true
 fi
 
 END_TIME=$(date +%s)

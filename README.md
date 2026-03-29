@@ -14,7 +14,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-[![Stages](https://img.shields.io/badge/Pipeline-41_Stages-blueviolet?style=for-the-badge)]()
+[![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
@@ -61,7 +61,10 @@
 | **Findings SHA-256 Manifest** | `stages/findings/stage.json` now carries per-artifact SHA-256 hashes for full evidence chain coverage |
 | **Handoff Validation** | `firmware_handoff.json` is validated via `validate_handoff()` before write -- missing keys are caught early |
 | **Exploit Stage Isolation** | Each exploit stage has independent import error handling; a single missing dependency no longer skips all five |
-| **v2.0: 7 New Analysis Stages** | Enhanced source detection, semantic classification, taint propagation, FP verification, adversarial triage, PoC refinement, chain construction (34 -> 41 stages) |
+| **v2.0: 8 New Analysis Stages** | Enhanced source detection, semantic classification, taint propagation, FP verification, adversarial triage, PoC refinement, chain construction, C-source identification (34 -> 42 stages) |
+| **v2.1: Known CVE Signatures** | `known_cve_signatures.py`: 13 CVE patterns (NETGEAR, D-Link, Linksys, ASUS, TP-Link, TRENDnet, Zyxel, Belkin) -- vendor/model/binary matching without SBOM |
+| **v2.1: Web Server Auto-Detection** | `enhanced_source.py` auto-identifies httpd/lighttpd/boa binaries; HTTP input sources classified as `source_type: "http_input"` for prioritized taint analysis |
+| **v2.1: Ghidra Auto-Detection** | `./scout` wrapper and `ghidra_bridge.py` probe `/opt/ghidra_*`, `/usr/local/ghidra*`, `/usr/share/ghidra*` -- `AIEDGE_GHIDRA_HOME` no longer required |
 | **v2.0: CLI Modularization** | `__main__.py` split from ~4500 lines into 7 focused modules (~660 lines entry point) |
 | **v2.0: FirmAE Benchmarking** | `benchmark_firmae.sh` for SCOUT vs FirmAE comparison; `unpack_firmae_dataset.sh` for dataset classification |
 
@@ -72,7 +75,7 @@
 ```
   1. Drop            2. Analyze              3. Collect               4. Review
   ─────────          ──────────              ──────────               ────────
-  firmware.bin  ──>  41-stage pipeline  ──>  SARIF findings      ──>  Web viewer
+  firmware.bin  ──>  42-stage pipeline  ──>  SARIF findings      ──>  Web viewer
                      runs automatically      CycloneDX SBOM+VEX      VS Code (SARIF)
                                              Evidence chain           GitHub Code Scanning
                                              SLSA attestation         TUI dashboard
@@ -80,7 +83,7 @@
 
 **Step 1** -- Point SCOUT at any firmware blob (or pre-extracted rootfs).
 
-**Step 2** -- The 41-stage pipeline runs end-to-end: unpacking, profiling, binary analysis, enhanced source detection, semantic classification, SBOM generation, CVE scanning, reachability analysis, taint propagation, FP verification, adversarial triage, security assessment, attack surface mapping, exploit chain construction, PoC refinement, optional Ghidra decompilation, optional AFL++ fuzzing.
+**Step 2** -- The 42-stage pipeline runs end-to-end: unpacking, profiling, binary analysis, enhanced source detection, semantic classification, C-source identification, SBOM generation, CVE scanning, reachability analysis, taint propagation, FP verification, adversarial triage, security assessment, attack surface mapping, exploit chain construction, PoC refinement, optional Ghidra decompilation, optional AFL++ fuzzing.
 
 **Step 3** -- Outputs land in a structured run directory: SARIF 2.1.0 findings, CycloneDX 1.6 SBOM with VEX annotations, hash-anchored evidence chain, SLSA L2 provenance attestation, and executive Markdown report.
 
@@ -157,21 +160,37 @@
 | :clipboard: | **Executive Reports** | Auto-generated Markdown reports with top risks, SBOM/CVE tables, attack surface |
 | :arrows_counterclockwise: | **Firmware Diff** | Compare two analysis runs -- filesystem, hardening, and config security changes |
 | :chart_with_upwards_trend: | **Benchmark Runner** | Corpus-based quality measurement with precision/recall/FPR tracking |
+| :electric_plug: | **Cross-Binary IPC Chains** | 5 IPC types (unix_socket, dbus, shm, pipe, exec_chain); shared `.rodata` string-based cross-binary communication detection |
+| :label: | **Known CVE Signatures** | 13 built-in CVE patterns (NETGEAR, D-Link, Linksys, ASUS, TP-Link, TRENDnet, Zyxel, Belkin) matched by vendor/model/binary without SBOM |
 
 ---
 
-## Pipeline (41 Stages)
+## Pipeline (42 Stages)
 
 ```
 Firmware --> Unpack --> Profile --> Inventory --> [Ghidra] --> Semantic Classification
     --> SBOM --> CVE Scan --> Reachability --> Endpoints --> Surfaces
-    --> Enhanced Source --> Taint Propagation --> FP Verification --> Adversarial Triage
+    --> Enhanced Source --> C-Source Identification --> Taint Propagation
+    --> FP Verification --> Adversarial Triage
     --> Security Assessment --> Graph --> Attack Surface --> Findings
     --> LLM Triage --> LLM Synthesis --> Emulation (3-tier) --> [Fuzzing]
     --> PoC Refinement --> Chain Construction --> Exploit Chain --> PoC --> Verification
 ```
 
-**New in v2.0:** `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction`.
+**New in v2.0:** `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction`, `csource_identification`.
+
+**v2.0 Stage Details:**
+
+| Stage | Module | Purpose | LLM? | Cost |
+|-------|--------|---------|------|------|
+| `enhanced_source` | `enhanced_source.py` | Web server auto-detection + INPUT_APIS scan (21 APIs) | No | $0 |
+| `semantic_classification` | `semantic_classifier.py` | 3-pass function classifier (static, haiku, sonnet) | Yes | Low |
+| `taint_propagation` | `taint_propagation.py` | HTTP-aware inter-procedural taint with call chain | Yes | Medium |
+| `fp_verification` | `fp_verification.py` | 3-pattern FP removal (sanitizer/non-propagating/sysfile) | No | $0 |
+| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM debate for FPR reduction | Yes | Medium |
+| `poc_refinement` | `poc_refinement.py` | Iterative PoC generation from fuzzing seeds (5 attempts) | Yes | Medium |
+| `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
+| `csource_identification` | `csource_identification.py` | HTTP input source identification via static sentinel + QEMU | No | $0 |
 
 Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 
@@ -192,7 +211,7 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 |  --> [Ghidra] --> LLM Triage --> LLM Synthesis                    |
 |  --> Emulation --> [Fuzzing] --> Exploit --> PoC --> Verify        |
 |                                                                   |
-|  41 stages . stage.json manifests . SHA-256 hashed artifacts      |
+|  42 stages . stage.json manifests . SHA-256 hashed artifacts      |
 |  Outputs: SARIF 2.1.0 + CycloneDX 1.6+VEX + SLSA L2 provenance  |
 +------------------------------------------------------------------+
 |                   Handoff (firmware_handoff.json)                  |
@@ -236,8 +255,10 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 | `./scout mcp --project-id <id>` | Start MCP stdio server |
 | `./scout serve <run_dir>` | Launch web report viewer |
 | `./scout tui <run_dir>` | Terminal UI dashboard |
-| `./scout ti` | TUI interactive mode (latest run) |
-| `./scout tw <run_dir> -t 2` | TUI watch mode (auto-refresh) |
+| `./scout ti` | TUI `--interactive` mode (latest run) |
+| `./scout tw <run_dir> -t 2` | TUI `--watch` mode (auto-refresh) |
+| `./scout to` | TUI `--mode once` (latest run) |
+| `./scout t` | TUI latest run (default mode) |
 | `./scout corpus-validate <run_dir>` | Validate corpus manifest |
 | `./scout quality-metrics <run_dir>` | Compute quality metrics |
 | `./scout quality-gate <run_dir>` | Check quality thresholds |
@@ -284,7 +305,7 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AIEDGE_GHIDRA_HOME` | -- | Ghidra installation path |
+| `AIEDGE_GHIDRA_HOME` | -- | Ghidra installation path (auto-detected if not set) |
 | `AIEDGE_GHIDRA_MAX_BINARIES` | `20` | Max binaries to analyze |
 | `AIEDGE_GHIDRA_TIMEOUT_S` | `300` | Per-binary analysis timeout |
 
@@ -392,8 +413,10 @@ cosign verify-attestation --type slsaprovenance \
 ./scout quality-gate aiedge-runs/<run_id>
 ./scout release-quality-gate aiedge-runs/<run_id>
 
-# FirmAE benchmarking
-scripts/benchmark_firmae.sh                        # SCOUT vs FirmAE comparison
+# FirmAE benchmarking (1,124 firmware images)
+scripts/benchmark_firmae.sh --parallel 8 --time-budget 300 --cleanup
+# Options: --dataset-dir, --results-dir, --parallel N, --time-budget S,
+#          --stages STAGES, --max-images N, --8mb, --full, --cleanup, --dry-run
 scripts/unpack_firmae_dataset.sh                   # FirmAE dataset classifier
 ```
 
@@ -416,6 +439,8 @@ scripts/unpack_firmae_dataset.sh                   # FirmAE dataset classifier
 | [Determinism Policy](docs/determinism_policy.md) | Replay gate rules and relaxation policy |
 | [Quality SLO](docs/quality_slo.md) | Precision, recall, FPR thresholds |
 | [Runbook](docs/runbook.md) | Operator flow for digest-first review |
+| [8MB Track Runbook](docs/aiedge_8mb_track_runbook.md) | 8MB truncated track operator guide |
+| [Known CVE Ground Truth](docs/known_cve_ground_truth.md) | Known CVE ground truth for validation |
 | [Upgrade Plan v2](docs/upgrade_plan_v2.md) | Full v2.0 upgrade plan with appendices |
 | [LLM Agent Roadmap](docs/roadmap_llm_agent_integration.md) | LLM integration roadmap and strategy |
 

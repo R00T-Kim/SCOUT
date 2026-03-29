@@ -108,11 +108,27 @@ def _find_web_content_roots(
 
     # Collect scan roots from inventory
     scan_roots: list[Path] = []
-    for entry in (inv.get("entries") or []):
-        if isinstance(entry, dict):
-            p = entry.get("path")
-            if isinstance(p, str) and not p.startswith("<"):
-                full = run_dir / p
+    entries_any = inv.get("entries")
+    if isinstance(entries_any, list):
+        for entry in entries_any:
+            if isinstance(entry, dict):
+                p = entry.get("path")
+                if isinstance(p, str) and not p.startswith("<"):
+                    full = run_dir / p
+                    if full.is_dir():
+                        scan_roots.append(full)
+    # Also try "roots" field
+    roots_any = inv.get("roots")
+    if isinstance(roots_any, list):
+        for root_entry in roots_any:
+            if isinstance(root_entry, dict):
+                p = root_entry.get("path")
+                if isinstance(p, str):
+                    full = run_dir / p
+                    if full.is_dir():
+                        scan_roots.append(full)
+            elif isinstance(root_entry, str):
+                full = run_dir / root_entry
                 if full.is_dir():
                     scan_roots.append(full)
     if not scan_roots:
