@@ -10,8 +10,6 @@
 
 <br />
 
-[![CI](https://github.com/rootk1m/SCOUT/actions/workflows/ci.yml/badge.svg)](https://github.com/rootk1m/SCOUT/actions/workflows/ci.yml)
-
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
