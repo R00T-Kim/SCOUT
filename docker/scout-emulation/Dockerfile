@@ -42,11 +42,13 @@ RUN wget -q https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.g
 # To update: pass --build-arg FIRMAE_COMMIT=<new-sha> and rebuild.
 RUN git clone --recursive https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
     && cd /opt/FirmAE \
-    && git checkout "${FIRMAE_COMMIT}" \
     && git submodule update --init --recursive \
     && cp /opt/FirmAE/core/unstuff /usr/local/bin/ 2>/dev/null || true \
     && chmod +x /opt/FirmAE/run.sh \
-    && ./download.sh
+    && ./download.sh \
+    && printf "y\n" | ./install.sh \
+     # through symbolic link 'firmae' to execute from anywhere
+    ln -s /opt/FirmAE/run.sh /usr/local/bin/firmae
 
 # Initialize PostgreSQL for FirmAE
 RUN service postgresql start \
