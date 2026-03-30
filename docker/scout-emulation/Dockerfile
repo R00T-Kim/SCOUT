@@ -31,22 +31,24 @@ RUN apt-get update && apt-get install -y \
 
 RUN python3 -m pip install --no-cache-dir psycopg2-binary coloredlogs python-magic
 
-# Install binwalk (required by FirmAE extractor) v3 need to edit where to place .cargo
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-RUN . /root/.cargo/env && cargo install binwalk
+# Install binwalk (required by FirmAE extractor)
+RUN wget -q https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.gz \
+    && tar -xf v2.3.4.tar.gz \
+    && cd binwalk-2.3.4 \
+    && python3 setup.py install \
+    && cd / && rm -rf /v2.3.4.tar.gz /binwalk-2.3.4
 
 # Clone FirmAE pinned to a specific commit for reproducibility.
 # To update: pass --build-arg FIRMAE_COMMIT=<new-sha> and rebuild.
-RUN git clone https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
+RUN git clone --recursive https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
     && cd /opt/FirmAE \
     && git submodule update --init --recursive \
     && cp /opt/FirmAE/core/unstuff /usr/local/bin/ 2>/dev/null || true \
+    && chmod +x /opt/FirmAE/run.sh \
     && ./download.sh \
     && printf "y\n" | ./install.sh \
-    && chmod +x /opt/FirmAE/run.sh \
-    && ln -s /opt/FirmAE/run.sh /usr/local/bin/firmae
-
-
+     # through symbolic link 'firmae' to execute from anywhere
+    ln -s /opt/FirmAE/run.sh /usr/local/bin/firmae
 
 # Initialize PostgreSQL for FirmAE
 RUN service postgresql start \
