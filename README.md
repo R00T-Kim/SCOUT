@@ -146,27 +146,27 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 ## Architecture
 
 ```
-+------------------------------------------------------------------+
-|                      SCOUT (Evidence Engine)                      |
-|                                                                   |
-|  Firmware --> Unpack --> Profile --> Inventory --> SBOM --> CVE    |
-|                          |            |            |        |     |
-|                       [Ghidra]   Binary Audit   40+ sigs  NVD+   |
-|                       auto-detect  NX/PIE/etc            local DB|
-|                                                                   |
-|  --> Taint --> FP Filter --> Attack Surface --> Findings          |
-|     (HTTP-aware)  (3-pattern)   (IPC chains)    (SARIF 2.1.0)    |
-|                                                                   |
-|  --> Emulation --> [Fuzzing] --> Exploit Chain --> PoC --> Verify  |
-|                                                                   |
-|  42 stages . SHA-256 manifests . confidence cap 0.60 (static)    |
-|  Outputs: SARIF + CycloneDX VEX + SLSA L2 + Markdown reports    |
-+------------------------------------------------------------------+
-|                   Handoff (firmware_handoff.json)                  |
-+------------------------------------------------------------------+
-|                    Terminator (Orchestrator)                       |
-|  LLM Tribunal --> Dynamic Validation --> Verified Chain           |
-+------------------------------------------------------------------+
++--------------------------------------------------------------------+
+|                       SCOUT (Evidence Engine)                      |
+|                                                                    |
+|  Firmware --> Unpack --> Profile --> Inventory --> SBOM --> CVE     |
+|                          |            |            |          |     |
+|                       Ghidra     Binary Audit   40+ sigs    NVD+   |
+|                       auto-detect  NX/PIE/etc              local DB|
+|                                                                    |
+|  --> Taint --> FP Filter --> Attack Surface --> Findings            |
+|     (HTTP-aware)  (3-pattern)   (IPC chains)    (SARIF 2.1.0)      |
+|                                                                    |
+|  --> Emulation --> [Fuzzing] --> Exploit Chain --> PoC --> Verify   |
+|                                                                    |
+|  42 stages . SHA-256 manifests . confidence cap 0.60 (static)     |
+|  Outputs: SARIF + CycloneDX VEX + SLSA L2 + Markdown reports      |
++--------------------------------------------------------------------+
+|                    Handoff (firmware_handoff.json)                  |
++--------------------------------------------------------------------+
+|                     Terminator (Orchestrator)                       |
+|  LLM Tribunal --> Dynamic Validation --> Verified Chain            |
++--------------------------------------------------------------------+
 ```
 
 | Layer | Role | Deterministic? |
