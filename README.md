@@ -114,7 +114,7 @@
 ## Pipeline (42 Stages)
 
 ```
-Firmware --> Unpack --> Profile --> Inventory --> [Ghidra] --> Semantic Classification
+Firmware --> Unpack --> Profile --> Inventory --> Ghidra --> Semantic Classification
     --> SBOM --> CVE Scan --> Reachability --> Endpoints --> Surfaces
     --> Enhanced Source --> C-Source ID --> Taint Propagation
     --> FP Verification --> Adversarial Triage
@@ -123,7 +123,7 @@ Firmware --> Unpack --> Profile --> Inventory --> [Ghidra] --> Semantic Classifi
     --> PoC Refinement --> Chain Construction --> Exploit Chain --> PoC --> Verification
 ```
 
-Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
+Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require optional external tools (AFL++/Docker).
 
 <details>
 <summary><strong>v2.0 New Stages (8)</strong></summary>
