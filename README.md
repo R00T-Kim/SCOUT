@@ -30,114 +30,67 @@
 ## Why SCOUT?
 
 > **Every finding has a hash-anchored evidence chain.**
->
-> SCOUT does not emit a finding without a file path, byte offset, SHA-256 hash, and rationale. Artifacts are immutable and traceable from firmware blob to final verdict. No black-box scoring.
+> No finding without a file path, byte offset, SHA-256 hash, and rationale. Artifacts are immutable and traceable from firmware blob to final verdict.
 
-> **Static-only findings capped at 0.60 -- we don't inflate.**
->
-> If a vulnerability hasn't been dynamically validated, its confidence is hard-capped. Promotion to `confirmed` requires at least one dynamic verification artifact. Honest confidence beats high numbers.
+> **Static-only findings capped at 0.60 -- honest confidence.**
+> Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
 
-> **SARIF + CycloneDX VEX + SLSA provenance -- not another custom format.**
->
-> Findings export to SARIF 2.1.0 for GitHub Code Scanning and VS Code. SBOM ships with CycloneDX 1.6 + Vulnerability Exploitability eXchange. Analysis artifacts carry SLSA Level 2 in-toto attestations.
-
----
-
-## What's New
-
-| Feature | Description |
-|:--------|:------------|
-| **SARIF 2.1.0 Export** | Standard findings output for GitHub Code Scanning, VS Code SARIF Viewer, and CI/CD integration |
-| **CycloneDX VEX** | Vulnerability Exploitability eXchange states (exploitable / affected / not_affected) embedded in SBOM |
-| **Precise .dynstr Detection** | ELF dynamic import table parsing replaces naive byte-scan; FORTIFY_SOURCE coverage detection |
-| **40+ SBOM Signatures** | wolfSSL, mbedTLS, GoAhead, miniUPnPd, SQLite, U-Boot, lighttpd, and 30+ more (up from 8) |
-| **Ghidra Headless Scripts** | 4 analysis scripts: `decompile_all`, `xref_graph`, `dataflow_trace`, `string_refs` |
-| **AFL++ Performance** | CMPLOG, persistent mode, NVRAM faker, multi-instance campaigns, `AFL_ENTRYPOINT` support |
-| **Reachability-Aware CVE** | CVE confidence auto-adjusted by BFS network reachability analysis |
-| **SLSA L2 Provenance** | in-toto attestation for analysis artifacts, cosign-ready verification |
-| **Benchmark Runner** | Corpus-based quality measurement with precision / recall / FPR tracking |
-| **Quality Gate Overrides** | Configurable thresholds via environment variables for CI/CD pipelines |
-| **GitHub Actions CI** | Automated pytest (3.10-3.12), ruff lint, and pyright type checking on every push/PR |
-| **Findings SHA-256 Manifest** | `stages/findings/stage.json` now carries per-artifact SHA-256 hashes for full evidence chain coverage |
-| **Handoff Validation** | `firmware_handoff.json` is validated via `validate_handoff()` before write -- missing keys are caught early |
-| **Exploit Stage Isolation** | Each exploit stage has independent import error handling; a single missing dependency no longer skips all five |
-| **v2.0: 8 New Analysis Stages** | Enhanced source detection, semantic classification, taint propagation, FP verification, adversarial triage, PoC refinement, chain construction, C-source identification (34 -> 42 stages) |
-| **v2.1: Known CVE Signatures** | `known_cve_signatures.py`: 13 CVE patterns (NETGEAR, D-Link, Linksys, ASUS, TP-Link, TRENDnet, Zyxel, Belkin) -- vendor/model/binary matching without SBOM |
-| **v2.1: Web Server Auto-Detection** | `enhanced_source.py` auto-identifies httpd/lighttpd/boa binaries; HTTP input sources classified as `source_type: "http_input"` for prioritized taint analysis |
-| **v2.1: Ghidra Auto-Detection** | `./scout` wrapper and `ghidra_bridge.py` probe `/opt/ghidra_*`, `/usr/local/ghidra*`, `/usr/share/ghidra*` -- `AIEDGE_GHIDRA_HOME` no longer required |
-| **v2.0: CLI Modularization** | `__main__.py` split from ~4500 lines into 7 focused modules (~660 lines entry point) |
-| **v2.0: FirmAE Benchmarking** | `benchmark_firmae.sh` for SCOUT vs FirmAE comparison; `unpack_firmae_dataset.sh` for dataset classification |
+> **SARIF + CycloneDX VEX + SLSA provenance -- standard formats.**
+> GitHub Code Scanning, VS Code, CI/CD integration out of the box.
 
 ---
 
 ## How It Works
 
 ```
-  1. Drop            2. Analyze              3. Collect               4. Review
-  ─────────          ──────────              ──────────               ────────
-  firmware.bin  ──>  42-stage pipeline  ──>  SARIF findings      ──>  Web viewer
-                     runs automatically      CycloneDX SBOM+VEX      VS Code (SARIF)
-                                             Evidence chain           GitHub Code Scanning
-                                             SLSA attestation         TUI dashboard
+  firmware.bin  ──>  42-stage pipeline  ──>  SARIF findings       ──>  Web viewer
+                     (auto Ghidra)          CycloneDX SBOM+VEX       TUI dashboard
+                     (auto CVE match)       Evidence chain            GitHub/VS Code
+                     (optional LLM)         SLSA attestation          MCP for AI agents
 ```
 
-**Step 1** -- Point SCOUT at any firmware blob (or pre-extracted rootfs).
-
-**Step 2** -- The 42-stage pipeline runs end-to-end: unpacking, profiling, binary analysis, enhanced source detection, semantic classification, C-source identification, SBOM generation, CVE scanning, reachability analysis, taint propagation, FP verification, adversarial triage, security assessment, attack surface mapping, exploit chain construction, PoC refinement, optional Ghidra decompilation, optional AFL++ fuzzing.
-
-**Step 3** -- Outputs land in a structured run directory: SARIF 2.1.0 findings, CycloneDX 1.6 SBOM with VEX annotations, hash-anchored evidence chain, SLSA L2 provenance attestation, and executive Markdown report.
-
-**Step 4** -- Review results in the built-in web viewer, import SARIF into VS Code or GitHub Code Scanning, query artifacts via MCP server from Claude Code/Desktop, or inspect via TUI dashboard.
-
----
-
-## Quick Start
-
 ```bash
-# Full analysis (all features enabled by default)
+# Full analysis
 ./scout analyze firmware.bin
 
-# Deterministic only (no LLM)
+# Static-only (no LLM, $0)
 ./scout analyze firmware.bin --no-llm
 
-# Pre-extracted rootfs (bypasses weak unpacking)
-./scout analyze firmware.img --rootfs /path/to/extracted/rootfs
-
-# Analysis-only profile (no exploit chain)
-./scout analyze firmware.bin --profile analysis --no-llm
-
-# SARIF export for CI/CD
-./scout analyze firmware.bin --no-llm
-# -> aiedge-runs/<run_id>/stages/findings/sarif.json
-
-# MCP server for AI agents
-./scout mcp --project-id aiedge-runs/<run_id>
+# Pre-extracted rootfs
+./scout analyze firmware.img --rootfs /path/to/rootfs
 
 # Web viewer
 ./scout serve aiedge-runs/<run_id> --port 8080
+
+# TUI dashboard
+./scout ti                    # interactive (latest run)
+./scout tw                    # watch mode (auto-refresh)
+
+# MCP server for AI agents
+./scout mcp --project-id aiedge-runs/<run_id>
 ```
 
 ---
 
 ## Comparison
 
-| Feature | SCOUT | EMBA | FACT | FirmAE |
-|:--------|:-----:|:----:|:----:|:------:|
-| SBOM (CycloneDX 1.6) | Yes + VEX | Yes | No | No |
-| SARIF 2.1.0 Export | Yes | No | No | No |
-| Hash-Anchored Evidence Chain | Yes | No | No | No |
-| SLSA L2 Provenance | Yes | No | No | No |
-| Reachability-Aware CVE | Yes | No | No | No |
-| Confidence Caps (honest scoring) | Yes | No | No | No |
-| Ghidra Headless Integration | Yes | Yes | No | No |
-| AFL++ Fuzzing Pipeline | Yes | No | No | No |
-| 3-Tier Emulation | Yes | Partial | No | Yes |
-| MCP Server (AI agent integration) | Yes | No | No | No |
-| LLM Triage + Synthesis | Yes | No | No | No |
-| Web Report Viewer | Yes | Yes | Yes | No |
-| Adversarial FP Reduction | Yes | No | No | No |
-| Taint Propagation (LLM) | Yes | No | No | No |
-| Zero pip Dependencies | Yes | No | No | No |
+| Feature | SCOUT | FirmAgent | EMBA | FACT | FirmAE |
+|:--------|:-----:|:---------:|:----:|:----:|:------:|
+| Scale (firmware tested) | 1,124 | 14 | -- | -- | 1,124 |
+| SBOM (CycloneDX 1.6+VEX) | Yes | No | Yes | No | No |
+| SARIF 2.1.0 Export | Yes | No | No | No | No |
+| Hash-Anchored Evidence Chain | Yes | No | No | No | No |
+| SLSA L2 Provenance | Yes | No | No | No | No |
+| Known CVE Signature Matching | Yes (2,239 CVEs) | No | No | No | No |
+| Confidence Caps (honest scoring) | Yes | No | No | No | No |
+| Ghidra Integration (auto-detect) | Yes | IDA Pro | Yes | No | No |
+| AFL++ Fuzzing Pipeline | Yes | Yes | No | No | No |
+| Cross-Binary IPC Chains | Yes (5 types) | No | No | No | No |
+| Taint Propagation (LLM) | Yes | Yes (DeepSeek) | No | No | No |
+| Adversarial FP Reduction | Yes | No | No | No | No |
+| MCP Server (AI agent) | Yes | No | No | No | No |
+| Web Report Viewer | Yes | No | Yes | Yes | No |
+| Zero pip Dependencies | Yes | No | No | No | No |
 
 ---
 
@@ -145,23 +98,18 @@
 
 | | Feature | Description |
 |---|---------|-------------|
-| :package: | **SBOM & CVE** | CycloneDX 1.6 SBOM (40+ signatures) + NVD API 2.0 CVE scanning with VEX and reachability-aware confidence |
-| :mag: | **Binary Analysis** | ELF hardening audit (NX/PIE/RELRO/Canary) + precise `.dynstr` symbol detection + FORTIFY_SOURCE + optional Ghidra headless decompilation |
-| :dart: | **Attack Surface** | Source-to-sink tracing, IPC detection (5 types), credential auto-mapping |
-| :shield: | **Security Assessment** | X.509 certificate scanning, boot service auditing, filesystem permission checks |
-| :test_tube: | **Fuzzing** *(optional)* | AFL++ pipeline with CMPLOG, persistent mode, NVRAM faker, binary scoring, harness generation, crash triage — requires Docker + AFL++ image |
-| :bug: | **Emulation** | 3-tier (FirmAE / QEMU user-mode / rootfs inspection) + GDB remote debugging |
-| :robot: | **MCP Server** | 12 tools exposed via Model Context Protocol for Claude Code/Desktop integration |
-| :brain: | **LLM Drivers** | Codex CLI + Claude API + Ollama -- with cost tracking and budget limits |
-| :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap, graph visualization |
-| :link: | **Evidence Chain** | Hash-anchored artifacts, confidence caps, exploit tiering, verified chain gating |
-| :scroll: | **SARIF Export** | SARIF 2.1.0 findings for GitHub Code Scanning, VS Code SARIF Viewer, CI/CD |
-| :lock: | **SLSA Provenance** | Level 2 in-toto attestation for analysis artifacts, cosign-ready |
-| :clipboard: | **Executive Reports** | Auto-generated Markdown reports with top risks, SBOM/CVE tables, attack surface |
-| :arrows_counterclockwise: | **Firmware Diff** | Compare two analysis runs -- filesystem, hardening, and config security changes |
-| :chart_with_upwards_trend: | **Benchmark Runner** | Corpus-based quality measurement with precision/recall/FPR tracking |
-| :electric_plug: | **Cross-Binary IPC Chains** | 5 IPC types (unix_socket, dbus, shm, pipe, exec_chain); shared `.rodata` string-based cross-binary communication detection |
-| :label: | **Known CVE Signatures** | 13 built-in CVE patterns (NETGEAR, D-Link, Linksys, ASUS, TP-Link, TRENDnet, Zyxel, Belkin) matched by vendor/model/binary without SBOM |
+| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ signatures) + NVD CVE scan + 2,239 local CVE DB + 13 known CVE signatures |
+| :mag: | **Binary Analysis** | ELF hardening (NX/PIE/RELRO/Canary) + `.dynstr` detection + FORTIFY_SOURCE + Ghidra decompilation |
+| :dart: | **Attack Surface** | Source-to-sink tracing, web server auto-detection, cross-binary IPC chains (5 types) |
+| :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint with call chain visualization; web server priority |
+| :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping |
+| :test_tube: | **Fuzzing** *(optional)* | AFL++ with CMPLOG, persistent mode, NVRAM faker, harness generation, crash triage |
+| :bug: | **Emulation** | 3-tier (FirmAE / QEMU user-mode / rootfs inspection) + GDB remote debug |
+| :robot: | **MCP Server** | 12 tools via Model Context Protocol for Claude Code/Desktop |
+| :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap |
+| :link: | **Evidence Chain** | SHA-256 anchored artifacts, confidence caps, 5-tier exploit promotion |
+| :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto attestation |
+| :chart_with_upwards_trend: | **Benchmarking** | FirmAE 1,124 dataset support, CVE rematch, TP/FP analysis scripts |
 
 ---
 
@@ -170,16 +118,17 @@
 ```
 Firmware --> Unpack --> Profile --> Inventory --> [Ghidra] --> Semantic Classification
     --> SBOM --> CVE Scan --> Reachability --> Endpoints --> Surfaces
-    --> Enhanced Source --> C-Source Identification --> Taint Propagation
+    --> Enhanced Source --> C-Source ID --> Taint Propagation
     --> FP Verification --> Adversarial Triage
-    --> Security Assessment --> Graph --> Attack Surface --> Findings
-    --> LLM Triage --> LLM Synthesis --> Emulation (3-tier) --> [Fuzzing]
+    --> Graph --> Attack Surface --> Findings
+    --> LLM Triage --> LLM Synthesis --> Emulation --> [Fuzzing]
     --> PoC Refinement --> Chain Construction --> Exploit Chain --> PoC --> Verification
 ```
 
-**New in v2.0:** `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction`, `csource_identification`.
+Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 
-**v2.0 Stage Details:**
+<details>
+<summary><strong>v2.0 New Stages (8)</strong></summary>
 
 | Stage | Module | Purpose | LLM? | Cost |
 |-------|--------|---------|------|------|
@@ -192,7 +141,7 @@ Firmware --> Unpack --> Profile --> Inventory --> [Ghidra] --> Semantic Classifi
 | `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
 | `csource_identification` | `csource_identification.py` | HTTP input source identification via static sentinel + QEMU | No | $0 |
 
-Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
+</details>
 
 ---
 
@@ -203,36 +152,34 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 |                      SCOUT (Evidence Engine)                      |
 |                                                                   |
 |  Firmware --> Unpack --> Profile --> Inventory --> SBOM --> CVE    |
-|                                      (+ hardening)  (NVD 2.0)    |
-|                                                         |         |
-|  --> Security Assessment --> Surfaces --> Reachability --> Find    |
-|      (cert/init/fs-perm)                 (BFS graph)              |
+|                          |            |            |        |     |
+|                       [Ghidra]   Binary Audit   40+ sigs  NVD+   |
+|                       auto-detect  NX/PIE/etc            local DB|
 |                                                                   |
-|  --> [Ghidra] --> LLM Triage --> LLM Synthesis                    |
-|  --> Emulation --> [Fuzzing] --> Exploit --> PoC --> Verify        |
+|  --> Taint --> FP Filter --> Attack Surface --> Findings          |
+|     (HTTP-aware)  (3-pattern)   (IPC chains)    (SARIF 2.1.0)    |
 |                                                                   |
-|  42 stages . stage.json manifests . SHA-256 hashed artifacts      |
-|  Outputs: SARIF 2.1.0 + CycloneDX 1.6+VEX + SLSA L2 provenance  |
+|  --> Emulation --> [Fuzzing] --> Exploit Chain --> PoC --> Verify  |
+|                                                                   |
+|  42 stages . SHA-256 manifests . confidence cap 0.60 (static)    |
+|  Outputs: SARIF + CycloneDX VEX + SLSA L2 + Markdown reports    |
 +------------------------------------------------------------------+
 |                   Handoff (firmware_handoff.json)                  |
 +------------------------------------------------------------------+
 |                    Terminator (Orchestrator)                       |
-|  Tribunal --> Validator --> Exploit Dev --> Verified Chain         |
-|  (LLM judge)  (emulation)   (lab-gated)    (dynamic evidence)    |
+|  LLM Tribunal --> Dynamic Validation --> Verified Chain           |
 +------------------------------------------------------------------+
 ```
 
 | Layer | Role | Deterministic? |
 |:------|:-----|:--------------:|
-| **SCOUT** | Evidence production (extraction, profiling, inventory, surfaces, findings) | Yes |
+| **SCOUT** | Evidence production (42 stages) | Yes |
 | **Handoff** | JSON contract between engine and orchestrator | Yes |
-| **Terminator** | LLM tribunal, dynamic validation, exploit development, report promotion | No (auditable) |
+| **Terminator** | LLM tribunal, dynamic validation, exploit dev | No (auditable) |
 
 ---
 
 ## Exploit Promotion Policy
-
-**Iron rule: no Confirmed without dynamic evidence.**
 
 | Level | Requirements | Placement |
 |:------|:-------------|:----------|
@@ -240,7 +187,7 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 | `candidate` | Confidence 0.5-0.8, evidence exists but chain incomplete | Report (flagged) |
 | `high_confidence_static` | Confidence >= 0.8, strong static evidence, no dynamic | Report (highlighted) |
 | `confirmed` | Confidence >= 0.8 AND >= 1 dynamic verification artifact | Report (top) |
-| `verified_chain` | Confirmed AND PoC reproduced 3x in sandbox, complete chain | Exploit report |
+| `verified_chain` | Confirmed AND PoC reproduced 3x in sandbox | Exploit report |
 
 ---
 
@@ -249,22 +196,57 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 
 | Command | Description |
 |---------|-------------|
-| `./scout analyze <firmware>` | Full firmware analysis pipeline |
+| `./scout analyze <firmware>` | Full 42-stage analysis pipeline |
 | `./scout analyze-8mb <firmware>` | Truncated 8MB canonical track |
-| `./scout stages <run_dir>` | Rerun specific stages on existing run |
-| `./scout mcp --project-id <id>` | Start MCP stdio server |
+| `./scout stages <run_dir> --stages X,Y` | Rerun specific stages |
 | `./scout serve <run_dir>` | Launch web report viewer |
+| `./scout mcp [--project-id <id>]` | Start MCP stdio server |
 | `./scout tui <run_dir>` | Terminal UI dashboard |
-| `./scout ti` | TUI `--interactive` mode (latest run) |
-| `./scout tw <run_dir> -t 2` | TUI `--watch` mode (auto-refresh) |
-| `./scout to` | TUI `--mode once` (latest run) |
-| `./scout t` | TUI latest run (default mode) |
-| `./scout corpus-validate <run_dir>` | Validate corpus manifest |
-| `./scout quality-metrics <run_dir>` | Compute quality metrics |
-| `./scout quality-gate <run_dir>` | Check quality thresholds |
-| `./scout release-quality-gate <run_dir>` | Unified release gate |
+| `./scout ti` | TUI interactive (latest run) |
+| `./scout tw` | TUI watch mode (auto-refresh) |
+| `./scout to` | TUI one-shot (latest run) |
+| `./scout t` | TUI default (latest run) |
+| `./scout corpus-validate` | Validate corpus manifest |
+| `./scout quality-metrics` | Compute quality metrics |
+| `./scout quality-gate` | Check quality thresholds |
+| `./scout release-quality-gate` | Unified release gate |
 
 **Exit codes:** `0` success, `10` partial, `20` fatal, `30` policy violation
+
+</details>
+
+<details>
+<summary><strong>Benchmarking</strong></summary>
+
+```bash
+# FirmAE dataset benchmark (1,124 firmware images, 8 vendors)
+./scripts/benchmark_firmae.sh --parallel 8 --time-budget 1800 --cleanup
+
+# Options
+--dataset-dir DIR       # Firmware directory (default: aiedge-inputs/firmae-benchmark)
+--results-dir DIR       # Output directory
+--parallel N            # Concurrent jobs (default: 4)
+--time-budget S         # Seconds per firmware (default: 600)
+--stages STAGES         # Specific stages (default: full pipeline)
+--max-images N          # Limit images (0 = all)
+--8mb                   # Use 8MB truncated track
+--full                  # Include dynamic stages
+--cleanup               # Archive JSONs, delete run dirs (saves disk)
+--dry-run               # List files without running
+
+# Post-benchmark analysis
+PYTHONPATH=src python3 scripts/cve_rematch.py \
+  --results-dir benchmark-results/firmae-YYYYMMDD_HHMM \
+  --nvd-dir data/nvd-cache \
+  --csv-out cve_matches.csv
+
+PYTHONPATH=src python3 scripts/analyze_findings.py \
+  --results-dir benchmark-results/firmae-YYYYMMDD_HHMM \
+  --output analysis_report.json
+
+# FirmAE dataset setup
+./scripts/unpack_firmae_dataset.sh [ZIP_FILE]
+```
 
 </details>
 
@@ -282,66 +264,42 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 | `AIEDGE_PRIV_RUNNER` | -- | Privileged command prefix for dynamic stages |
 | `AIEDGE_FEEDBACK_DIR` | `aiedge-feedback` | Terminator feedback directory |
 
+### Ghidra
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AIEDGE_GHIDRA_HOME` | auto-detect | Ghidra install path; probes `/opt/ghidra_*`, `/usr/local/ghidra*` |
+| `AIEDGE_GHIDRA_MAX_BINARIES` | `20` | Max binaries to analyze |
+| `AIEDGE_GHIDRA_TIMEOUT_S` | `300` | Per-binary analysis timeout |
+
 ### SBOM & CVE
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AIEDGE_NVD_API_KEY` | -- | NVD API key (optional, improves rate limits) |
-| `AIEDGE_NVD_CACHE_DIR` | `aiedge-nvd-cache` | Cross-run NVD response cache |
+| `AIEDGE_NVD_CACHE_DIR` | -- | Cross-run NVD response cache |
 | `AIEDGE_SBOM_MAX_COMPONENTS` | `500` | Maximum SBOM components |
 | `AIEDGE_CVE_SCAN_MAX_COMPONENTS` | `50` | Maximum components to CVE-scan |
 | `AIEDGE_CVE_SCAN_TIMEOUT_S` | `30` | Per-request NVD API timeout |
 
-### LLM Timeouts
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AIEDGE_LLM_CHAIN_TIMEOUT_S` | `180` | LLM synthesis timeout |
-| `AIEDGE_LLM_CHAIN_MAX_ATTEMPTS` | `5` | LLM synthesis max retries |
-| `AIEDGE_AUTOPOC_LLM_TIMEOUT_S` | `180` | Auto-PoC LLM timeout |
-| `AIEDGE_AUTOPOC_LLM_MAX_ATTEMPTS` | `4` | Auto-PoC max retries |
-
-### Ghidra
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AIEDGE_GHIDRA_HOME` | -- | Ghidra installation path (auto-detected if not set) |
-| `AIEDGE_GHIDRA_MAX_BINARIES` | `20` | Max binaries to analyze |
-| `AIEDGE_GHIDRA_TIMEOUT_S` | `300` | Per-binary analysis timeout |
-
-### Fuzzing (AFL++)
+### Fuzzing & Emulation
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AIEDGE_AFLPP_IMAGE` | `aflplusplus/aflplusplus` | AFL++ Docker image |
 | `AIEDGE_FUZZ_BUDGET_S` | `3600` | Fuzzing time budget (seconds) |
 | `AIEDGE_FUZZ_MAX_TARGETS` | `5` | Max fuzzing target binaries |
-
-### Emulation
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AIEDGE_EMULATION_IMAGE` | `scout-emulation:latest` | Tier 1 Docker image |
+| `AIEDGE_EMULATION_IMAGE` | `scout-emulation:latest` | Emulation Docker image |
 | `AIEDGE_FIRMAE_ROOT` | `/opt/FirmAE` | FirmAE installation path |
 | `AIEDGE_QEMU_GDB_PORT` | `1234` | QEMU GDB remote port |
 
-### MCP & Port Scanning
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AIEDGE_MCP_MAX_OUTPUT_KB` | `512` | MCP response max size |
-| `AIEDGE_PORTSCAN_TOP_K` | `1000` | Top-K ports to scan |
-| `AIEDGE_PORTSCAN_WORKERS` | `128` | Concurrent scan workers |
-| `AIEDGE_PORTSCAN_BUDGET_S` | `120` | Port scan time budget |
-
-### Quality Gate Overrides
+### Quality Gates
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AIEDGE_QG_PRECISION_MIN` | `0.9` | Minimum precision threshold |
 | `AIEDGE_QG_RECALL_MIN` | `0.6` | Minimum recall threshold |
 | `AIEDGE_QG_FPR_MAX` | `0.1` | Maximum false positive rate |
-| `AIEDGE_QG_ABSTAIN_MAX` | `0.25` | Maximum abstention rate |
 
 </details>
 
@@ -352,35 +310,32 @@ Stages in `[brackets]` require optional external tools (Ghidra, AFL++/Docker).
 aiedge-runs/<run_id>/
 ├── manifest.json
 ├── firmware_handoff.json
-├── provenance.intoto.jsonl          # SLSA L2 attestation
+├── provenance.intoto.jsonl           # SLSA L2 attestation
 ├── input/firmware.bin
 ├── stages/
-│   ├── tooling/
-│   ├── extraction/
-│   ├── firmware_profile/
+│   ├── extraction/                   # Unpacked filesystem
 │   ├── inventory/
-│   │   └── binary_analysis.json     # per-binary hardening data
+│   │   └── binary_analysis.json      # Per-binary hardening + symbols
+│   ├── enhanced_source/
+│   │   └── sources.json              # HTTP input sources + web server detection
 │   ├── sbom/
-│   │   ├── sbom.json                # CycloneDX 1.6 + CPE index
-│   │   └── vex.json                 # VEX exploitability annotations
+│   │   ├── sbom.json                 # CycloneDX 1.6
+│   │   └── vex.json                  # VEX exploitability
 │   ├── cve_scan/
-│   │   └── cve_scan.json            # NVD API CVE matches
-│   ├── reachability/
-│   │   └── reachability.json        # BFS reachability classification
-│   ├── surfaces/
-│   │   └── source_sink_graph.json
-│   ├── ghidra_analysis/             # optional
+│   │   └── cve_matches.json          # NVD + known signature matches
+│   ├── taint_propagation/
+│   │   └── taint_results.json        # Taint paths + call chains
+│   ├── ghidra_analysis/              # Decompiled functions (optional)
+│   ├── chain_construction/
+│   │   └── chains.json               # Same-binary + cross-binary IPC chains
 │   ├── findings/
-│   │   ├── stage.json                # SHA-256 manifest (evidence chain)
-│   │   ├── pattern_scan.json
-│   │   ├── credential_mapping.json
-│   │   ├── chains.json
-│   │   └── sarif.json               # SARIF 2.1.0 export
-│   ├── fuzzing/                     # optional
-│   │   └── fuzz_results.json
-│   └── graph/
-│       └── communication_graph.json
+│   │   ├── findings.json             # All findings
+│   │   ├── pattern_scan.json         # Static pattern matches
+│   │   ├── sarif.json                # SARIF 2.1.0 export
+│   │   └── stage.json                # SHA-256 manifest
+│   └── ...                           # 42 stage directories total
 └── report/
+    ├── viewer.html                   # Web dashboard
     ├── report.json
     ├── analyst_digest.json
     └── executive_report.md
@@ -403,21 +358,9 @@ python3 scripts/verify_aiedge_analyst_report.py --run-dir aiedge-runs/<run_id>
 # Security invariants
 python3 scripts/verify_run_dir_evidence_only.py --run-dir aiedge-runs/<run_id>
 python3 scripts/verify_network_isolation.py --run-dir aiedge-runs/<run_id>
-python3 scripts/verify_exploit_meaningfulness.py --run-dir aiedge-runs/<run_id>
-
-# SLSA provenance verification
-cosign verify-attestation --type slsaprovenance \
-  aiedge-runs/<run_id>/provenance.intoto.jsonl
 
 # Quality gates
-./scout quality-gate aiedge-runs/<run_id>
 ./scout release-quality-gate aiedge-runs/<run_id>
-
-# FirmAE benchmarking (1,124 firmware images)
-scripts/benchmark_firmae.sh --parallel 8 --time-budget 300 --cleanup
-# Options: --dataset-dir, --results-dir, --parallel N, --time-budget S,
-#          --stages STAGES, --max-images N, --8mb, --full, --cleanup, --dry-run
-scripts/unpack_firmae_dataset.sh                   # FirmAE dataset classifier
 ```
 
 </details>
@@ -428,21 +371,17 @@ scripts/unpack_firmae_dataset.sh                   # FirmAE dataset classifier
 
 | Document | Purpose |
 |:---------|:--------|
-| [Blueprint](docs/blueprint.md) | Full pipeline architecture and design rationale |
+| [Blueprint](docs/blueprint.md) | Pipeline architecture and design rationale |
 | [Status](docs/status.md) | Current implementation status |
-| [Artifact Schema](docs/aiedge_firmware_artifacts_v1.md) | Profiling + inventory artifact contracts |
+| [Artifact Schema](docs/aiedge_firmware_artifacts_v1.md) | Profiling + inventory contracts |
 | [Adapter Contract](docs/aiedge_adapter_contract.md) | Terminator-SCOUT handoff protocol |
-| [Report Contract](docs/aiedge_report_contract.md) | Report structure and governance rules |
-| [Analyst Digest](docs/analyst_digest_contract.md) | Digest schema and verdict semantics |
-| [Verified Chain](docs/verified_chain_contract.md) | Evidence requirements for verified chains |
-| [Duplicate Gate](docs/aiedge_duplicate_gate_contract.md) | Cross-run duplicate suppression rules |
-| [Determinism Policy](docs/determinism_policy.md) | Replay gate rules and relaxation policy |
-| [Quality SLO](docs/quality_slo.md) | Precision, recall, FPR thresholds |
-| [Runbook](docs/runbook.md) | Operator flow for digest-first review |
-| [8MB Track Runbook](docs/aiedge_8mb_track_runbook.md) | 8MB truncated track operator guide |
-| [Known CVE Ground Truth](docs/known_cve_ground_truth.md) | Known CVE ground truth for validation |
-| [Upgrade Plan v2](docs/upgrade_plan_v2.md) | Full v2.0 upgrade plan with appendices |
-| [LLM Agent Roadmap](docs/roadmap_llm_agent_integration.md) | LLM integration roadmap and strategy |
+| [Report Contract](docs/aiedge_report_contract.md) | Report structure and governance |
+| [Analyst Digest](docs/analyst_digest_contract.md) | Digest schema and verdicts |
+| [Verified Chain](docs/verified_chain_contract.md) | Evidence requirements |
+| [Duplicate Gate](docs/aiedge_duplicate_gate_contract.md) | Cross-run dedup rules |
+| [Known CVE Ground Truth](docs/known_cve_ground_truth.md) | CVE validation dataset |
+| [Upgrade Plan v2](docs/upgrade_plan_v2.md) | v2.0 upgrade plan |
+| [LLM Roadmap](docs/roadmap_llm_agent_integration.md) | LLM integration strategy |
 
 ---
 
@@ -450,30 +389,17 @@ scripts/unpack_firmae_dataset.sh                   # FirmAE dataset classifier
 
 > **Authorized environments only.**
 
-SCOUT is intended for use in controlled environments with proper authorization:
-
-- **Contracted security audits** -- vendor-coordinated firmware assessments
-- **Vulnerability research** -- responsible disclosure with coordinated timelines
-- **CTF and training** -- designated targets in lab environments
-
-Dynamic validation runs in network-isolated sandbox containers. Exploit profile and lab attestation are enabled by default. No weaponized payloads are included.
+SCOUT is intended for contracted security audits, vulnerability research (responsible disclosure), and CTF/training in lab environments. Dynamic validation runs in network-isolated sandbox containers. No weaponized payloads are included.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Before submitting a pull request:
-
 1. **Read** [Blueprint](docs/blueprint.md) for architecture context
 2. **Run** `pytest -q` -- all tests must pass
-3. **Lint** `ruff check src/` -- zero lint violations
-4. **Check** `pyright src/` -- zero type errors
-5. **Follow** the existing stage protocol (see `Stage` in `src/aiedge/stage.py`)
-6. **Zero pip dependencies** -- stdlib only for core modules
-
-CI runs these checks automatically on every push and pull request via GitHub Actions.
-
-For new pipeline stages, see the "Adding a New Pipeline Stage" section in `CLAUDE.md`.
+3. **Lint** `ruff check src/` -- zero violations
+4. **Follow** the Stage protocol (`src/aiedge/stage.py`)
+5. **Zero pip dependencies** -- stdlib only
 
 ---
 
