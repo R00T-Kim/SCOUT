@@ -187,7 +187,7 @@ def test_iter_candidate_files_prioritizes_high_signal_paths_under_cap(
     assert "zzz/opt/vyatta/scripts/peer.sh" in rels
 
 
-def test_run_findings_keeps_no_signals_when_extracted_has_no_matches(
+def test_run_findings_returns_empty_when_extracted_has_no_matches(
     tmp_path: Path,
 ) -> None:
     ctx = _ctx(tmp_path)
@@ -201,7 +201,7 @@ def test_run_findings_keeps_no_signals_when_extracted_has_no_matches(
 
     result = run_findings(ctx)
     ids = [cast(str, finding.get("id")) for finding in result.findings]
-    assert "aiedge.findings.no_signals" in ids
+    assert "aiedge.findings.no_signals" not in ids
 
 
 def test_run_findings_uses_inventory_roots_when_extraction_is_empty(
@@ -535,7 +535,7 @@ def test_run_findings_suppresses_non_config_paths_for_common_signals(
     assert "aiedge.findings.config.ssh_permit_root_login" not in ids
     assert "aiedge.findings.debug.adb_enablement" not in ids
     assert "aiedge.findings.debug.telnet_enablement" not in ids
-    assert "aiedge.findings.no_signals" in ids
+    assert "aiedge.findings.no_signals" not in ids
 
 
 def test_run_findings_writes_pattern_scan_chain_and_gate_artifacts(
