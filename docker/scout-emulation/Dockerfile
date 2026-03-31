@@ -33,10 +33,10 @@ RUN apt-get update && apt-get install -y \
 
 RUN python3 -m pip install --no-cache-dir psycopg2-binary coloredlogs python-magic
 
-# Install Rust and Binwalk v3 (Rust version)
+# Install Rust and Binwalk v3 (Rust version) - Pin to v3.1.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo install binwalk
+RUN cargo install binwalk@3.1.0
 
 # Clone FirmAE pinned to a specific commit for reproducibility.
 # To update: pass --build-arg FIRMAE_COMMIT=<new-sha> and rebuild.
@@ -47,15 +47,9 @@ RUN git clone --recursive https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
     && cp /opt/FirmAE/core/unstuff /usr/local/bin/ 2>/dev/null || true \
     && chmod +x /opt/FirmAE/run.sh \
     && ./download.sh \
+    # FirmAE's install.sh handles PostgreSQL initialization (firmadyne user/db)
     && printf "y\n" | ./install.sh \
     && ln -s /opt/FirmAE/run.sh /usr/local/bin/firmae
-
-# Initialize PostgreSQL for FirmAE
-RUN service postgresql start \
-    && su - postgres -c "psql -c \"CREATE USER firmadyne WITH PASSWORD 'firmadyne';\"" \
-    && su - postgres -c "createdb -O firmadyne firmware" \
-    && su - postgres -c "psql -d firmware < /opt/FirmAE/database/schema" \
-    && service postgresql stop
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
