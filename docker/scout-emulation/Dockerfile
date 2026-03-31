@@ -25,18 +25,18 @@ RUN apt-get update && apt-get install -y \
     libmagic1 mtd-utils gzip bzip2 cpio lzop lzma squashfs-tools \
     unzip p7zip p7zip-full arj lhasa cabextract sleuthkit \
     srecord zlib1g-dev liblzma-dev liblzo2-dev \
+    # Build & Development for Binwalk v3
+    build-essential pkg-config libsodium-dev libfontconfig1-dev libgraphite2-dev \
     # Network tools
     net-tools iproute2 iputils-ping iptables bridge-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --no-cache-dir psycopg2-binary coloredlogs python-magic
 
-# Install binwalk (required by FirmAE extractor)
-RUN wget -q https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.gz \
-    && tar -xf v2.3.4.tar.gz \
-    && cd binwalk-2.3.4 \
-    && python3 setup.py install \
-    && cd / && rm -rf /v2.3.4.tar.gz /binwalk-2.3.4
+# Install Rust and Binwalk v3 (Rust version) - Pin to v3.1.0
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install binwalk@3.1.0
 
 # Clone FirmAE pinned to a specific commit for reproducibility.
 # To update: pass --build-arg FIRMAE_COMMIT=<new-sha> and rebuild.
@@ -46,14 +46,10 @@ RUN git clone --recursive https://github.com/pr0v3rbs/FirmAE.git /opt/FirmAE \
     && git submodule update --init --recursive \
     && cp /opt/FirmAE/core/unstuff /usr/local/bin/ 2>/dev/null || true \
     && chmod +x /opt/FirmAE/run.sh \
-    && ./download.sh
-
-# Initialize PostgreSQL for FirmAE
-RUN service postgresql start \
-    && su - postgres -c "psql -c \"CREATE USER firmadyne WITH PASSWORD 'firmadyne';\"" \
-    && su - postgres -c "createdb -O firmadyne firmware" \
-    && su - postgres -c "psql -d firmware < /opt/FirmAE/database/schema" \
-    && service postgresql stop
+    && ./download.sh \
+    # FirmAE's install.sh handles PostgreSQL initialization (firmadyne user/db)
+    && printf "y\n" | ./install.sh \
+    && ln -s /opt/FirmAE/run.sh /usr/local/bin/firmae
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

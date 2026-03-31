@@ -1036,8 +1036,8 @@ class ExtractionStage:
 
             argv: list[str] = [binwalk]
             if self.matryoshka:
+                # Binwalk v3 removed -d (depth) flag. It handles recursion without depth limits.
                 argv.append("-M")
-                argv.extend(["-d", str(int(self.matryoshka_depth))])
             argv.append("-e")
             argv.append(str(fw))
             try:
