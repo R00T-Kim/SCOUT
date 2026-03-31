@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import bz2
+import collections
 import gzip
+import math
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -21,6 +24,43 @@ _GZIP_MAGIC = b"\x1f\x8b"
 _BZIP_MAGIC = b"BZh"
 _ARCHIVE_EXTRACT_MAX_DEPTH = 6
 _SQUASHFS_EXTRACT_MAX_DEPTH = 4
+
+
+def _binwalk_major_version(binwalk_path: str) -> int:
+    """Return the major version number of binwalk (default 2 if unparseable)."""
+    try:
+        result = subprocess.run(
+            [binwalk_path, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        output = result.stdout + result.stderr
+        m = re.search(r"(\d+)\.\d+", output)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    return 2
+
+
+def _shannon_entropy(path: Path, sample_bytes: int = 65536) -> float:
+    """Compute Shannon entropy of the first sample_bytes of a file (bits/byte, 0.0-8.0)."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(sample_bytes)
+    except OSError:
+        return 0.0
+    if not data:
+        return 0.0
+    freq = collections.Counter(data)
+    total = len(data)
+    entropy = 0.0
+    for count in freq.values():
+        p = count / total
+        entropy -= p * math.log2(p)
+    return entropy
 
 
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
@@ -955,6 +995,7 @@ class ExtractionStage:
         extraction_mode = "binwalk"
         res: subprocess.CompletedProcess[str] | None = None
         manual_rootfs_limits: list[str] = []
+        entropy_limits: list[str] = []
 
         if self.provided_rootfs_dir is not None:
             extraction_mode = "provided_rootfs"
@@ -1034,10 +1075,23 @@ class ExtractionStage:
                     limitations=["binwalk not installed; skipping extraction."],
                 )
 
+            entropy = _shannon_entropy(fw)
+            details["firmware_entropy"] = entropy
+            if entropy > 7.9:
+                details["encryption_suspected"] = True
+                entropy_limits.append(
+                    f"Firmware entropy {entropy:.2f}/8.0; encryption suspected"
+                )
+            elif entropy >= 7.5:
+                details["high_entropy_warning"] = True
+
+            bw_version = _binwalk_major_version(binwalk)
+            details["binwalk_version"] = bw_version
             argv: list[str] = [binwalk]
             if self.matryoshka:
                 argv.append("-M")
-                argv.extend(["-d", str(int(self.matryoshka_depth))])
+                if bw_version < 3:
+                    argv.extend(["-d", str(int(self.matryoshka_depth))])
             argv.append("-e")
             argv.append(str(fw))
             try:
@@ -1113,7 +1167,7 @@ class ExtractionStage:
 
         extracted_files = _count_files(extracted_dir)
         min_expected_files = int(max(0, self.min_extracted_files))
-        limitations: list[str] = list(recursive_limits) + list(manual_rootfs_limits)
+        limitations: list[str] = list(entropy_limits) + list(recursive_limits) + list(manual_rootfs_limits)
 
         if res is not None:
             details["binwalk_returncode"] = int(res.returncode)

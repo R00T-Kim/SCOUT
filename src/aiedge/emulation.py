@@ -238,13 +238,18 @@ def _try_pandawan(
         run_cmd.extend(["-v", f"{str(root.resolve())}:/mnt/rootfs{i}:ro"])
 
     # Pandawan entrypoint: start PostgreSQL, run extractor, then emulate
+    # run_pandawan.py requires a numeric image ID (not a path), so we
+    # must extract with FirmAE's extractor first, yielding ID "1".
+    # NOTE: -e means "FirmAE stock" comparison mode — omit it to use
+    # the Pandawan system (KCRE kernel augmentation).
+    pandawan_timeout = int(timeout_s)
     pandawan_script = (
         "pg_ctlcluster 14 main start 2>/dev/null; "
         "if [ -f /mnt/firmware.bin ]; then "
         "  cd /output && "
         "  /FirmAE/sources/extractor/extractor.py -b auto -sql 127.0.0.1 -np /mnt/firmware.bin images/ 2>/dev/null && "
         "  cd /Pandawan && "
-        "  python3 run_pandawan.py 1 -a -e -s -g 300 2>&1; "
+        f"  python3 run_pandawan.py 1 -a -s -g {pandawan_timeout} 2>&1; "
         "else "
         "  echo 'no firmware mounted'; exit 1; "
         "fi"
