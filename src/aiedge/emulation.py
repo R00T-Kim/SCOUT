@@ -190,6 +190,93 @@ def _try_tier1(
         return False, "", "", f"tier1: {type(exc).__name__}: {exc}", -1
 
 
+def _try_pandawan(
+    docker_bin: str,
+    pandawan_image: str,
+    roots: list[Path],
+    firmware_path: Path | None,
+    *,
+    timeout_s: float,
+) -> tuple[bool, str, str, str, int]:
+    """Attempt Tier 1.5: Pandawan/FirmSolo KCRE emulation.
+
+    Pandawan uses FirmSolo's Kernel Config Recovery Engine to build
+    custom kernels for QEMU full-system emulation, achieving higher
+    re-hosting success than FirmAE alone.
+
+    Returns (success, stdout, stderr, reason, returncode).
+    """
+    # Check if Pandawan image exists
+    try:
+        inspect_res = subprocess.run(
+            [docker_bin, "image", "inspect", pandawan_image],
+            text=True, capture_output=True, check=False,
+        )
+    except Exception:
+        return False, "", "", "pandawan: image inspect failed", -1
+
+    if inspect_res.returncode != 0:
+        return False, "", "", "pandawan: image not available", -1
+
+    # Pandawan needs: privileged (kpartx, mount, QEMU), writable fs,
+    # PostgreSQL for firmadyne/FirmAE extraction step.
+    run_cmd: list[str] = [
+        docker_bin, "run", "--rm", "--privileged", "--pull=never",
+    ]
+
+    # Create workdir for Pandawan output
+    workdir = roots[0].parent / "_pandawan_workdir" if roots else Path("/tmp/_pandawan_workdir")
+    workdir.mkdir(parents=True, exist_ok=True)
+    run_cmd.extend(["-v", f"{str(workdir.resolve())}:/output"])
+
+    # Mount firmware
+    if firmware_path is not None and firmware_path.is_file():
+        run_cmd.extend(["-v", f"{str(firmware_path.resolve())}:/mnt/firmware.bin:ro"])
+
+    # Mount rootfs volumes
+    for i, root in enumerate(roots[:3]):
+        run_cmd.extend(["-v", f"{str(root.resolve())}:/mnt/rootfs{i}:ro"])
+
+    # Pandawan entrypoint: start PostgreSQL, run extractor, then emulate
+    pandawan_script = (
+        "pg_ctlcluster 14 main start 2>/dev/null; "
+        "if [ -f /mnt/firmware.bin ]; then "
+        "  cd /output && "
+        "  /FirmAE/sources/extractor/extractor.py -b auto -sql 127.0.0.1 -np /mnt/firmware.bin images/ 2>/dev/null && "
+        "  cd /Pandawan && "
+        "  python3 run_pandawan.py 1 -a -e -s -g 300 2>&1; "
+        "else "
+        "  echo 'no firmware mounted'; exit 1; "
+        "fi"
+    )
+    run_cmd.extend([pandawan_image, pandawan_script])
+
+    try:
+        res = subprocess.run(
+            run_cmd,
+            text=True, capture_output=True, check=False,
+            timeout=timeout_s,
+        )
+        success = res.returncode == 0
+        return (
+            success,
+            res.stdout or "",
+            res.stderr or "",
+            "" if success else f"pandawan: exit code {res.returncode}",
+            res.returncode,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return (
+            False,
+            (exc.stdout or "") if isinstance(exc.stdout, str) else "",
+            (exc.stderr or "") if isinstance(exc.stderr, str) else "",
+            f"pandawan: timed out after {timeout_s}s",
+            -1,
+        )
+    except Exception as exc:
+        return False, "", "", f"pandawan: {type(exc).__name__}: {exc}", -1
+
+
 def _try_tier2(roots: list[Path], *, timeout_s: float) -> tuple[bool, str, list[dict[str, JsonValue]]]:
     """Attempt Tier 2: QEMU user-mode service probes.
 
@@ -343,6 +430,47 @@ class EmulationStage:
                             "image": emu_image,
                             "used_tier": used_tier,
                             "returncode": t1_rc,
+                            "log": _rel_to_run_dir(ctx.run_dir, log_path),
+                            "evidence": evidence,
+                        },
+                    ),
+                    limitations=[],
+                )
+
+        # ---------------------------------------------------------------
+        # Tier 1.5: Pandawan (FirmSolo KCRE) fallback
+        # ---------------------------------------------------------------
+        if docker_bin:
+            pandawan_image = os.environ.get("AIEDGE_PANDAWAN_IMAGE", "pandawan:latest")
+            p_ok, p_stdout, p_stderr, p_reason, p_rc = _try_pandawan(
+                docker_bin,
+                pandawan_image,
+                roots,
+                firmware_path if firmware_path.is_file() else None,
+                timeout_s=float(self.tier1_timeout_s or 600.0),
+            )
+            log_sections.append(
+                _format_log(
+                    attempted_cmd=[docker_bin, "run", pandawan_image, "..."],
+                    stdout=p_stdout,
+                    stderr=p_stderr,
+                    reason=p_reason or None,
+                )
+            )
+            if p_ok:
+                used_tier = "tier1.5_pandawan"
+                _ = log_path.write_text(
+                    "\n".join(log_sections), encoding="utf-8"
+                )
+                return StageOutcome(
+                    status="ok",
+                    details=cast(
+                        dict[str, JsonValue],
+                        {
+                            "reason": "",
+                            "image": pandawan_image,
+                            "used_tier": used_tier,
+                            "returncode": p_rc,
                             "log": _rel_to_run_dir(ctx.run_dir, log_path),
                             "evidence": evidence,
                         },
