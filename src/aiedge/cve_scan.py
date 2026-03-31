@@ -1164,12 +1164,36 @@ class CveScanStage:
         if not vendor_claims and not model_claims:
             return []
 
-        return match_known_signatures(
+        results = match_known_signatures(
             vendor_claims=list(set(vendor_claims)),
             model_claims=list(set(model_claims)),
             binary_names=binary_names,
             binary_symbols=binary_symbols,
         )
+
+        # NVD local DB matching
+        try:
+            from .nvd_local import load_nvd_db, match_nvd_local
+
+            nvd_db_dir = Path(os.environ.get(
+                "AIEDGE_NVD_LOCAL_DB_DIR",
+                str(Path(__file__).resolve().parent.parent.parent / "data" / "nvd-cache"),
+            ))
+            if nvd_db_dir.is_dir():
+                nvd_cves = load_nvd_db(nvd_db_dir)
+                existing_ids = {str(r.get("cve_id", "")) for r in results}
+                for vc in set(vendor_claims):
+                    nvd_matches = match_nvd_local(
+                        nvd_cves, vc, list(set(model_claims)), binary_names,
+                    )
+                    for nm in nvd_matches:
+                        if str(nm["cve_id"]) not in existing_ids:
+                            results.append(nm)
+                            existing_ids.add(str(nm["cve_id"]))
+        except ImportError:
+            pass
+
+        return results
 
     def _write_stage_json(
         self,

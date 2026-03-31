@@ -3836,18 +3836,8 @@ def run_findings(
             }
         )
 
-    if not findings:
-        findings.append(
-            {
-                "id": "aiedge.findings.no_signals",
-                "title": "No heuristic findings detected",
-                "severity": "info",
-                "confidence": 0.7,
-                "disposition": "confirmed",
-                "description": "Heuristic checks did not surface noteworthy signals; this does not imply absence of issues.",
-                "evidence": cast(list[JsonValue], list(stage_evidence)),
-            }
-        )
+    # no_signals finding removed — empty findings list is valid and preferred
+    # over inflating FP counts with a placeholder finding.
 
     normalized: list[dict[str, JsonValue]] = []
     for f in findings:
