@@ -14,6 +14,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.2.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -30,8 +31,8 @@
 > **모든 finding에 해시 기반 증거 체인이 있습니다.**
 > 파일 경로, 바이트 오프셋, SHA-256 해시, 근거 없이는 finding을 생성하지 않습니다. 펌웨어 블롭에서 최종 판정까지 추적 가능.
 
-> **정적 분석 결과는 신뢰도 0.60으로 제한 -- 정직한 점수.**
-> `confirmed` 승격에는 동적 검증이 필요합니다. 점수를 부풀리지 않습니다.
+> **2-tier 신뢰도 상한 적용 -- 정직한 점수.**
+> SYMBOL_COOCCURRENCE는 0.40, STATIC_CODE_VERIFIED는 0.55로 제한. `confirmed` 승격에는 동적 검증이 필요합니다. 점수를 부풀리지 않습니다.
 
 > **SARIF + CycloneDX VEX + SLSA -- 표준 포맷.**
 > GitHub Code Scanning, VS Code, CI/CD 즉시 연동.
@@ -79,7 +80,7 @@
 | SARIF 2.1.0 내보내기 | O | X | X | X | X |
 | 해시 기반 증거 체인 | O | X | X | X | X |
 | SLSA L2 프로비넌스 | O | X | X | X | X |
-| Known CVE 시그니처 매칭 | O (2,239 CVEs) | X | X | X | X |
+| Known CVE 시그니처 매칭 | O (2,528 CVEs, 시그니처 25개) | X | X | X | X |
 | 신뢰도 상한 (정직한 점수) | O | X | X | X | X |
 | Ghidra 통합 (자동 감지) | O | IDA Pro | O | X | X |
 | AFL++ 퍼징 파이프라인 | O | O | X | X | X |
@@ -96,18 +97,19 @@
 
 | | 기능 | 설명 |
 |---|------|------|
-| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ 시그니처) + NVD CVE 스캔 + 2,239 로컬 CVE DB + 13 Known CVE 시그니처 |
+| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ 시그니처) + NVD CVE 스캔 + 2,528 로컬 CVE DB + 25 Known CVE 시그니처 (8개 신규 벤더) |
 | :mag: | **바이너리 분석** | ELF hardening (NX/PIE/RELRO/Canary) + `.dynstr` 감지 + FORTIFY_SOURCE + Ghidra 디컴파일 |
 | :dart: | **공격 표면** | Source-to-sink 추적, 웹 서버 자동 감지, 크로스 바이너리 IPC 체인 (5종) |
 | :brain: | **테인트 분석** | HTTP-aware 프로시저 간 테인트 + call chain 시각화; 웹 서버 우선 분석 |
 | :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한, 자격 증명 매핑 |
 | :test_tube: | **퍼징** *(선택)* | AFL++ CMPLOG, persistent mode, NVRAM faker, 하니스 생성, crash triage |
-| :bug: | **에뮬레이션** | 3-tier (FirmAE / QEMU user-mode / rootfs 검사) + GDB 원격 디버깅 |
+| :bug: | **에뮬레이션** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs 검사) + GDB 원격 디버깅 |
 | :robot: | **MCP 서버** | Model Context Protocol 12개 도구 (Claude Code/Desktop 연동) |
 | :bar_chart: | **웹 뷰어** | Glassmorphism 대시보드 (KPI 바, IPC 맵, 리스크 히트맵) |
-| :link: | **증거 체인** | SHA-256 앵커 아티팩트, 신뢰도 상한, 5단계 exploit 승격 |
+| :link: | **증거 체인** | SHA-256 앵커 아티팩트, 2-tier 신뢰도 상한 (0.40/0.55), 5단계 exploit 승격 |
 | :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto 인증 |
 | :chart_with_upwards_trend: | **벤치마킹** | FirmAE 1,124 데이터셋, CVE 재매칭, TP/FP 분석 스크립트 |
+| :key: | **벤더 복호화** | D-Link SHRS AES-128-CBC 자동 복호화; Shannon entropy 암호화 탐지 (>7.9) |
 
 ---
 
@@ -141,6 +143,30 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 
 </details>
 
+<details>
+<summary><strong>v2.2.0 신규 기능</strong></summary>
+
+| 기능 | 모듈 | 설명 |
+|------|------|------|
+| D-Link SHRS 복호화 | `vendor_decrypt.py` | SHRS 매직 자동 감지, AES-128-CBC 복호화 후 extraction |
+| binwalk v3 호환 | `extraction.py` | 런타임 버전 감지, v3에서 제거된 `-d` 플래그 자동 처리 |
+| Shannon entropy 탐지 | `extraction.py` | extraction 전 entropy 분석, >7.9는 암호화 의심으로 플래그 |
+| CVE 시그니처 25개 | `cve_scan.py` | 13→25개 확장, 신규 벤더 8개 (Hikvision, QNAP, MikroTik, Ubiquiti, Tenda, Synology, Belkin, TRENDnet) + path_traversal 유형 |
+| 정적 FP 룰 3개 | `fp_verification.py` | constant-sink gate, non-network binary gate, sanitizer detection |
+| 2-tier 신뢰도 상한 | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
+| Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker 통합 Tier 1.5 에뮬레이션, KCRE 커널 복구 |
+
+**v2.2.0 벤치마크 (D-Link 262개 재벤치마크):**
+
+| 지표 | 이전 | 이후 |
+|------|------|------|
+| 파이프라인 CVE 건수 | 0 | 748 (+748) |
+| CVE 발견 펌웨어 비율 | 0% | 57.3% |
+
+**Tier 1 전체 (1,124개):** 성공률 100%, findings 2,702개, CVE 2,528건 (rematch).
+
+</details>
+
 ---
 
 ## 아키텍처
@@ -159,7 +185,7 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 |                                                                    |
 |  --> 에뮬레이션 --> [퍼징] --> 익스플로잇 체인 --> PoC --> 검증       |
 |                                                                    |
-|  42단계 . SHA-256 매니페스트 . 신뢰도 상한 0.60 (정적)               |
+|  42단계 . SHA-256 매니페스트 . 2-tier 신뢰도 상한 (0.40/0.55)        |
 |  출력: SARIF + CycloneDX VEX + SLSA L2 + Markdown 보고서            |
 +--------------------------------------------------------------------+
 |                    핸드오프 (firmware_handoff.json)                 |

@@ -14,6 +14,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.2.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -30,8 +31,8 @@
 > **Every finding has a hash-anchored evidence chain.**
 > No finding without a file path, byte offset, SHA-256 hash, and rationale. Artifacts are immutable and traceable from firmware blob to final verdict.
 
-> **Static-only findings capped at 0.60 -- honest confidence.**
-> Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
+> **Static-only findings capped with 2-tier system -- honest confidence.**
+> SYMBOL_COOCCURRENCE capped at 0.40, STATIC_CODE_VERIFIED at 0.55. Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
 
 > **SARIF + CycloneDX VEX + SLSA provenance -- standard formats.**
 > GitHub Code Scanning, VS Code, CI/CD integration out of the box.
@@ -79,7 +80,7 @@
 | SARIF 2.1.0 Export | Yes | No | No | No | No |
 | Hash-Anchored Evidence Chain | Yes | No | No | No | No |
 | SLSA L2 Provenance | Yes | No | No | No | No |
-| Known CVE Signature Matching | Yes (2,239 CVEs) | No | No | No | No |
+| Known CVE Signature Matching | Yes (2,528 CVEs, 25 sigs) | No | No | No | No |
 | Confidence Caps (honest scoring) | Yes | No | No | No | No |
 | Ghidra Integration (auto-detect) | Yes | IDA Pro | Yes | No | No |
 | AFL++ Fuzzing Pipeline | Yes | Yes | No | No | No |
@@ -96,18 +97,19 @@
 
 | | Feature | Description |
 |---|---------|-------------|
-| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ signatures) + NVD CVE scan + 2,239 local CVE DB + 13 known CVE signatures |
+| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ signatures) + NVD CVE scan + 2,528 local CVE DB + 25 known CVE signatures (8 new vendors) |
 | :mag: | **Binary Analysis** | ELF hardening (NX/PIE/RELRO/Canary) + `.dynstr` detection + FORTIFY_SOURCE + Ghidra decompilation |
 | :dart: | **Attack Surface** | Source-to-sink tracing, web server auto-detection, cross-binary IPC chains (5 types) |
 | :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint with call chain visualization; web server priority |
 | :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping |
 | :test_tube: | **Fuzzing** *(optional)* | AFL++ with CMPLOG, persistent mode, NVRAM faker, harness generation, crash triage |
-| :bug: | **Emulation** | 3-tier (FirmAE / QEMU user-mode / rootfs inspection) + GDB remote debug |
+| :bug: | **Emulation** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs inspection) + GDB remote debug |
 | :robot: | **MCP Server** | 12 tools via Model Context Protocol for Claude Code/Desktop |
 | :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap |
-| :link: | **Evidence Chain** | SHA-256 anchored artifacts, confidence caps, 5-tier exploit promotion |
+| :link: | **Evidence Chain** | SHA-256 anchored artifacts, 2-tier confidence caps (0.40/0.55), 5-tier exploit promotion |
 | :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto attestation |
 | :chart_with_upwards_trend: | **Benchmarking** | FirmAE 1,124 dataset support, CVE rematch, TP/FP analysis scripts |
+| :key: | **Vendor Decrypt** | D-Link SHRS AES-128-CBC auto-decryption; Shannon entropy encryption detection (>7.9) |
 
 ---
 
@@ -141,6 +143,30 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 
 </details>
 
+<details>
+<summary><strong>v2.2.0 New Features</strong></summary>
+
+| Feature | Module | Description |
+|---------|--------|-------------|
+| D-Link SHRS Decryption | `vendor_decrypt.py` | Auto-detects SHRS magic, decrypts AES-128-CBC before extraction |
+| binwalk v3 Compatibility | `extraction.py` | Runtime version detection; auto-strips `-d` flag removed in v3 |
+| Shannon Entropy Detection | `extraction.py` | Pre-extraction entropy analysis; >7.9 flagged as encrypted |
+| CVE Signatures 25x | `cve_scan.py` | Expanded 13→25 signatures; 8 new vendors (Hikvision, QNAP, MikroTik, Ubiquiti, Tenda, Synology, Belkin, TRENDnet) + path_traversal type |
+| Static FP Rules (3) | `fp_verification.py` | Constant-sink gate, non-network binary gate, sanitizer detection |
+| 2-Tier Confidence Caps | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
+| Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker-integrated Tier 1.5 emulation with KCRE kernel recovery |
+
+**v2.2.0 Benchmark (D-Link 262 re-benchmark):**
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Pipeline CVE findings | 0 | 748 (+748) |
+| CVE-positive firmware | 0% | 57.3% |
+
+**Tier 1 full dataset (1,124 images):** 100% success rate, 2,702 findings, 2,528 CVEs (rematch).
+
+</details>
+
 ---
 
 ## Architecture
@@ -159,7 +185,7 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 |                                                                    |
 |  --> Emulation --> [Fuzzing] --> Exploit Chain --> PoC --> Verify  |
 |                                                                    |
-|  42 stages . SHA-256 manifests . confidence cap 0.60 (static)      |
+|  42 stages . SHA-256 manifests . 2-tier confidence caps (0.40/0.55) |
 |  Outputs: SARIF + CycloneDX VEX + SLSA L2 + Markdown reports       |
 +--------------------------------------------------------------------+
 |                    Handoff (firmware_handoff.json)                 |
