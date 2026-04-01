@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 STATIC_ONLY_CAP = 0.60
+SYMBOL_COOCCURRENCE_CAP = 0.40  # symbol co-occurrence only: no code path confirmed
+STATIC_CODE_VERIFIED_CAP = 0.55  # decompiled code inspected but no LLM taint trace
 EVIDENCE_LEVELS: tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4")
 
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from .confidence_caps import STATIC_CODE_VERIFIED_CAP, SYMBOL_COOCCURRENCE_CAP
 from .llm_driver import resolve_driver
 from .path_safety import assert_under_dir
 from .schema import JsonValue
@@ -51,6 +52,51 @@ _SINK_SYMBOLS: frozenset[str] = frozenset({
 
 _MAX_PATHS = 200
 _MAX_ALERTS = 100
+
+# FP Rule 2: symbols that indicate network/external input reachability
+_NETWORK_INPUT_SYMBOLS: frozenset[str] = frozenset({
+    "listen", "accept", "bind", "socket", "getenv", "nvram_get",
+    "recv", "recvfrom", "recvmsg", "fgets", "gets", "scanf",
+})
+
+# FP Rule 3: sanitizer symbols that convert strings to integers (injection-safe)
+_SANITIZER_SYMBOLS: frozenset[str] = frozenset({
+    "atoi", "atol", "atoll", "strtol", "strtoul", "strtoll", "strtoull",
+    "inet_aton", "inet_addr",
+})
+
+
+def _check_constant_sink(
+    func_map: dict[str, dict[str, str]],
+    sink_sym: str,
+) -> bool:
+    """FP Rule 1: return True if sink is called with a string constant argument.
+
+    Looks for patterns like: system("/bin/...") or popen("/usr/sbin/...", ...)
+    where the first argument is a quoted string literal, meaning the attacker
+    cannot control it.  Returns False (not a FP) when no evidence found so we
+    fail open.
+    """
+    # Simple heuristic: find lines containing sink_sym(..."/... or sink_sym(...'/...
+    pattern = re.compile(
+        r'\b' + re.escape(sink_sym) + r'\s*\(\s*"[^"]*"',
+        re.IGNORECASE,
+    )
+    for finfo in func_map.values():
+        body = finfo.get("body", "")
+        if pattern.search(body):
+            return True
+    return False
+
+
+def _has_network_input_symbol(import_symbols: set[str]) -> bool:
+    """FP Rule 2: binary has at least one network/external-input symbol."""
+    return bool(import_symbols & _NETWORK_INPUT_SYMBOLS)
+
+
+def _has_sanitizer_symbol(import_symbols: set[str]) -> bool:
+    """FP Rule 3: binary imports a string-to-integer sanitizer."""
+    return bool(import_symbols & _SANITIZER_SYMBOLS)
 
 
 def _load_json_file(path: Path) -> object | None:
@@ -302,6 +348,19 @@ class TaintPropagationStage:
                     if isinstance(sa, str):
                         sink_list.append(sa)
 
+            # Collect import symbols for this source entry (for FP rules 2 & 3)
+            src_import_syms: set[str] = set()
+            ms_any = source.get("matched_symbols")
+            if isinstance(ms_any, list):
+                for _s in cast(list[object], ms_any):
+                    if isinstance(_s, str):
+                        src_import_syms.add(_s.lower())
+            mi_any = source.get("matched_input_apis")
+            if isinstance(mi_any, list):
+                for _s in cast(list[object], mi_any):
+                    if isinstance(_s, str):
+                        src_import_syms.add(_s.lower())
+
             for sink_sym in sink_list:
                 dedup_key = (src_binary, src_api, sink_sym)
                 if dedup_key in seen_static:
@@ -345,6 +404,31 @@ class TaintPropagationStage:
                         f"{src_api}() and {sink_sym}(). "
                         f"Hardening: {hardening_str or 'unknown'}"
                     )
+
+                # --- FP Rule 1: constant-sink gate (Ghidra data required) ---
+                if func_map and _check_constant_sink(func_map, sink_sym):
+                    limitations.append(
+                        f"FP suppressed (constant-sink): {src_binary}:{sink_sym}"
+                    )
+                    continue
+
+                # --- FP Rule 2: non-network binary gate ---
+                # If binary has no network/external-input symbols, attacker
+                # cannot supply tainted data → lower confidence below threshold.
+                if not is_web and not _has_network_input_symbol(src_import_syms):
+                    conf = min(conf, 0.25)  # below fp_verification threshold (0.30)
+
+                # --- FP Rule 3: sanitizer detection ---
+                if _has_sanitizer_symbol(src_import_syms):
+                    conf = max(0.0, conf - 0.15)
+
+                # --- 2-tier confidence cap ---
+                if func_map:
+                    # Ghidra code available: code-verified tier
+                    conf = min(conf, STATIC_CODE_VERIFIED_CAP)
+                else:
+                    # Symbol co-occurrence only
+                    conf = min(conf, SYMBOL_COOCCURRENCE_CAP)
 
                 src_basename = (
                     src_binary.rsplit("/", 1)[-1]
@@ -397,6 +481,15 @@ class TaintPropagationStage:
             if not isinstance(bp_sinks, list):
                 bp_sinks = []
 
+            # Collect all symbols for FP rules
+            bp_all_syms: set[str] = set()
+            for _s in (bp_inputs if isinstance(bp_inputs, list) else []):
+                if isinstance(_s, str):
+                    bp_all_syms.add(_s.lower())
+            for _s in (bp_sinks if isinstance(bp_sinks, list) else []):
+                if isinstance(_s, str):
+                    bp_all_syms.add(_s.lower())
+
             src_apis = bp_inputs if bp_inputs else bp_sinks
             for src_api_str in src_apis:
                 if not isinstance(src_api_str, str):
@@ -411,7 +504,28 @@ class TaintPropagationStage:
                     if trace_count >= _MAX_PATHS:
                         break
 
+                    # FP Rule 1: constant-sink gate
+                    if func_map and _check_constant_sink(func_map, sink_str):
+                        limitations.append(
+                            f"FP suppressed (constant-sink): {bp_binary}:{sink_str}"
+                        )
+                        continue
+
                     bp_conf = 0.50 if bp_inputs else 0.40
+
+                    # FP Rule 2: non-network binary
+                    if not _has_network_input_symbol(bp_all_syms):
+                        bp_conf = min(bp_conf, 0.25)
+
+                    # FP Rule 3: sanitizer
+                    if _has_sanitizer_symbol(bp_all_syms):
+                        bp_conf = max(0.0, bp_conf - 0.15)
+
+                    # 2-tier confidence cap
+                    if func_map:
+                        bp_conf = min(bp_conf, STATIC_CODE_VERIFIED_CAP)
+                    else:
+                        bp_conf = min(bp_conf, SYMBOL_COOCCURRENCE_CAP)
                     taint_entry_bp: dict[str, JsonValue] = {
                         "source_api": src_api_str,
                         "source_binary": bp_binary,

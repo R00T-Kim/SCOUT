@@ -16,6 +16,7 @@ from typing import cast
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
+from .vendor_decrypt import try_vendor_decrypt
 
 _UBI_MAGIC = b"UBI#"
 _SQUASHFS_MAGICS = (b"hsqs", b"sqsh")
@@ -1084,6 +1085,18 @@ class ExtractionStage:
                 )
             elif entropy >= 7.5:
                 details["high_entropy_warning"] = True
+
+            decrypted, decrypt_log = try_vendor_decrypt(fw, stage_dir)
+            if decrypted is not None:
+                assert_under_dir(stage_dir, decrypted)
+                details["vendor_decrypted"] = True
+                details["decrypt_method"] = decrypt_log
+                reasons.append(f"Vendor decryption succeeded: {decrypt_log}")
+                fw = decrypted  # replace with decrypted file for binwalk
+            else:
+                details["vendor_decrypted"] = False
+                if decrypt_log and decrypt_log != "no vendor decryption scheme matched":
+                    reasons.append(f"Vendor decryption attempted: {decrypt_log}")
 
             bw_version = _binwalk_major_version(binwalk)
             details["binwalk_version"] = bw_version
