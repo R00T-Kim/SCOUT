@@ -156,14 +156,7 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | 2-tier 신뢰도 상한 | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
 | Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker 통합 Tier 1.5 에뮬레이션, KCRE 커널 복구 |
 
-**v2.2.0 벤치마크 (D-Link 262개 재벤치마크):**
-
-| 지표 | 이전 | 이후 |
-|------|------|------|
-| 파이프라인 CVE 건수 | 0 | 748 (+748) |
-| CVE 발견 펌웨어 비율 | 0% | 57.3% |
-
-**Tier 1 전체 (1,124개):** 성공률 100%, findings 2,702개, CVE 2,528건 (rematch).
+**v2.2.0 벤치마크:** `sasquatch` squashfs 지원 포함 재벤치마크 진행 중. 검증 완료 후 수치 업데이트 예정.
 
 </details>
 

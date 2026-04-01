@@ -156,14 +156,7 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | 2-Tier Confidence Caps | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
 | Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker-integrated Tier 1.5 emulation with KCRE kernel recovery |
 
-**v2.2.0 Benchmark (D-Link 262 re-benchmark):**
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Pipeline CVE findings | 0 | 748 (+748) |
-| CVE-positive firmware | 0% | 57.3% |
-
-**Tier 1 full dataset (1,124 images):** 100% success rate, 2,702 findings, 2,528 CVEs (rematch).
+**v2.2.0 Benchmark:** Re-benchmarking in progress with `sasquatch` squashfs support. Updated numbers will be published after verification.
 
 </details>
 
