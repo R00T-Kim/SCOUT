@@ -22,8 +22,8 @@ pytest -q tests/test_inventory.py   # single module
 ## Project Structure
 
 ```
-src/aiedge/          # core engine (74 modules, ~58k lines)
-tests/               # 88 test files
+src/aiedge/          # core engine (96 modules)
+tests/               # 86 test files
 scripts/             # verification & e2e scripts
 docs/                # contracts, runbooks, schemas
 benchmarks/          # corpus and performance benchmarks

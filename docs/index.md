@@ -48,7 +48,7 @@
 - **퍼징**: `fuzz_target.py` + `fuzz_harness.py` + `fuzz_campaign.py` + `fuzz_triage.py` — AFL++ 파이프라인
 - **리포트**: `report_export.py` — Markdown executive report 생성
 
-## 6) 파이프라인 (34 stages)
+## 6) 파이프라인 (42 stages)
 
 ```
 tooling → extraction → structure → carving → firmware_profile → inventory

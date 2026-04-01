@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SCOUT (AIEdge) is a deterministic firmware-to-exploit evidence engine. It takes firmware blobs as input and produces hash-anchored evidence artifacts through a 41-stage sequential pipeline — from unpacking through vulnerability discovery to exploit chain verification. SCOUT is the evidence-production layer; a separate orchestrator (Terminator) applies LLM judgment and dynamic validation on top via `firmware_handoff.json`.
+SCOUT (AIEdge) is a deterministic firmware-to-exploit evidence engine. It takes firmware blobs as input and produces hash-anchored evidence artifacts through a 42-stage sequential pipeline — from unpacking through vulnerability discovery to exploit chain verification. SCOUT is the evidence-production layer; a separate orchestrator (Terminator) applies LLM judgment and dynamic validation on top via `firmware_handoff.json`.
 
 **Key constraints:** Pure Python 3.10+ with zero pip dependencies (stdlib only). External tools (binwalk, QEMU, FirmAE, docker) are runtime-optional.
 
@@ -171,7 +171,7 @@ Subcommands: `analyze`, `analyze-8mb`, `stages`, `corpus-validate`, `quality-met
 
 ## Critical Coupling Points
 
-- **`stage.py`** Protocol/dataclass changes affect all 41 registered stages
+- **`stage.py`** Protocol/dataclass changes affect all 42 registered stages
 - **`schema.py`** validation changes affect report generation, quality gates, and all verification scripts
 - **`run.py`** report finalization changes affect all verification scripts and handoff generation. The shared `_finalize_report()` helper handles both budget-exhausted and normal finalization paths -- changes there affect all exit routes
 - **`schema.py`** also provides `validate_handoff()` which validates `firmware_handoff.json` before write; changes affect handoff contract integrity
