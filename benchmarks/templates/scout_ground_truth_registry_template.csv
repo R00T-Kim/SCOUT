@@ -1,0 +1,2 @@
+dataset_id,sample_id,firmware_filename,firmware_sha256,gt_id,reference_id,root_cause_type,component,entrypoint,sink,ground_truth_source,matched_cluster_id,first_rank_hit,reproduced,notes
+<dataset_id>,<sample_id>,<firmware_filename>,<firmware_sha256>,<gt_id>,<reference_id>,<root_cause_type>,<component>,<entrypoint>,<sink>,<ground_truth_source>,<matched_cluster_id>,<first_rank_hit>,<reproduced>,<notes>

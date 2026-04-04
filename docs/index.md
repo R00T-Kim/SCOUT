@@ -17,6 +17,10 @@
   - 지금 어디까지 구현됐는지
   - 무엇이 깨져있는지(known issues)
   - 다음 우선순위
+- `docs/tier1_rebenchmark_frozen_baseline.md`
+  - sasquatch 반영 후 Tier 1 재벤치마크의 frozen baseline 수치와 해석
+- `docs/tier1_rebenchmark_final_analysis.md`
+  - Tier 1 최종 결과, partial/fatal 분류, 벤더별 delta, emulation 후처리 분석
 
 ## 3) 실행/검증 런북
 
@@ -25,6 +29,10 @@
   - (원하면) `python3 -m aiedge analyze` / `python3 -m aiedge stages`도 직접 실행 가능
   - 결정론/계약 검증 스크립트
   - Terminator 연동 E2E(있는 경우)
+- `docs/scout_experimental_protocol.md`
+  - 팀원이 SCOUT를 실제로 사용해 취약점 후보를 찾고, 피드백을 남기고, 재현 가능한 실험 결과를 축적하기 위한 운영 프로토콜
+- `docs/scout_evaluation_labeling_criteria.md`
+  - TP/FP/blocked/duplicate를 분리해 SCOUT 결과를 논문화·발표 가능한 방식으로 수치화하기 위한 판정 기준
 
 ## 4) 저수준 계약(Contracts)
 

@@ -75,7 +75,7 @@
 
 | Feature | SCOUT | FirmAgent | EMBA | FACT | FirmAE |
 |:--------|:-----:|:---------:|:----:|:----:|:------:|
-| Scale (firmware tested) | 1,124 | 14 | -- | -- | 1,124 |
+| Scale (firmware tested) | 1,123 | 14 | -- | -- | 1,124 |
 | SBOM (CycloneDX 1.6+VEX) | Yes | No | Yes | No | No |
 | SARIF 2.1.0 Export | Yes | No | No | No | No |
 | Hash-Anchored Evidence Chain | Yes | No | No | No | No |
@@ -156,7 +156,20 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | 2-Tier Confidence Caps | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
 | Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker-integrated Tier 1.5 emulation with KCRE kernel recovery |
 
-**v2.2.0 Benchmark:** Re-benchmarking in progress with `sasquatch` squashfs support. Updated numbers will be published after verification.
+**v2.2.0 Benchmark (Tier 1 frozen baseline):**
+
+- `1,123` firmware / `8` vendors
+- `1,110` success / `4` partial / `9` failed
+- analysis rate (`success + partial`): `99.2%`
+- `3,523` findings / `13,893` CVE matches
+- extraction ok / partial: `1110 / 4`
+- inventory sufficient / insufficient: `1104 / 10`
+- emulation post-processing (`report.json`) showed `1102` runs with `used_tier=tier1` and `12` with `used_tier=tier2`; this is **stage-level path success, not service-verified full-system success**
+
+See:
+
+- [`docs/tier1_rebenchmark_frozen_baseline.md`](docs/tier1_rebenchmark_frozen_baseline.md)
+- [`docs/tier1_rebenchmark_final_analysis.md`](docs/tier1_rebenchmark_final_analysis.md)
 
 </details>
 
@@ -236,16 +249,18 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 <summary><strong>Benchmarking</strong></summary>
 
 ```bash
-# FirmAE dataset benchmark (1,124 firmware images, 8 vendors)
+# FirmAE dataset benchmark (1,123 usable firmware images in the current frozen baseline)
 ./scripts/benchmark_firmae.sh --parallel 8 --time-budget 1800 --cleanup
 
 # Options
 --dataset-dir DIR       # Firmware directory (default: aiedge-inputs/firmae-benchmark)
 --results-dir DIR       # Output directory
+--file-list PATH        # Explicit newline-delimited firmware list
 --parallel N            # Concurrent jobs (default: 4)
 --time-budget S         # Seconds per firmware (default: 600)
 --stages STAGES         # Specific stages (default: full pipeline)
 --max-images N          # Limit images (0 = all)
+--llm                   # Enable LLM-backed stages
 --8mb                   # Use 8MB truncated track
 --full                  # Include dynamic stages
 --cleanup               # Archive JSONs, delete run dirs (saves disk)
@@ -263,6 +278,10 @@ PYTHONPATH=src python3 scripts/analyze_findings.py \
 
 # FirmAE dataset setup
 ./scripts/unpack_firmae_dataset.sh [ZIP_FILE]
+
+# Tier 1 frozen baseline docs
+# - docs/tier1_rebenchmark_frozen_baseline.md
+# - docs/tier1_rebenchmark_final_analysis.md
 ```
 
 </details>

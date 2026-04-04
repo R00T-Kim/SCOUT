@@ -75,7 +75,7 @@
 
 | 기능 | SCOUT | FirmAgent | EMBA | FACT | FirmAE |
 |:-----|:-----:|:---------:|:----:|:----:|:------:|
-| 분석 규모 (테스트 펌웨어) | 1,124 | 14 | -- | -- | 1,124 |
+| 분석 규모 (테스트 펌웨어) | 1,123 | 14 | -- | -- | 1,124 |
 | SBOM (CycloneDX 1.6+VEX) | O | X | O | X | X |
 | SARIF 2.1.0 내보내기 | O | X | X | X | X |
 | 해시 기반 증거 체인 | O | X | X | X | X |
@@ -156,7 +156,20 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | 2-tier 신뢰도 상한 | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
 | Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker 통합 Tier 1.5 에뮬레이션, KCRE 커널 복구 |
 
-**v2.2.0 벤치마크:** `sasquatch` squashfs 지원 포함 재벤치마크 진행 중. 검증 완료 후 수치 업데이트 예정.
+**v2.2.0 벤치마크 (Tier 1 frozen baseline):**
+
+- `1,123`개 펌웨어 / `8`개 벤더
+- `1,110` success / `4` partial / `9` failed
+- 분석 가능 비율 (`success + partial`): `99.2%`
+- `3,523` findings / `13,893` CVE 매칭
+- extraction ok / partial: `1110 / 4`
+- inventory sufficient / insufficient: `1104 / 10`
+- emulation 후처리(`report.json`) 기준 `used_tier=tier1`은 `1102`, `used_tier=tier2`는 `12`였으며, 이는 **stage-level path success이지 서비스 기동이 확인된 full-system success를 의미하지는 않습니다**
+
+참고 문서:
+
+- [`docs/tier1_rebenchmark_frozen_baseline.md`](docs/tier1_rebenchmark_frozen_baseline.md)
+- [`docs/tier1_rebenchmark_final_analysis.md`](docs/tier1_rebenchmark_final_analysis.md)
 
 </details>
 
@@ -236,16 +249,18 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 <summary><strong>벤치마킹</strong></summary>
 
 ```bash
-# FirmAE 데이터셋 벤치마크 (1,124개 펌웨어, 8개 벤더)
+# FirmAE 데이터셋 벤치마크 (현재 frozen baseline 기준 usable 펌웨어 1,123개)
 ./scripts/benchmark_firmae.sh --parallel 8 --time-budget 1800 --cleanup
 
 # 옵션
 --dataset-dir DIR       # 펌웨어 디렉토리 (기본: aiedge-inputs/firmae-benchmark)
 --results-dir DIR       # 결과 출력 디렉토리
+--file-list PATH        # 줄바꿈 기준 고정 펌웨어 리스트
 --parallel N            # 동시 작업 수 (기본: 4)
 --time-budget S         # 펌웨어당 시간 (기본: 600초)
 --stages STAGES         # 특정 스테이지 (기본: 전체 파이프라인)
 --max-images N          # 이미지 제한 (0 = 전체)
+--llm                   # LLM 단계 활성화
 --8mb                   # 8MB 트랙 사용
 --full                  # 동적 스테이지 포함
 --cleanup               # JSON 아카이브 후 run 디렉토리 삭제 (디스크 절약)
@@ -263,6 +278,10 @@ PYTHONPATH=src python3 scripts/analyze_findings.py \
 
 # FirmAE 데이터셋 설정
 ./scripts/unpack_firmae_dataset.sh [ZIP_FILE]
+
+# Tier 1 frozen baseline 문서
+# - docs/tier1_rebenchmark_frozen_baseline.md
+# - docs/tier1_rebenchmark_final_analysis.md
 ```
 
 </details>
