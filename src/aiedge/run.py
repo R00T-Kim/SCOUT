@@ -3502,8 +3502,9 @@ def analyze_run(
         _import_limitations.append(f"firmware_lineage import failed: {exc}")
     try:
         from .ghidra_analysis import make_ghidra_analysis_stage
-        # Insert ghidra BEFORE taint_propagation so decompiled functions are available
-        _taint_idx = next((i for i, s in enumerate(stages) if s.name == "taint_propagation"), len(stages))
+        # Insert ghidra BEFORE semantic_classification so decompiled functions
+        # are available for both semantic_classification and taint_propagation
+        _taint_idx = next((i for i, s in enumerate(stages) if s.name == "semantic_classification"), len(stages))
         stages.insert(_taint_idx, make_ghidra_analysis_stage(info, source_input_path, remaining_s, no_llm))
     except ImportError as exc:
         _import_limitations.append(f"ghidra_analysis import failed: {exc}")
