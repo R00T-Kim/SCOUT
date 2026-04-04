@@ -4,11 +4,13 @@ from __future__ import annotations
 
 Removes false positives from taint alerts using three known FP patterns
 (sanitizer, non-propagating, system-file) via LLM few-shot classification.
-Skips under ``--no-llm``.
+Enriches LLM prompts with Ghidra decompiled function bodies and xref-based
+call chain evidence to improve precision.  Skips under ``--no-llm``.
 """
 
 import json
 import re
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -36,6 +38,23 @@ _RETRYABLE_TOKENS: tuple[str, ...] = (
 
 _CONFIDENCE_REDUCTION = 0.3
 
+# Sanitizer functions that neutralize taint
+_SANITIZER_NAMES: frozenset[str] = frozenset(
+    [
+        "atoi",
+        "strtol",
+        "strtoul",
+        "strtoll",
+        "strtoull",
+        "strtod",
+        "strtof",
+        "isValidIpAddr",
+        "inet_aton",
+        "inet_addr",
+        "inet_pton",
+    ]
+)
+
 
 def _load_json_file(path: Path) -> object | None:
     if not path.is_file():
@@ -54,8 +73,104 @@ def _clamp01(v: float) -> float:
     return float(v)
 
 
-def _build_fp_prompt(alert: dict[str, object]) -> str:
+def _trace_call_chain(
+    xref_map: dict[str, list[str]],
+    source: str,
+    sink: str,
+    max_depth: int = 5,
+) -> list[str] | None:
+    """BFS through xref_map to find a call path from *source* to *sink*.
+
+    Returns the path as a list of function names (inclusive), or None if no
+    path exists within *max_depth* hops.
+    """
+    if not xref_map or not source or not sink:
+        return None
+    queue: deque[tuple[str, list[str]]] = deque([(source, [source])])
+    visited: set[str] = {source}
+    while queue:
+        current, path = queue.popleft()
+        if len(path) > max_depth:
+            continue
+        for callee in xref_map.get(current, []):
+            if callee == sink:
+                return path + [sink]
+            if callee not in visited:
+                visited.add(callee)
+                queue.append((callee, path + [callee]))
+    return None
+
+
+def _check_constant_sink_in_context(
+    decompiled_context: list[dict[str, str]],
+    sink_sym: str,
+) -> bool:
+    """Return True if every call to *sink_sym* in *decompiled_context* passes
+    only a string/integer literal as its first argument (constant-sink FP).
+
+    Heuristic: look for `sink_sym("` or `sink_sym(0x` patterns, and ensure
+    there is no variable reference pattern `sink_sym(var` / `sink_sym(buf`.
+    """
+    if not sink_sym:
+        return False
+    literal_pat = re.compile(
+        r"\b" + re.escape(sink_sym) + r'\s*\(\s*(?:"[^"]*"|0x[0-9a-fA-F]+|\d+)',
+    )
+    variable_pat = re.compile(
+        r"\b" + re.escape(sink_sym) + r"\s*\(\s*[a-zA-Z_]",
+    )
+    found_literal = False
+    for finfo in decompiled_context:
+        body = finfo.get("body", "")
+        if literal_pat.search(body):
+            found_literal = True
+        if variable_pat.search(body):
+            # At least one call with a variable argument — cannot be pure constant-sink
+            return False
+    return found_literal
+
+
+def _check_sanitizer_in_context(
+    decompiled_context: list[dict[str, str]],
+    src_api: str,
+    sink_sym: str,
+) -> bool:
+    """Return True if any sanitizer function appears in the relevant function
+    bodies (between source and sink), suggesting taint may be neutralized.
+    """
+    for finfo in decompiled_context:
+        body = finfo.get("body", "")
+        for san in _SANITIZER_NAMES:
+            if san + "(" in body or san + " (" in body:
+                return True
+    return False
+
+
+def _build_fp_prompt(
+    alert: dict[str, object],
+    decompiled_context: list[dict[str, str]] | None = None,
+    call_chain: list[str] | None = None,
+) -> str:
     alert_json = json.dumps(alert, indent=2, ensure_ascii=True)
+
+    code_section = ""
+    if decompiled_context:
+        code_section = "\n## Decompiled Function Context\n"
+        for func in decompiled_context[:3]:  # max 3 functions
+            body = func.get("body", "")[:1500]  # 1500-char limit per function
+            binary_basename = func.get("binary", "").split("/")[-1]
+            code_section += (
+                f"\n### {func.get('name', '?')} ({binary_basename})\n"
+                f"```c\n{body}\n```\n"
+            )
+
+    chain_section = ""
+    if call_chain:
+        chain_section = (
+            "\n## Call Chain Evidence\n"
+            f"`{'  ->  '.join(call_chain)}`\n"
+        )
+
     return (
         "You are a firmware vulnerability false-positive analyst.\n"
         "Determine if the following taint alert is a FALSE POSITIVE or a\n"
@@ -77,8 +192,17 @@ def _build_fp_prompt(alert: dict[str, object]) -> str:
         'fopen("/sys/..."), or reading from a fixed system file path that\n'
         "is not attacker-writable, the data is not externally controlled.\n"
         "Mark as FP.\n\n"
+        f"{code_section}"
+        f"{chain_section}"
         "## Alert to Analyze\n"
         f"{alert_json}\n\n"
+        "## Additional Instructions\n"
+        "If decompiled code is provided, examine it carefully:\n"
+        "- Check if the sink argument is a constant string (FP pattern 1)\n"
+        "- Check if sanitization functions (atoi, strtol, inet_aton) exist\n"
+        "  between source and sink\n"
+        "- Check if the source data actually reaches the sink through the\n"
+        "  call chain shown above\n\n"
         "## Output Format\n"
         "Return ONLY a JSON object (no markdown fences):\n"
         "{\n"
@@ -155,6 +279,70 @@ class FPVerificationStage:
                 limitations=["no_llm_mode"],
             )
 
+        # ---------------------------------------------------------------
+        # Step 1: Load Ghidra decompiled functions → func_map
+        # Pattern mirrors taint_propagation.py:304-326
+        # ---------------------------------------------------------------
+        ghidra_dir = run_dir / "stages" / "ghidra_analysis"
+        decompiled_path = ghidra_dir / "decompiled_functions.json"
+        func_data = _load_json_file(decompiled_path)
+        func_map: dict[str, dict[str, str]] = {}
+        if isinstance(func_data, dict):
+            funcs_any = func_data.get("functions")
+            if isinstance(funcs_any, list):
+                for f in funcs_any:
+                    if not isinstance(f, dict):
+                        continue
+                    fname = str(f.get("name", ""))
+                    body = str(f.get("body", ""))
+                    binary = str(f.get("binary", ""))
+                    if fname and body:
+                        func_map[fname] = {
+                            "name": fname,
+                            "body": body,
+                            "binary": binary,
+                        }
+
+        # ---------------------------------------------------------------
+        # Step 2: Load xref_graph → xref_map (caller → [callees])
+        # ---------------------------------------------------------------
+        xref_map: dict[str, list[str]] = {}
+        for xref_file in ghidra_dir.rglob("xref_graph.json"):
+            xref_data = _load_json_file(xref_file)
+            if isinstance(xref_data, list):
+                for entry in xref_data:
+                    if not isinstance(entry, dict):
+                        continue
+                    caller = str(entry.get("caller", ""))
+                    callee = str(entry.get("callee", ""))
+                    if caller and callee:
+                        xref_map.setdefault(caller, []).append(callee)
+
+        # ---------------------------------------------------------------
+        # Step 5: Load IPC communication graph for cross-binary context
+        # ---------------------------------------------------------------
+        ipc_edges: list[dict[str, object]] = []
+        ipc_graph_path = run_dir / "stages" / "graph" / "communication_graph.json"
+        ipc_data = _load_json_file(ipc_graph_path)
+        _IPC_EDGE_TYPES = frozenset(
+            [
+                "ipc_unix_socket",
+                "ipc_dbus",
+                "ipc_shm",
+                "ipc_pipe",
+                "ipc_exec_chain",
+            ]
+        )
+        if isinstance(ipc_data, dict):
+            edges_any = ipc_data.get("edges")
+            if isinstance(edges_any, list):
+                for edge in edges_any:
+                    if not isinstance(edge, dict):
+                        continue
+                    etype = str(edge.get("type", ""))
+                    if etype in _IPC_EDGE_TYPES:
+                        ipc_edges.append(cast(dict[str, object], edge))
+
         # --- Load alerts from taint_propagation, findings, or attack_surface ---
         alerts: list[dict[str, object]] = []
 
@@ -196,13 +384,11 @@ class FPVerificationStage:
                         if not isinstance(entry_any, dict):
                             continue
                         entry = cast(dict[str, object], entry_any)
-                        # Use confidence_calibrated (actual field name)
                         conf_any = (
                             entry.get("confidence")
                             or entry.get("confidence_calibrated")
                         )
                         if isinstance(conf_any, (int, float)) and float(conf_any) > 0.3:
-                            # Normalize to alert format
                             alert_entry: dict[str, object] = {
                                 "source_api": str(entry.get("surface", "")),
                                 "source_binary": str(
@@ -271,15 +457,127 @@ class FPVerificationStage:
         verified: list[dict[str, JsonValue]] = []
         fp_count = 0
         tp_count = 0
+        static_fp_count = 0  # pre-filter FPs (no LLM call)
 
         if not driver.available():
             limitations.append("LLM driver not available for FP verification")
-            # Pass all through unchanged
             for a in alerts:
                 verified.append(cast(dict[str, JsonValue], dict(a)))
         else:
             for alert in eligible:
-                prompt = _build_fp_prompt(alert)
+                sink_sym = str(alert.get("sink_symbol", ""))
+                src_binary = str(alert.get("source_binary", ""))
+                src_api = str(alert.get("source_api", ""))
+
+                # -------------------------------------------------------
+                # Step 4: Build decompiled_context for this alert
+                # Find functions that reference the sink symbol in the
+                # same binary as the alert source.
+                # -------------------------------------------------------
+                binary_basename = src_binary.split("/")[-1] if src_binary else ""
+                decompiled_context: list[dict[str, str]] = []
+                for finfo in func_map.values():
+                    if sink_sym and sink_sym in finfo.get("body", ""):
+                        fb = finfo.get("binary", "")
+                        # prefer same binary; accept any if basename matches or
+                        # binary_basename is empty (fallback)
+                        if not binary_basename or binary_basename in fb:
+                            decompiled_context.append(finfo)
+                            if len(decompiled_context) >= 3:
+                                break
+
+                # -------------------------------------------------------
+                # Step 5 (cont.): IPC cross-binary context
+                # If alert has IPC indicators, add decompiled functions
+                # from the peer binary connected via IPC edges.
+                # -------------------------------------------------------
+                if ipc_edges and binary_basename:
+                    for edge in ipc_edges:
+                        src_node = str(edge.get("source", ""))
+                        dst_node = str(edge.get("target", ""))
+                        # Check if this binary is one side of an IPC edge
+                        if binary_basename in src_node or binary_basename in dst_node:
+                            peer = dst_node if binary_basename in src_node else src_node
+                            peer_basename = peer.split("/")[-1]
+                            # Add up to 2 decompiled functions from the peer binary
+                            added = 0
+                            for finfo in func_map.values():
+                                if (
+                                    sink_sym
+                                    and sink_sym in finfo.get("body", "")
+                                    and peer_basename in finfo.get("binary", "")
+                                    and finfo not in decompiled_context
+                                ):
+                                    decompiled_context.append(finfo)
+                                    added += 1
+                                    if added >= 2:
+                                        break
+                            if added:
+                                break  # one IPC peer is enough
+
+                # -------------------------------------------------------
+                # Step 4 (cont.): xref-based call chain source → sink
+                # -------------------------------------------------------
+                call_chain = _trace_call_chain(xref_map, src_api, sink_sym, max_depth=5)
+
+                # -------------------------------------------------------
+                # Step 6: Static pre-filters (skip LLM when possible)
+                # -------------------------------------------------------
+                alert_copy = dict(alert)
+
+                if decompiled_context:
+                    # Pre-filter 1: constant-sink
+                    if _check_constant_sink_in_context(decompiled_context, sink_sym):
+                        alert_copy["fp_verdict"] = "FP"
+                        alert_copy["fp_pattern"] = "constant_sink"
+                        alert_copy["fp_rationale"] = (
+                            "Ghidra code confirms constant-sink pattern "
+                            "(all sink arguments are literals)"
+                        )
+                        orig_conf = float(alert.get("confidence", 0.5))
+                        alert_copy["original_confidence"] = orig_conf
+                        alert_copy["confidence"] = _clamp01(
+                            orig_conf - _CONFIDENCE_REDUCTION
+                        )
+                        alert_copy["static_prefilter"] = True
+                        fp_count += 1
+                        static_fp_count += 1
+                        verified.append(cast(dict[str, JsonValue], alert_copy))
+                        continue  # skip LLM
+
+                    # Pre-filter 2: adjust confidence when sanitizer present
+                    if _check_sanitizer_in_context(decompiled_context, src_api, sink_sym):
+                        orig_conf = float(alert.get("confidence", 0.5))
+                        alert_copy["confidence"] = _clamp01(orig_conf - 0.15)
+                        alert_copy["original_confidence"] = orig_conf
+                        alert_copy["sanitizer_detected"] = True
+
+                # Pre-filter 3: xref loaded but no path source→sink
+                if xref_map and src_api and sink_sym and call_chain is None:
+                    alert_copy["fp_verdict"] = "FP"
+                    alert_copy["fp_pattern"] = "no_call_path"
+                    alert_copy["fp_rationale"] = (
+                        "No call path from source to sink found in xref graph"
+                    )
+                    orig_conf = float(alert.get("confidence", 0.5))
+                    alert_copy["original_confidence"] = orig_conf
+                    alert_copy["confidence"] = _clamp01(
+                        orig_conf - _CONFIDENCE_REDUCTION
+                    )
+                    alert_copy["static_prefilter"] = True
+                    fp_count += 1
+                    static_fp_count += 1
+                    verified.append(cast(dict[str, JsonValue], alert_copy))
+                    continue  # skip LLM
+
+                # -------------------------------------------------------
+                # LLM call with enriched prompt
+                # -------------------------------------------------------
+                prompt = _build_fp_prompt(
+                    alert,
+                    decompiled_context or None,
+                    call_chain or None,
+                )
                 result = driver.execute(
                     prompt=prompt,
                     run_dir=run_dir,
@@ -289,7 +587,6 @@ class FPVerificationStage:
                     model_tier="sonnet",
                 )
 
-                alert_copy = dict(alert)
                 if result.status == "ok":
                     parsed = _parse_json_response(result.stdout)
                     if parsed is not None:
@@ -345,6 +642,10 @@ class FPVerificationStage:
                 "eligible_checked": len(eligible),
                 "false_positives": fp_count,
                 "true_positives": tp_count,
+                "static_prefilter_fps": static_fp_count,
+                "ghidra_functions_loaded": len(func_map),
+                "xref_edges_loaded": sum(len(v) for v in xref_map.values()),
+                "ipc_edges_loaded": len(ipc_edges),
             },
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
@@ -360,6 +661,7 @@ class FPVerificationStage:
             "verified": len(verified),
             "false_positives": fp_count,
             "true_positives": tp_count,
+            "static_prefilter_fps": static_fp_count,
         }
         return StageOutcome(
             status=status,
