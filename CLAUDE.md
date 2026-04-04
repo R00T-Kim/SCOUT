@@ -79,7 +79,7 @@ Stages execute sequentially via `run_stages()` in `src/aiedge/stage.py`. Each st
 - Property `name: str`
 - Method `run(ctx: StageContext) -> StageOutcome`
 
-Stages are registered as factory functions in `src/aiedge/stage_registry.py` (`_STAGE_FACTORIES` dict, 41 entries). Stage factories are instantiated by `run.py` which manages run directories, manifests, and report finalization.
+Stages are registered as factory functions in `src/aiedge/stage_registry.py` (`_STAGE_FACTORIES` dict, 42 entries). Stage factories are instantiated by `run.py` which manages run directories, manifests, and report finalization.
 
 **Execution order:** tooling → extraction → structure → carving → firmware_profile → inventory → ghidra_analysis → semantic_classification → sbom → cve_scan → reachability → endpoints → surfaces → enhanced_source → taint_propagation → fp_verification → adversarial_triage → web_ui → graph → attack_surface → functional_spec → threat_model → llm_triage → llm_synthesis → attribution → emulation → dynamic_validation → fuzzing → poc_refinement → chain_construction → exploit_gate → exploit_chain → exploit_autopoc → poc_validation → exploit_policy (plus OTA-specific stages: ota, ota_payload, ota_fs, ota_roots, ota_boottriage, firmware_lineage)
 
