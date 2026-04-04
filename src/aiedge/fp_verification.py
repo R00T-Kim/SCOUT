@@ -552,23 +552,14 @@ class FPVerificationStage:
                         alert_copy["original_confidence"] = orig_conf
                         alert_copy["sanitizer_detected"] = True
 
-                # Pre-filter 3: xref loaded but no path source→sink
+                # Note: xref graph tracks user-defined function calls, not
+                # libc API calls (gets, system, etc.), so absence of a path
+                # does NOT confirm FP. Only reduce confidence slightly.
                 if xref_map and src_api and sink_sym and call_chain is None:
-                    alert_copy["fp_verdict"] = "FP"
-                    alert_copy["fp_pattern"] = "no_call_path"
-                    alert_copy["fp_rationale"] = (
-                        "No call path from source to sink found in xref graph"
-                    )
                     orig_conf = float(alert.get("confidence", 0.5))
+                    alert_copy["confidence"] = _clamp01(orig_conf - 0.05)
                     alert_copy["original_confidence"] = orig_conf
-                    alert_copy["confidence"] = _clamp01(
-                        orig_conf - _CONFIDENCE_REDUCTION
-                    )
-                    alert_copy["static_prefilter"] = True
-                    fp_count += 1
-                    static_fp_count += 1
-                    verified.append(cast(dict[str, JsonValue], alert_copy))
-                    continue  # skip LLM
+                    alert_copy["no_xref_path"] = True
 
                 # -------------------------------------------------------
                 # LLM call with enriched prompt
