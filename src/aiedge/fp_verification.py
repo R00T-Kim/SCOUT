@@ -260,24 +260,8 @@ class FPVerificationStage:
 
         limitations: list[str] = []
 
-        # --- Skip under --no-llm ---
-        if self.no_llm:
-            payload: dict[str, JsonValue] = {
-                "schema_version": _SCHEMA_VERSION,
-                "status": "skipped",
-                "reason": "no_llm_mode",
-                "verified_alerts": [],
-            }
-            out_json.write_text(
-                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-                + "\n",
-                encoding="utf-8",
-            )
-            return StageOutcome(
-                status="skipped",
-                details=cast(dict[str, JsonValue], {"reason": "no_llm_mode"}),
-                limitations=["no_llm_mode"],
-            )
+        # NOTE: no_llm mode still runs static pre-filters (constant-sink,
+        # sanitizer, xref confidence reduction). Only LLM calls are skipped.
 
         # ---------------------------------------------------------------
         # Step 1: Load Ghidra decompiled functions → func_map
@@ -562,53 +546,57 @@ class FPVerificationStage:
                     alert_copy["no_xref_path"] = True
 
                 # -------------------------------------------------------
-                # LLM call with enriched prompt
+                # LLM call with enriched prompt (skipped under --no-llm)
                 # -------------------------------------------------------
-                prompt = _build_fp_prompt(
-                    alert,
-                    decompiled_context or None,
-                    call_chain or None,
-                )
-                result = driver.execute(
-                    prompt=prompt,
-                    run_dir=run_dir,
-                    timeout_s=_LLM_TIMEOUT_S,
-                    max_attempts=_LLM_MAX_ATTEMPTS,
-                    retryable_tokens=_RETRYABLE_TOKENS,
-                    model_tier="sonnet",
-                )
+                if self.no_llm:
+                    alert_copy["fp_verdict"] = "static_only"
+                    alert_copy["fp_rationale"] = "no_llm_mode; static pre-filters applied"
+                else:
+                    prompt = _build_fp_prompt(
+                        alert,
+                        decompiled_context or None,
+                        call_chain or None,
+                    )
+                    result = driver.execute(
+                        prompt=prompt,
+                        run_dir=run_dir,
+                        timeout_s=_LLM_TIMEOUT_S,
+                        max_attempts=_LLM_MAX_ATTEMPTS,
+                        retryable_tokens=_RETRYABLE_TOKENS,
+                        model_tier="sonnet",
+                    )
 
-                if result.status == "ok":
-                    parsed = _parse_json_response(result.stdout)
-                    if parsed is not None:
-                        verdict = str(parsed.get("verdict", "TP")).upper()
-                        fp_pattern = parsed.get("fp_pattern")
-                        rationale = str(parsed.get("rationale", ""))
+                    if result.status == "ok":
+                        parsed = _parse_json_response(result.stdout)
+                        if parsed is not None:
+                            verdict = str(parsed.get("verdict", "TP")).upper()
+                            fp_pattern = parsed.get("fp_pattern")
+                            rationale = str(parsed.get("rationale", ""))
 
-                        if verdict == "FP":
-                            orig_conf = float(alert.get("confidence", 0.5))
-                            new_conf = _clamp01(
-                                orig_conf - _CONFIDENCE_REDUCTION
-                            )
-                            alert_copy["confidence"] = new_conf
-                            alert_copy["original_confidence"] = orig_conf
-                            alert_copy["fp_verdict"] = "FP"
-                            alert_copy["fp_pattern"] = fp_pattern
-                            alert_copy["fp_rationale"] = rationale
-                            fp_count += 1
+                            if verdict == "FP":
+                                orig_conf = float(alert.get("confidence", 0.5))
+                                new_conf = _clamp01(
+                                    orig_conf - _CONFIDENCE_REDUCTION
+                                )
+                                alert_copy["confidence"] = new_conf
+                                alert_copy["original_confidence"] = orig_conf
+                                alert_copy["fp_verdict"] = "FP"
+                                alert_copy["fp_pattern"] = fp_pattern
+                                alert_copy["fp_rationale"] = rationale
+                                fp_count += 1
+                            else:
+                                alert_copy["fp_verdict"] = "TP"
+                                alert_copy["fp_rationale"] = rationale
+                                tp_count += 1
                         else:
-                            alert_copy["fp_verdict"] = "TP"
-                            alert_copy["fp_rationale"] = rationale
-                            tp_count += 1
+                            alert_copy["fp_verdict"] = "unverified"
+                            alert_copy["fp_rationale"] = "LLM response parse failure"
+                            limitations.append(
+                                "One or more FP verification responses could not be parsed"
+                            )
                     else:
                         alert_copy["fp_verdict"] = "unverified"
-                        alert_copy["fp_rationale"] = "LLM response parse failure"
-                        limitations.append(
-                            "One or more FP verification responses could not be parsed"
-                        )
-                else:
-                    alert_copy["fp_verdict"] = "unverified"
-                    alert_copy["fp_rationale"] = f"LLM call failed: {result.status}"
+                        alert_copy["fp_rationale"] = f"LLM call failed: {result.status}"
 
                 verified.append(cast(dict[str, JsonValue], alert_copy))
 
