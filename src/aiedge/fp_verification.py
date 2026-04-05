@@ -462,6 +462,10 @@ class FPVerificationStage:
                 decompiled_context: list[dict[str, str]] = []
                 for finfo in func_map.values():
                     if sink_sym and sink_sym in finfo.get("body", ""):
+                        # Skip PLT stubs — functions whose name IS the sink
+                        # symbol are just indirect jump wrappers, not real callers
+                        if finfo.get("name", "") == sink_sym:
+                            continue
                         fb = finfo.get("binary", "")
                         # prefer same binary; accept any if basename matches or
                         # binary_basename is empty (fallback)
@@ -489,6 +493,7 @@ class FPVerificationStage:
                                 if (
                                     sink_sym
                                     and sink_sym in finfo.get("body", "")
+                                    and finfo.get("name", "") != sink_sym  # skip PLT stub
                                     and peer_basename in finfo.get("binary", "")
                                     and finfo not in decompiled_context
                                 ):
