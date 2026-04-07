@@ -507,7 +507,149 @@ class OllamaDriver:
         )
 
 
-_KNOWN_LLM_DRIVERS = frozenset({"codex", "claude", "ollama"})
+class ClaudeCodeCLIDriver:
+    """Wraps ``claude -p`` CLI with OAuth auth (no API key needed)."""
+
+    _TIER_MAP: dict[str, str] = {
+        "haiku": "haiku",
+        "sonnet": "sonnet",
+        "opus": "opus",
+    }
+
+    @property
+    def name(self) -> str:
+        return "claude-code"
+
+    def available(self) -> bool:
+        return shutil.which("claude") is not None
+
+    def execute(
+        self,
+        *,
+        prompt: str,
+        run_dir: Path,
+        timeout_s: float,
+        max_attempts: int = 3,
+        retryable_tokens: tuple[str, ...] = (),
+        model_tier: ModelTier = "sonnet",
+    ) -> LLMDriverResult:
+        if not self.available():
+            return LLMDriverResult(
+                status="missing_cli",
+                stdout="",
+                stderr="claude executable not found",
+                argv=[],
+                attempts=[],
+                returncode=-1,
+            )
+
+        model_alias = self._TIER_MAP.get(model_tier, "sonnet")
+        base_argv = [
+            "claude",
+            "-p",
+            "--model", model_alias,
+            "--output-format", "text",
+            "--no-session-persistence",
+            "--dangerously-skip-permissions",
+        ]
+        argv = base_argv + [prompt]
+        attempts: list[dict[str, object]] = []
+
+        for attempt_idx in range(max(1, max_attempts)):
+            try:
+                cp = subprocess.run(
+                    argv,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                    stdin=subprocess.DEVNULL,
+                )
+                attempts.append({
+                    "argv": list(argv),
+                    "returncode": int(cp.returncode),
+                    "stdout": cp.stdout or "",
+                    "stderr": cp.stderr or "",
+                })
+            except subprocess.TimeoutExpired as exc:
+                attempts.append({
+                    "argv": list(argv),
+                    "returncode": -1,
+                    "stdout": (exc.stdout if isinstance(exc.stdout, str) else "") or "",
+                    "stderr": (exc.stderr if isinstance(exc.stderr, str) else "") or "",
+                    "exception": "TimeoutExpired",
+                })
+                if attempt_idx + 1 < max_attempts:
+                    continue
+                return LLMDriverResult(
+                    status="timeout",
+                    stdout="",
+                    stderr=f"claude CLI timed out after {timeout_s}s",
+                    argv=list(argv),
+                    attempts=attempts,
+                    returncode=-1,
+                )
+            except FileNotFoundError:
+                return LLMDriverResult(
+                    status="missing_cli",
+                    stdout="",
+                    stderr="claude executable not found",
+                    argv=list(argv),
+                    attempts=attempts,
+                    returncode=-1,
+                )
+            except Exception as exc:
+                return LLMDriverResult(
+                    status="error",
+                    stdout="",
+                    stderr=f"{type(exc).__name__}: {exc}",
+                    argv=list(argv),
+                    attempts=attempts,
+                    returncode=-1,
+                )
+
+            if cp.returncode == 0:
+                return LLMDriverResult(
+                    status="ok",
+                    stdout=cp.stdout or "",
+                    stderr=cp.stderr or "",
+                    argv=list(argv),
+                    attempts=attempts,
+                    returncode=0,
+                )
+
+            stderr_lc = (cp.stderr or "").lower()
+            if retryable_tokens and any(
+                token in stderr_lc for token in retryable_tokens
+            ):
+                time.sleep(2 ** attempt_idx)
+                continue
+
+            if "overloaded" in stderr_lc or "rate" in stderr_lc:
+                time.sleep(2 ** attempt_idx)
+                continue
+
+            return LLMDriverResult(
+                status="nonzero_exit",
+                stdout=cp.stdout or "",
+                stderr=cp.stderr or "",
+                argv=list(argv),
+                attempts=attempts,
+                returncode=int(cp.returncode),
+            )
+
+        last = attempts[-1] if attempts else {}
+        return LLMDriverResult(
+            status="error",
+            stdout=str(last.get("stdout", "")),
+            stderr=str(last.get("stderr", "exhausted attempts")),
+            argv=list(argv),
+            attempts=attempts,
+            returncode=-1,
+        )
+
+
+_KNOWN_LLM_DRIVERS = frozenset({"codex", "claude", "claude-code", "ollama"})
 
 
 def resolve_driver() -> LLMDriver:
@@ -515,6 +657,8 @@ def resolve_driver() -> LLMDriver:
     driver_name = os.environ.get("AIEDGE_LLM_DRIVER", "codex").strip().lower()
     if driver_name == "claude":
         return ClaudeAPIDriver()
+    if driver_name == "claude-code":
+        return ClaudeCodeCLIDriver()
     if driver_name == "ollama":
         return OllamaDriver()
     if driver_name not in _KNOWN_LLM_DRIVERS:
