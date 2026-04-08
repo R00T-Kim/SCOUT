@@ -551,6 +551,9 @@ class ClaudeCodeCLIDriver:
             "--output-format", "text",
             "--no-session-persistence",
             "--dangerously-skip-permissions",
+            "--strict-mcp-config",
+            "--mcp-config", '{"mcpServers":{}}',
+            "--disable-slash-commands",
         ]
         argv = base_argv + [prompt]
         attempts: list[dict[str, object]] = []
