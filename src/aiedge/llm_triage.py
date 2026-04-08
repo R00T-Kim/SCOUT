@@ -122,26 +122,34 @@ def _build_triage_prompt(
 def _parse_triage_response(stdout: str) -> list[dict[str, object]] | None:
     """Extract rankings from LLM response.
 
-    Tries code-fenced JSON first, then raw JSON.
+    Tries code-fenced JSON first, then raw JSON, then regex extraction.
     Returns *None* on parse failure.
     """
     text = stdout.strip()
     if not text:
         return None
 
-    # Try code-fenced JSON
+    # Stage 1: code-fenced JSON (lenient regex — no mandatory newline)
     fences = re.findall(
-        r"```(?:json)?\s*\n(.*?)```",
+        r"```(?:json)?\s*(.*?)```",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
     for fence in fences:
-        parsed = _try_parse_rankings(fence)
+        parsed = _try_parse_rankings(fence.strip())
         if parsed is not None:
             return parsed
 
-    # Try raw JSON
-    return _try_parse_rankings(text)
+    # Stage 2: raw JSON
+    result = _try_parse_rankings(text)
+    if result is not None:
+        return result
+
+    # Stage 3: extract outermost JSON object via regex
+    obj_match = re.search(r"\{[\s\S]*\}", text)
+    if obj_match is not None:
+        return _try_parse_rankings(obj_match.group(0).strip())
+    return None
 
 
 def _try_parse_rankings(text: str) -> list[dict[str, object]] | None:

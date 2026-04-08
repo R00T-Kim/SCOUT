@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -17,7 +18,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 ModelTier = Literal["haiku", "sonnet", "opus"]
 
@@ -33,6 +34,35 @@ class LLMDriverResult:
     attempts: list[dict[str, object]]
     returncode: int
     usage: dict[str, int] | None = None
+
+
+def parse_json_from_llm_output(text: str) -> dict[str, object] | None:
+    """3-stage LLM JSON response parser: fence → raw → regex extraction."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    candidates: list[str] = []
+    # Stage 1: fence extraction (lenient regex — no mandatory newline)
+    fence_matches = re.findall(
+        r"```(?:json)?\s*(.*?)```", stripped, flags=re.IGNORECASE | re.DOTALL
+    )
+    candidates.extend([m.strip() for m in fence_matches if m.strip()])
+    # Stage 2: raw text as-is
+    candidates.append(stripped)
+    # Stage 3: extract outermost JSON object via regex
+    obj_match = re.search(r"\{[\s\S]*\}", stripped)
+    if obj_match is not None:
+        obj_candidate = obj_match.group(0).strip()
+        if obj_candidate:
+            candidates.append(obj_candidate)
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            return cast(dict[str, object], obj)
+    return None
 
 
 class LLMDriver(Protocol):
@@ -628,7 +658,10 @@ class ClaudeCodeCLIDriver:
                 time.sleep(2 ** attempt_idx)
                 continue
 
-            if "overloaded" in stderr_lc or "rate" in stderr_lc:
+            if any(tok in stderr_lc for tok in (
+                "overloaded", "rate", "429", "503", "502",
+                "timeout", "econnreset", "connection reset",
+            )):
                 time.sleep(2 ** attempt_idx)
                 continue
 

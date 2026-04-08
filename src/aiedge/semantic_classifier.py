@@ -144,32 +144,8 @@ def _build_deep_analysis_prompt(func_name: str, body: str) -> str:
 
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
-    text = stdout.strip()
-    if not text:
-        return None
-    # Try code-fenced JSON first
-    import re
-
-    fences = re.findall(
-        r"```(?:json)?\s*\n(.*?)```",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    for fence in fences:
-        try:
-            obj = json.loads(fence)
-            if isinstance(obj, dict):
-                return cast(dict[str, object], obj)
-        except (json.JSONDecodeError, ValueError):
-            continue
-    # Try raw JSON
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, dict):
-            return cast(dict[str, object], obj)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return None
+    from .llm_driver import parse_json_from_llm_output
+    return parse_json_from_llm_output(stdout)
 
 
 @dataclass(frozen=True)

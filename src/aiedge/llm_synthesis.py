@@ -147,7 +147,7 @@ def _extract_json_payload(text: str) -> dict[str, object] | None:
         return None
     candidates: list[str] = [stripped]
     fence_matches = re.findall(
-        r"```(?:json)?\s*\n(.*?)```", stripped, flags=re.IGNORECASE | re.DOTALL
+        r"```(?:json)?\s*(.*?)```", stripped, flags=re.IGNORECASE | re.DOTALL
     )
     candidates.extend([m.strip() for m in fence_matches if m.strip()])
     obj_match = re.search(r"\{[\s\S]*\}", stripped)
