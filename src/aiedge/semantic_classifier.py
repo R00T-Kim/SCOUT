@@ -7,6 +7,7 @@ dangerous-API filtering and optional LLM-assisted classification.
 """
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -94,7 +95,7 @@ def _static_filter(
         body_lower = body.lower()
         matched_apis: list[str] = []
         for api in _DANGEROUS_APIS:
-            if api in body_lower:
+            if re.search(r"\b" + re.escape(api) + r"\b", body_lower):
                 matched_apis.append(api)
         if matched_apis:
             func_copy = dict(func)
@@ -384,12 +385,17 @@ class SemanticClassifierStage:
             if driver.available():
                 # Prepare function summaries for LLM
                 func_summaries: list[dict[str, str]] = []
+                # Sort by matched API count (most dangerous first)
+                filtered.sort(
+                    key=lambda f: len(f.get("matched_dangerous_apis", [])),
+                    reverse=True,
+                )
                 for func in filtered[:50]:  # Cap at 50 for LLM context
                     fname = str(func.get("name", "unknown"))
                     body = str(func.get("body", ""))
                     func_summaries.append({
                         "function_name": fname,
-                        "body_snippet": _truncate_text(body, max_chars=500),
+                        "body_snippet": _truncate_text(body, max_chars=2000),
                         "dangerous_apis": ", ".join(
                             cast(list[str], func.get("matched_dangerous_apis", []))
                         ),

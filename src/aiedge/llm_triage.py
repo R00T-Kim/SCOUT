@@ -212,17 +212,40 @@ class LLMTriageStage:
 
         candidates_list_any = cast(dict[str, object], candidates_data).get("candidates")
         if not isinstance(candidates_list_any, list) or not candidates_list_any:
-            _write_artifact(stage_dir, {
-                "schema_version": _TRIAGE_SCHEMA_VERSION,
-                "status": "partial",
-                "reason": "no_candidates",
-                "rankings": [],
-            })
-            return StageOutcome(
-                status="partial",
-                details=cast(dict[str, JsonValue], {"reason": "no_candidates"}),
-                limitations=["no_candidates"],
-            )
+            # Fallback: build candidates from findings.json
+            findings_path = ctx.run_dir / "stages" / "findings" / "findings.json"
+            findings_data = _load_json_file(findings_path)
+            fallback_candidates: list[dict[str, object]] = []
+            if isinstance(findings_data, list):
+                for f in cast(list[object], findings_data):
+                    if isinstance(f, dict):
+                        fd = cast(dict[str, object], f)
+                        conf = fd.get("confidence", 0)
+                        if isinstance(conf, (int, float)) and float(conf) >= 0.3:
+                            fallback_candidates.append(fd)
+            elif isinstance(findings_data, dict):
+                items = findings_data.get("findings", [])
+                if isinstance(items, list):
+                    for f in cast(list[object], items):
+                        if isinstance(f, dict):
+                            fd = cast(dict[str, object], f)
+                            conf = fd.get("confidence", 0)
+                            if isinstance(conf, (int, float)) and float(conf) >= 0.3:
+                                fallback_candidates.append(fd)
+
+            if not fallback_candidates:
+                _write_artifact(stage_dir, {
+                    "schema_version": _TRIAGE_SCHEMA_VERSION,
+                    "status": "partial",
+                    "reason": "no_candidates",
+                    "rankings": [],
+                })
+                return StageOutcome(
+                    status="partial",
+                    details=cast(dict[str, JsonValue], {"reason": "no_candidates"}),
+                    limitations=["no_candidates"],
+                )
+            candidates_list_any = fallback_candidates
 
         candidates = cast(list[dict[str, object]], candidates_list_any)
 

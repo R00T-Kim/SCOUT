@@ -10,6 +10,7 @@ Skips entirely under ``--no-llm``.
 import hashlib
 import json
 import re
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -66,27 +67,61 @@ _SANITIZER_SYMBOLS: frozenset[str] = frozenset({
 })
 
 
+def _trace_call_chain(
+    xref_map: dict[str, list[str]],
+    source: str,
+    sink: str,
+    max_depth: int = 5,
+) -> list[str] | None:
+    """BFS through xref_map to find a call path from *source* to *sink*."""
+    if not xref_map or not source or not sink:
+        return None
+    queue: deque[tuple[str, list[str]]] = deque([(source, [source])])
+    visited: set[str] = {source}
+    while queue:
+        current, path = queue.popleft()
+        if len(path) > max_depth:
+            continue
+        for callee in xref_map.get(current, []):
+            if callee == sink:
+                return path + [sink]
+            if callee not in visited:
+                visited.add(callee)
+                queue.append((callee, path + [callee]))
+    return None
+
+
 def _check_constant_sink(
     func_map: dict[str, dict[str, str]],
     sink_sym: str,
+    binary_basename: str = "",
 ) -> bool:
-    """FP Rule 1: return True if sink is called with a string constant argument.
+    """FP Rule 1: return True only if EVERY call to *sink_sym* passes a literal.
 
-    Looks for patterns like: system("/bin/...") or popen("/usr/sbin/...", ...)
-    where the first argument is a quoted string literal, meaning the attacker
-    cannot control it.  Returns False (not a FP) when no evidence found so we
-    fail open.
+    Returns False (not a FP) when any variable-argument call is found, or when
+    no evidence exists.  Filters by *binary_basename* when provided so that a
+    constant ``system("/bin/reboot")`` in one binary does not suppress a
+    variable ``system(user_buf)`` in another.
     """
-    # Simple heuristic: find lines containing sink_sym(..."/... or sink_sym(...'/...
-    pattern = re.compile(
-        r'\b' + re.escape(sink_sym) + r'\s*\(\s*"[^"]*"',
+    literal_pat = re.compile(
+        r"\b" + re.escape(sink_sym) + r'\s*\(\s*(?:"[^"]*"|0x[0-9a-fA-F]+|\d+)',
         re.IGNORECASE,
     )
+    variable_pat = re.compile(
+        r"\b" + re.escape(sink_sym) + r"\s*\(\s*[a-zA-Z_]",
+        re.IGNORECASE,
+    )
+    found_literal = False
     for finfo in func_map.values():
+        fb = finfo.get("binary", "")
+        if binary_basename and fb and binary_basename not in fb:
+            continue
         body = finfo.get("body", "")
-        if pattern.search(body):
-            return True
-    return False
+        if variable_pat.search(body):
+            return False
+        if literal_pat.search(body):
+            found_literal = True
+    return found_literal
 
 
 def _has_network_input_symbol(import_symbols: set[str]) -> bool:
@@ -312,8 +347,10 @@ class TaintPropagationStage:
                     fd = cast(dict[str, object], f)
                     fname = str(fd.get("name", ""))
                     body = str(fd.get("body", ""))
+                    binary = str(fd.get("binary", ""))
                     if fname and body:
-                        func_map[fname] = {"name": fname, "body": body}
+                        key = f"{binary}:{fname}" if binary else fname
+                        func_map[key] = {"name": fname, "body": body, "binary": binary}
         elif isinstance(func_data, dict):
             funcs_any = cast(dict[str, object], func_data).get("functions")
             if isinstance(funcs_any, list):
@@ -322,10 +359,25 @@ class TaintPropagationStage:
                         fd = cast(dict[str, object], f)
                         fname = str(fd.get("name", ""))
                         body = str(fd.get("body", ""))
+                        binary = str(fd.get("binary", ""))
                         if fname and body:
-                            func_map[fname] = {"name": fname, "body": body}
+                            key = f"{binary}:{fname}" if binary else fname
+                            func_map[key] = {"name": fname, "body": body, "binary": binary}
         if not func_map:
             limitations.append("No decompiled function bodies available")
+
+        # --- Load xref_graph for call chain traversal ---
+        xref_map: dict[str, list[str]] = {}
+        for xref_file in ghidra_dir.rglob("xref_graph.json"):
+            xref_data = _load_json_file(xref_file)
+            if isinstance(xref_data, list):
+                for entry in cast(list[object], xref_data):
+                    if not isinstance(entry, dict):
+                        continue
+                    caller = str(cast(dict[str, object], entry).get("caller", ""))
+                    callee = str(cast(dict[str, object], entry).get("callee", ""))
+                    if caller and callee:
+                        xref_map.setdefault(caller, []).append(callee)
 
         # === STATIC TAINT INFERENCE (always runs, no LLM needed) ===
         # Infer taint paths from binaries that have both input and sink symbols
@@ -405,8 +457,15 @@ class TaintPropagationStage:
                         f"Hardening: {hardening_str or 'unknown'}"
                     )
 
+                # Compute binary basename early for FP rules
+                src_basename = (
+                    src_binary.rsplit("/", 1)[-1]
+                    if "/" in src_binary
+                    else src_binary
+                )
+
                 # --- FP Rule 1: constant-sink gate (Ghidra data required) ---
-                if func_map and _check_constant_sink(func_map, sink_sym):
+                if func_map and _check_constant_sink(func_map, sink_sym, src_basename):
                     limitations.append(
                         f"FP suppressed (constant-sink): {src_binary}:{sink_sym}"
                     )
@@ -430,11 +489,6 @@ class TaintPropagationStage:
                     # Symbol co-occurrence only
                     conf = min(conf, SYMBOL_COOCCURRENCE_CAP)
 
-                src_basename = (
-                    src_binary.rsplit("/", 1)[-1]
-                    if "/" in src_binary
-                    else src_binary
-                )
                 call_chain: list[dict[str, str]] = []
                 if is_web:
                     call_chain = [
@@ -641,11 +695,49 @@ class TaintPropagationStage:
                             break
 
                         relevant_funcs: list[dict[str, str]] = []
-                        for fname, finfo in list(func_map.items())[:5]:
-                            body = finfo["body"]
-                            body_lower = body.lower()
-                            if src_api.lower() in body_lower or sink_sym.lower() in body_lower:
-                                relevant_funcs.append(finfo)
+                        llm_src_basename = (
+                            src_binary.rsplit("/", 1)[-1]
+                            if "/" in src_binary
+                            else src_binary
+                        )
+                        src_lower = src_api.lower()
+                        sink_lower = sink_sym.lower()
+                        # Prioritize: functions with BOTH source+sink, then single match
+                        both_match: list[dict[str, str]] = []
+                        single_match: list[dict[str, str]] = []
+                        for _key, finfo in func_map.items():
+                            fb = finfo.get("binary", "")
+                            if llm_src_basename and fb and llm_src_basename not in fb:
+                                continue
+                            body_lower = finfo["body"].lower()
+                            has_src = src_lower in body_lower
+                            has_sink = sink_lower in body_lower
+                            if has_src and has_sink:
+                                both_match.append(finfo)
+                            elif has_src or has_sink:
+                                single_match.append(finfo)
+                        # Prepend xref call chain functions if available
+                        chain_funcs: list[dict[str, str]] = []
+                        if xref_map:
+                            chain = _trace_call_chain(xref_map, src_api, sink_sym)
+                            if chain:
+                                seen_names = set()
+                                for cfname in chain:
+                                    for _k, fi in func_map.items():
+                                        if fi["name"] == cfname and fi["name"] not in seen_names:
+                                            fb = fi.get("binary", "")
+                                            if not llm_src_basename or not fb or llm_src_basename in fb:
+                                                chain_funcs.append(fi)
+                                                seen_names.add(fi["name"])
+                                                break
+                        # Merge: chain functions first, then both-match, then single
+                        seen = {f["name"] for f in chain_funcs}
+                        merged = list(chain_funcs)
+                        for f in both_match + single_match:
+                            if f["name"] not in seen:
+                                merged.append(f)
+                                seen.add(f["name"])
+                        relevant_funcs = merged[:10]
 
                         if not relevant_funcs:
                             continue
@@ -709,6 +801,8 @@ class TaintPropagationStage:
                                     if isinstance(conf_any, (int, float))
                                     else 0.5
                                 )
+                                # Cap LLM confidence to match governance model
+                                conf_val = min(conf_val, STATIC_CODE_VERIFIED_CAP)
                                 path_desc = str(parsed.get("path_description", ""))
                                 sanitizers = parsed.get("sanitizers_found", [])
 

@@ -75,14 +75,31 @@ def _clamp01(v: float) -> float:
     return float(v)
 
 
-def _build_advocate_prompt(finding: dict[str, object]) -> str:
+def _build_code_section(decompiled_context: list[dict[str, str]] | None) -> str:
+    """Format decompiled function bodies for LLM prompts."""
+    if not decompiled_context:
+        return ""
+    parts: list[str] = []
+    for fc in decompiled_context[:3]:
+        name = fc.get("name", "unknown")
+        body = fc.get("body", "")[:2000]
+        parts.append(f"### {name}\n```c\n{body}\n```")
+    return "\n## Decompiled Code Evidence\n" + "\n".join(parts) + "\n"
+
+
+def _build_advocate_prompt(
+    finding: dict[str, object],
+    decompiled_context: list[dict[str, str]] | None = None,
+) -> str:
     finding_json = json.dumps(finding, indent=2, ensure_ascii=True)
+    code_section = _build_code_section(decompiled_context)
     return (
         "You are an offensive security researcher acting as an ADVOCATE.\n"
         "Your job is to argue why the following firmware finding IS\n"
         "exploitable. Cite specific evidence from the finding data.\n\n"
         "## Finding\n"
         f"{finding_json}\n\n"
+        f"{code_section}"
         "## Rules\n"
         "- Focus on attacker-reachable input paths\n"
         "- Consider lack of input validation or sanitization\n"
@@ -100,9 +117,12 @@ def _build_advocate_prompt(finding: dict[str, object]) -> str:
 
 
 def _build_critic_prompt(
-    finding: dict[str, object], advocate_argument: str,
+    finding: dict[str, object],
+    advocate_argument: str,
+    decompiled_context: list[dict[str, str]] | None = None,
 ) -> str:
     finding_json = json.dumps(finding, indent=2, ensure_ascii=True)
+    code_section = _build_code_section(decompiled_context)
     return (
         "You are a defensive security engineer acting as a CRITIC.\n"
         "Your job is to argue why the following firmware finding is NOT\n"
@@ -110,6 +130,7 @@ def _build_critic_prompt(
         "barriers to exploitation.\n\n"
         "## Finding\n"
         f"{finding_json}\n\n"
+        f"{code_section}"
         "## Advocate's Argument (opposing view)\n"
         f"{advocate_argument}\n\n"
         "## Rules\n"
@@ -332,17 +353,57 @@ class AdversarialTriageStage:
                 limitations=limitations,
             )
 
-        # --- Filter findings with confidence >= 0.5 ---
+        # --- Filter findings using original_confidence if available ---
+        # fp_verification may reduce confidence but preserves the original
+        # score in "original_confidence".  Use it for eligibility so that
+        # FP-adjusted alerts still reach the advocate/critic debate.
+        _AT_THRESHOLD = 0.40
         eligible = [
             f for f in findings
             if isinstance(f.get("confidence"), (int, float))
-            and float(f["confidence"]) >= 0.5
+            and float(f.get("original_confidence", f["confidence"])) >= _AT_THRESHOLD
         ]
         below_threshold = [
             f for f in findings
             if not isinstance(f.get("confidence"), (int, float))
-            or float(f["confidence"]) < 0.5
+            or float(f.get("original_confidence", f["confidence"])) < _AT_THRESHOLD
         ]
+
+        # --- Load decompiled functions for code-backed debate ---
+        ghidra_dir = run_dir / "stages" / "ghidra_analysis"
+        decompiled_path = ghidra_dir / "decompiled_functions.json"
+        _all_funcs: list[dict[str, str]] = []
+        dec_data = _load_json_file(decompiled_path)
+        if isinstance(dec_data, dict):
+            funcs_any = dec_data.get("functions")
+            if isinstance(funcs_any, list):
+                for f in funcs_any:
+                    if isinstance(f, dict):
+                        fname = str(f.get("name", ""))
+                        body = str(f.get("body", ""))
+                        binary = str(f.get("binary", ""))
+                        if fname and body:
+                            _all_funcs.append({"name": fname, "body": body, "binary": binary})
+
+        def _find_decompiled_for(finding: dict[str, object]) -> list[dict[str, str]] | None:
+            """Find decompiled functions relevant to a finding."""
+            src_binary = str(finding.get("source_binary", ""))
+            src_api = str(finding.get("source_api", ""))
+            sink_sym = str(finding.get("sink_symbol", ""))
+            if not _all_funcs or (not src_api and not sink_sym):
+                return None
+            basename = src_binary.rsplit("/", 1)[-1] if "/" in src_binary else src_binary
+            matched: list[dict[str, str]] = []
+            for fi in _all_funcs:
+                fb = fi.get("binary", "")
+                if basename and fb and basename not in fb:
+                    continue
+                bl = fi["body"].lower()
+                if (src_api and src_api.lower() in bl) or (sink_sym and sink_sym.lower() in bl):
+                    matched.append(fi)
+                    if len(matched) >= 3:
+                        break
+            return matched or None
 
         # --- Advocate/Critic debate ---
         driver = resolve_driver()
@@ -357,9 +418,10 @@ class AdversarialTriageStage:
         else:
             for finding in eligible:
                 finding_copy = dict(finding)
+                dec_ctx = _find_decompiled_for(finding)
 
                 # Advocate prompt
-                advocate_prompt = _build_advocate_prompt(finding)
+                advocate_prompt = _build_advocate_prompt(finding, dec_ctx)
                 advocate_result = driver.execute(
                     prompt=advocate_prompt,
                     run_dir=run_dir,
@@ -382,7 +444,8 @@ class AdversarialTriageStage:
 
                 # Critic prompt
                 critic_prompt = _build_critic_prompt(
-                    finding, advocate_argument or "(advocate failed to respond)"
+                    finding, advocate_argument or "(advocate failed to respond)",
+                    dec_ctx,
                 )
                 critic_result = driver.execute(
                     prompt=critic_prompt,

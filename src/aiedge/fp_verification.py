@@ -281,7 +281,8 @@ class FPVerificationStage:
                     body = str(f.get("body", ""))
                     binary = str(f.get("binary", ""))
                     if fname and body:
-                        func_map[fname] = {
+                        key = f"{binary}:{fname}" if binary else fname
+                        func_map[key] = {
                             "name": fname,
                             "body": body,
                             "binary": binary,
@@ -558,7 +559,7 @@ class FPVerificationStage:
                     alert_copy["fp_rationale"] = "no_llm_mode; static pre-filters applied"
                 else:
                     prompt = _build_fp_prompt(
-                        alert,
+                        alert_copy,
                         decompiled_context or None,
                         call_chain or None,
                     )
