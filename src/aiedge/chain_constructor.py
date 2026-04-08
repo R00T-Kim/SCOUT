@@ -9,7 +9,6 @@ available; falls back to static-only chain assembly under ``--no-llm``.
 """
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast

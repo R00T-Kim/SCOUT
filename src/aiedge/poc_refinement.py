@@ -10,7 +10,6 @@ no fuzzing/taint data is available.
 
 import json
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
