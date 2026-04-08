@@ -17,6 +17,9 @@ SCOUT (AIEdge) is a deterministic firmware-to-exploit evidence engine. It takes 
 # Full analysis (all features enabled by default)
 ./scout analyze firmware.bin
 
+# Suppress real-time progress output (CI/scripted use)
+./scout analyze firmware.bin --quiet
+
 # Deterministic analysis (no LLM)
 ./scout analyze firmware.bin --no-llm
 
@@ -118,12 +121,15 @@ Stages have **no in-memory coupling**. Each stage reads JSON artifacts from pred
 
 ### LLM Driver Abstraction
 
-`llm_driver.py` provides an `LLMDriver` Protocol with three implementations:
+`llm_driver.py` provides an `LLMDriver` Protocol with four implementations:
 - `CodexCLIDriver` — wraps `codex exec --ephemeral` (default)
 - `ClaudeAPIDriver` — direct Claude API via `urllib.request` (`ANTHROPIC_API_KEY`)
+- `ClaudeCodeCLIDriver` — invokes `claude -p --model <tier>` subprocess using Claude Code CLI OAuth session (no API key needed); flags: `--no-session-persistence`, `--dangerously-skip-permissions`, `--strict-mcp-config`, `--disable-slash-commands`
 - `OllamaDriver` — local Ollama HTTP API (`AIEDGE_OLLAMA_URL`)
 
-Select via `AIEDGE_LLM_DRIVER=codex|claude|ollama`. All three support `ModelTier` (haiku/sonnet/opus) selection. All LLM call sites (`llm_synthesis`, `exploit_autopoc`, `llm_codex`) use `resolve_driver()` to get the active backend. Cost tracking via `llm_cost.py` with optional budget limit (`AIEDGE_LLM_BUDGET_USD`). Stages gracefully skip LLM calls under `--no-llm`.
+Select via `AIEDGE_LLM_DRIVER=codex|claude|claude-code|ollama`. All four support `ModelTier` (haiku/sonnet/opus) selection. All LLM call sites (`llm_synthesis`, `exploit_autopoc`, `llm_codex`) use `resolve_driver()` to get the active backend. Cost tracking via `llm_cost.py` with optional budget limit (`AIEDGE_LLM_BUDGET_USD`). Stages gracefully skip LLM calls under `--no-llm`.
+
+Shared JSON parsing utility: `parse_json_from_llm_output()` in `llm_driver.py` provides a 3-stage fallback (fence extraction → raw JSON → regex object extraction), replacing 7 formerly duplicate `_parse_json_response()` implementations across stage modules.
 
 ### Evidence & Governance Layers
 
@@ -207,7 +213,7 @@ All configuration is environment-variable-driven (no config files). Key variable
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `AIEDGE_LLM_DRIVER` | LLM provider: `codex`, `claude`, `ollama` | `codex` |
+| `AIEDGE_LLM_DRIVER` | LLM provider: `codex`, `claude`, `claude-code`, `ollama` | `codex` |
 | `ANTHROPIC_API_KEY` | Claude API key (required for `claude` driver) | — |
 | `AIEDGE_OLLAMA_URL` | Ollama server URL | `http://localhost:11434` |
 | `AIEDGE_LLM_BUDGET_USD` | LLM cost budget limit per run | unlimited |

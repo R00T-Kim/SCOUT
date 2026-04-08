@@ -227,6 +227,7 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | 명령어 | 설명 |
 |--------|------|
 | `./scout analyze <firmware>` | 전체 42단계 분석 파이프라인 |
+| `./scout analyze <firmware> --quiet` | 진행 상황 출력 억제 (CI/스크립트 환경) |
 | `./scout analyze-8mb <firmware>` | 8MB 정규형 트랙 분석 |
 | `./scout stages <run_dir> --stages X,Y` | 특정 스테이지 재실행 |
 | `./scout serve <run_dir>` | 웹 리포트 뷰어 |
@@ -293,8 +294,8 @@ PYTHONPATH=src python3 scripts/analyze_findings.py \
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `AIEDGE_LLM_DRIVER` | `codex` | LLM 제공자: `codex` / `claude` / `ollama` |
-| `ANTHROPIC_API_KEY` | -- | Claude 드라이버 API 키 |
+| `AIEDGE_LLM_DRIVER` | `codex` | LLM 제공자: `codex` / `claude` / `claude-code` / `ollama` |
+| `ANTHROPIC_API_KEY` | -- | Claude 드라이버 API 키 (`claude-code`는 불필요) |
 | `AIEDGE_OLLAMA_URL` | `http://localhost:11434` | Ollama 서버 URL |
 | `AIEDGE_LLM_BUDGET_USD` | -- | LLM 비용 예산 한도 |
 | `AIEDGE_PRIV_RUNNER` | -- | 동적 스테이지 특권 명령 접두사 |

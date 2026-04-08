@@ -9,6 +9,12 @@ Use the bundled launcher to run commands with short flags:
   --case-id er-e50-v3.0.1-verified-chain
 ```
 
+For scripted or CI use, add `--quiet` to suppress the real-time stage-by-stage progress output on stderr:
+
+```bash
+./scout analyze /path/to/firmware.bin --quiet --case-id my-run 2>/dev/null
+```
+
 The analyze command prints the generated run_dir path. Use that value as `<run_dir>` in all commands below.
 
 If extraction quality is low for your target format (few files, wrong OS guess), rerun with pre-extracted rootfs input:
@@ -67,6 +73,13 @@ export AIEDGE_PORTSCAN_FULL_RANGE=0  # 1: enable full range; 0(default): top-k p
 
 # If you need complete coverage (slower but deterministic), enable full-range mode:
 # export AIEDGE_PORTSCAN_FULL_RANGE=1
+```
+
+To use the Claude Code CLI OAuth session instead of Codex (no API key required):
+
+```bash
+export AIEDGE_LLM_DRIVER=claude-code
+./scout analyze /path/to/firmware.bin
 ```
 
 If Codex responses are slow/intermittent, increase LLM timeouts/retries for stage runs:

@@ -227,6 +227,7 @@ See:
 | Command | Description |
 |---------|-------------|
 | `./scout analyze <firmware>` | Full 42-stage analysis pipeline |
+| `./scout analyze <firmware> --quiet` | Suppress real-time progress output (CI/scripted use) |
 | `./scout analyze-8mb <firmware>` | Truncated 8MB canonical track |
 | `./scout stages <run_dir> --stages X,Y` | Rerun specific stages |
 | `./scout serve <run_dir>` | Launch web report viewer |
@@ -293,8 +294,8 @@ PYTHONPATH=src python3 scripts/analyze_findings.py \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AIEDGE_LLM_DRIVER` | `codex` | LLM provider: `codex` / `claude` / `ollama` |
-| `ANTHROPIC_API_KEY` | -- | API key for Claude driver |
+| `AIEDGE_LLM_DRIVER` | `codex` | LLM provider: `codex` / `claude` / `claude-code` / `ollama` |
+| `ANTHROPIC_API_KEY` | -- | API key for Claude driver (not needed for `claude-code`) |
 | `AIEDGE_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
 | `AIEDGE_LLM_BUDGET_USD` | -- | LLM cost budget limit |
 | `AIEDGE_PRIV_RUNNER` | -- | Privileged command prefix for dynamic stages |
