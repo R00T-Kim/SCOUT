@@ -2309,10 +2309,11 @@ def _rerun_llm_synthesis_after_findings(
     report: dict[str, JsonValue],
     budget_s: int,
     no_llm: bool,
+    on_progress: object | None = None,
 ) -> list[str]:
     llm_stage: Stage = LLMSynthesisStage(no_llm=no_llm)
     try:
-        llm_rep = run_stages([llm_stage], ctx)
+        llm_rep = run_stages([llm_stage], ctx, on_progress=on_progress)
         _write_stage_manifests(ctx=ctx, stages=[llm_stage], report=llm_rep)
     except Exception as exc:
         return [
@@ -2364,6 +2365,7 @@ def run_subset(
     *,
     time_budget_s: int = 3600,
     no_llm: bool = False,
+    on_progress: object | None = None,
 ) -> RunReport:
     ctx = StageContext(
         run_dir=info.run_dir,
@@ -2390,7 +2392,9 @@ def run_subset(
         no_llm=no_llm,
     )
 
-    rep = run_stages(stages, ctx)
+    if on_progress is not None and hasattr(on_progress, "register_batch"):
+        on_progress.register_batch("Pipeline", len(stages))
+    rep = run_stages(stages, ctx, on_progress=on_progress)
     _write_stage_manifests(ctx=ctx, stages=stages, report=rep)
 
     for stage_result in rep.stage_results:
@@ -2452,6 +2456,7 @@ def analyze_run(
     time_budget_s: int = 3600,
     no_llm: bool = False,
     force_retriage: bool = False,
+    on_progress: object | None = None,
 ) -> str:
     ctx = StageContext(
         run_dir=info.run_dir,
@@ -2672,7 +2677,9 @@ def analyze_run(
             _make_adversarial_triage(no_llm),
             make_emulation_stage(),
         ]
-        inv_rep = run_stages(early_stages, ctx)
+        if on_progress is not None and hasattr(on_progress, "register_batch"):
+            on_progress.register_batch("Early stages (budget exhausted)", len(early_stages))
+        inv_rep = run_stages(early_stages, ctx, on_progress=on_progress)
         _write_stage_manifests(ctx=ctx, stages=early_stages, report=inv_rep)
 
         # Apply results for v2.0 stages that lack dedicated handlers
@@ -3375,7 +3382,7 @@ def analyze_run(
             from .llm_triage import LLMTriageStage
 
             _llm_triage_stage_early: Stage = LLMTriageStage(no_llm=no_llm)
-            _llm_triage_rep_early = run_stages([_llm_triage_stage_early], ctx)
+            _llm_triage_rep_early = run_stages([_llm_triage_stage_early], ctx, on_progress=on_progress)
             _write_stage_manifests(
                 ctx=ctx,
                 stages=[_llm_triage_stage_early],
@@ -3409,6 +3416,7 @@ def analyze_run(
             report=report,
             budget_s=budget_s,
             no_llm=no_llm,
+            on_progress=on_progress,
         )
         if llm_synthesis_limits_early:
             existing_limits_post_llm_early = normalize_limitations_list(
@@ -3548,7 +3556,9 @@ def analyze_run(
         stages.append(PocValidationStage())
     if ExploitEvidencePolicyStage is not None:
         stages.append(ExploitEvidencePolicyStage())
-    rep = run_stages(stages, ctx)
+    if on_progress is not None and hasattr(on_progress, "register_batch"):
+        on_progress.register_batch("Pipeline", len(stages))
+    rep = run_stages(stages, ctx, on_progress=on_progress)
     _write_stage_manifests(ctx=ctx, stages=stages, report=rep)
     if _import_limitations:
         _existing_lims = normalize_limitations_list(report.get("limitations"))
@@ -4342,7 +4352,7 @@ def analyze_run(
         from .llm_triage import LLMTriageStage
 
         _llm_triage_stage: Stage = LLMTriageStage(no_llm=no_llm)
-        _llm_triage_rep = run_stages([_llm_triage_stage], ctx)
+        _llm_triage_rep = run_stages([_llm_triage_stage], ctx, on_progress=on_progress)
         _write_stage_manifests(
             ctx=ctx,
             stages=[_llm_triage_stage],
@@ -4375,6 +4385,7 @@ def analyze_run(
         report=report,
         budget_s=budget_s,
         no_llm=no_llm,
+        on_progress=on_progress,
     )
     if llm_synthesis_limits:
         existing_limits_after_llm = normalize_limitations_list(report.get("limitations"))
@@ -4388,7 +4399,7 @@ def analyze_run(
             from .exploit_autopoc import ExploitAutoPoCStage
 
             autopoc_stage: Stage = ExploitAutoPoCStage(no_llm=no_llm)
-            autopoc_rep = run_stages([autopoc_stage], ctx)
+            autopoc_rep = run_stages([autopoc_stage], ctx, on_progress=on_progress)
             _write_stage_manifests(
                 ctx=ctx,
                 stages=[autopoc_stage],

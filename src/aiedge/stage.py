@@ -116,11 +116,20 @@ def _combine_status(statuses: Sequence[StageStatus]) -> StageStatus:
     return "ok"
 
 
-def run_stages(stages: Sequence[Stage], ctx: StageContext) -> RunReport:
+def run_stages(
+    stages: Sequence[Stage],
+    ctx: StageContext,
+    *,
+    on_progress: object | None = None,
+) -> RunReport:
     results: list[StageResult] = []
     limitations: list[str] = []
 
-    for stage in stages:
+    for idx, stage in enumerate(stages):
+        stage_name = getattr(stage, "name", stage.__class__.__name__)
+        if on_progress is not None and hasattr(on_progress, "on_start"):
+            on_progress.on_start(idx, len(stages), stage_name)
+
         started_at = _iso_utc_now()
         t0 = time.monotonic()
         timed_out = False
@@ -153,7 +162,6 @@ def run_stages(stages: Sequence[Stage], ctx: StageContext) -> RunReport:
         ):
             timed_out = True
 
-        stage_name = getattr(stage, "name", stage.__class__.__name__)
         res = StageResult(
             stage=stage_name,
             status=status,
@@ -167,6 +175,9 @@ def run_stages(stages: Sequence[Stage], ctx: StageContext) -> RunReport:
         )
         results.append(res)
         limitations.extend(stage_limits)
+
+        if on_progress is not None and hasattr(on_progress, "on_end"):
+            on_progress.on_end(idx, len(stages), stage_name, res)
 
     overall = _combine_status([r.status for r in results])
     return RunReport(status=overall, stage_results=results, limitations=limitations)

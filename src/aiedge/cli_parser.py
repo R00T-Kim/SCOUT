@@ -60,6 +60,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overall pipeline time budget in seconds (default: 3600).",
     )
     _ = analyze.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stage progress output on stderr.",
+    )
+    _ = analyze.add_argument(
         "--open-egress",
         action="store_true",
         default=True,
@@ -186,6 +191,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overall pipeline time budget in seconds (default: 3600).",
     )
     _ = analyze_8mb.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stage progress output on stderr.",
+    )
+    _ = analyze_8mb.add_argument(
         "--open-egress",
         action="store_true",
         default=True,
@@ -302,6 +312,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3600,
         help="Overall pipeline time budget in seconds (default: 3600).",
+    )
+    _ = stages.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stage progress output on stderr.",
     )
     _ = stages.add_argument(
         "--max-files",

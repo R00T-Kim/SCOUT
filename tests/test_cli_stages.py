@@ -36,6 +36,7 @@ def test_analyze_cli_with_stages_calls_run_subset(
         *,
         time_budget_s: int,
         no_llm: bool,
+        **_kwargs: object,
     ) -> object:
         calls["run_id"] = info.run_id
         calls["stage_names"] = stage_names
@@ -86,6 +87,7 @@ def test_analyze_cli_without_stages_calls_analyze_run(
         time_budget_s: int,
         no_llm: bool,
         force_retriage: bool,
+        **_kwargs: object,
     ) -> str:
         calls["run_id"] = info.run_id
         calls["time_budget_s"] = time_budget_s
@@ -137,6 +139,7 @@ def test_analyze_cli_rootfs_writes_manifest_marker(
         time_budget_s: int,
         no_llm: bool,
         force_retriage: bool,
+        **_kwargs: object,
     ) -> str:
         manifest = cast(
             dict[str, object],
@@ -186,6 +189,7 @@ def test_analyze_cli_scan_limits_write_manifest_marker(
         time_budget_s: int,
         no_llm: bool,
         force_retriage: bool,
+        **_kwargs: object,
     ) -> str:
         manifest = cast(
             dict[str, object],
@@ -272,6 +276,7 @@ def test_stages_cli_scan_limits_write_manifest_marker(
         *,
         time_budget_s: int,
         no_llm: bool,
+        **_kwargs: object,
     ) -> object:
         manifest = cast(
             dict[str, object],
@@ -376,6 +381,7 @@ def test_analyze_cli_force_retriage_flag_is_forwarded(
         time_budget_s: int,
         no_llm: bool,
         force_retriage: bool,
+        **_kwargs: object,
     ) -> str:
         calls["time_budget_s"] = time_budget_s
         calls["no_llm"] = no_llm
@@ -539,6 +545,7 @@ def test_analyze_cli_ref_md_hash_recorded_in_manifest_and_report(
         time_budget_s: int,
         no_llm: bool,
         force_retriage: bool,
+        **_kwargs: object,
     ) -> str:
         _ = time_budget_s, no_llm, force_retriage
         return "ok"

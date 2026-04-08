@@ -222,6 +222,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_matches=max_matches,
                 )
 
+            # Progress tracker (--quiet suppresses)
+            _progress = None
+            if not getattr(args, "quiet", False):
+                try:
+                    from .progress import ProgressTracker
+                    _progress = ProgressTracker()
+                except Exception:
+                    pass
+
             stage_status: str | None = None
             if stage_names is not None:
                 if not callable(run_subset):
@@ -233,6 +242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         stage_names,
                         time_budget_s=time_budget_s,
                         no_llm=no_llm,
+                        on_progress=_progress,
                     ),
                 )
                 stage_status = rep.status
@@ -244,6 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         time_budget_s=time_budget_s,
                         no_llm=no_llm,
                         force_retriage=force_retriage,
+                        on_progress=_progress,
                     ),
                 )
         except ValueError as e:
@@ -320,6 +331,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_files=max_files,
                     max_matches=max_matches,
                 )
+            _progress_stages = None
+            if not getattr(args, "quiet", False):
+                try:
+                    from .progress import ProgressTracker
+                    _progress_stages = ProgressTracker()
+                except Exception:
+                    pass
+
             rep = cast(
                 _RunReport,
                 run_subset(
@@ -327,6 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     stage_names,
                     time_budget_s=time_budget_s,
                     no_llm=no_llm,
+                    on_progress=_progress_stages,
                 ),
             )
         except ValueError as e:

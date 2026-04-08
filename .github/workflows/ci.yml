@@ -40,5 +40,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - run: pip install pyright
+      - run: pip install 'pyright==1.1.398'
       - run: pyright src/

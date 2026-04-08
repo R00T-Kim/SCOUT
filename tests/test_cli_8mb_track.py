@@ -72,6 +72,7 @@ def test_analyze_8mb_uses_separate_runs_root_and_marks_manifest(
         time_budget_s: int,
         no_llm: bool,
         force_retriage: bool,
+        **_kwargs: object,
     ) -> str:
         _ = time_budget_s, no_llm, force_retriage
         return "ok"
