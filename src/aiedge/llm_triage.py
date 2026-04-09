@@ -42,9 +42,7 @@ def _select_model_tier(candidate_count: int, has_chains: bool) -> ModelTier:
     """Select model tier based on candidate count and complexity."""
     if candidate_count > 50 or has_chains:
         return "opus"
-    if candidate_count > 10:
-        return "sonnet"
-    return "haiku"
+    return "sonnet"
 
 
 def _load_json_file(path: Path) -> object | None:
