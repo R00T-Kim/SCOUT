@@ -108,7 +108,7 @@
 | :bar_chart: | **웹 뷰어** | Glassmorphism 대시보드 (KPI 바, IPC 맵, 리스크 히트맵) |
 | :link: | **증거 체인** | SHA-256 앵커 아티팩트, 2-tier 신뢰도 상한 (0.40/0.55), 5단계 exploit 승격 |
 | :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto 인증 |
-| :chart_with_upwards_trend: | **벤치마킹** | FirmAE 1,124 데이터셋, CVE 재매칭, TP/FP 분석 스크립트 |
+| :chart_with_upwards_trend: | **벤치마킹** | FirmAE 데이터셋 지원, analyst-readiness 점수화, verifier 기반 archive bundle, TP/FP 분석 스크립트 |
 | :key: | **벤더 복호화** | D-Link SHRS AES-128-CBC 자동 복호화; Shannon entropy 암호화 탐지 (>7.9) |
 
 ---
@@ -155,6 +155,8 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | 정적 FP 룰 3개 | `fp_verification.py` | constant-sink gate, non-network binary gate, sanitizer detection |
 | 2-tier 신뢰도 상한 | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
 | Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker 통합 Tier 1.5 에뮬레이션, KCRE 커널 복구 |
+| Analyst-Readiness Benchmarking | `benchmark_eval.py` + `benchmark_firmae.sh` | archived bundle verifier pass, actionable candidate, analyst-ready 상태를 함께 측정 |
+| LLM Trace Capture | `llm_driver.py` | stage별 `llm_trace/*.json`에 prompt/output/attempt 메타데이터 기록 |
 
 **v2.2.0 벤치마크 (Tier 1 frozen baseline):**
 
@@ -264,8 +266,19 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 --llm                   # LLM 단계 활성화
 --8mb                   # 8MB 트랙 사용
 --full                  # 동적 스테이지 포함
---cleanup               # JSON 아카이브 후 run 디렉토리 삭제 (디스크 절약)
+--cleanup               # verifier 친화적인 run replica를 results/archives/ 아래 보존한 뒤 원본 run_dir 삭제
 --dry-run               # 실행 없이 파일 목록만
+
+# 기존 benchmark-results를 analyst-readiness 기준으로 재평가
+python3 scripts/reevaluate_benchmark_results.py \
+  --results-dir benchmark-results/<run>
+
+# legacy bundle을 normalize한 뒤 일부 stage만 재실행 (archive fidelity 디버깅용)
+python3 scripts/rerun_benchmark_stages.py \
+  --results-dir benchmark-results/<legacy-run> \
+  --out-dir benchmark-results/<rerun-out> \
+  --stages attribution,graph,attack_surface \
+  --no-llm
 
 # 벤치마크 후 분석
 PYTHONPATH=src python3 scripts/cve_rematch.py \
@@ -284,6 +297,22 @@ PYTHONPATH=src python3 scripts/analyze_findings.py \
 # - docs/tier1_rebenchmark_frozen_baseline.md
 # - docs/tier1_rebenchmark_final_analysis.md
 ```
+
+**현재 benchmark 계약**
+
+- archived benchmark bundle은 이제 **flattened JSON 묶음이 아니라 run replica 전체**를 보존하는 것을 표준으로 삼습니다.
+- benchmark 품질은 두 층으로 봅니다.
+  - **analysis rate** = 파이프라인 완료율 (`success + partial`)
+  - **analyst-ready rate** = archived bundle이 analyst/verifier 점검을 통과하고 evidence navigation이 가능한 상태
+- `benchmark-results/legacy/tier2-llm-v2`는 **legacy snapshot**입니다. 역사적 참고/재평가용으로만 남기고, 새 analyst-readiness 기준의 공식 baseline으로 쓰지 않습니다.
+- 새 contract는 fresh single-sample run (`benchmark-results/tier2-single-fidelity`)에서 archived bundle 기준 digest/report verifier 통과로 확인했습니다.
+
+**현재 LLM 품질 동작**
+
+- `llm_triage` 모델 라우팅: `<=10 haiku`, `11-50 sonnet`, `>50 또는 chain-backed opus`
+- `haiku` 호출이 nonzero exit이면 `sonnet`으로 fallback합니다.
+- `llm_triage`, `semantic_classification`, `adversarial_triage`, `fp_verification`은 `stages/<stage>/llm_trace/*.json`를 남깁니다.
+- parse failure는 가능하면 repair하고, 아니면 조용히 성공 처리하지 않고 fail-closed `partial/degraded`로 남깁니다.
 
 </details>
 

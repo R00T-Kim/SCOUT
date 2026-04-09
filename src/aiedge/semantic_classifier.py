@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .llm_driver import ModelTier, resolve_driver
+from .llm_driver import ModelTier, resolve_driver, write_llm_trace
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -389,6 +389,15 @@ class SemanticClassifierStage:
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier=model_tier,
                 )
+                _ = write_llm_trace(
+                    run_dir=run_dir,
+                    stage_name=self.name,
+                    purpose="classification",
+                    prompt=prompt,
+                    model_tier=model_tier,
+                    result=result,
+                    metadata={"dangerous_api_matches": len(filtered)},
+                )
                 if result.status == "ok":
                     parsed = _parse_json_response(result.stdout)
                     if parsed is not None:
@@ -484,6 +493,15 @@ class SemanticClassifierStage:
                             max_attempts=_LLM_MAX_ATTEMPTS,
                             retryable_tokens=_RETRYABLE_TOKENS,
                             model_tier="sonnet",
+                        )
+                        _ = write_llm_trace(
+                            run_dir=run_dir,
+                            stage_name=self.name,
+                            purpose=f"deep-{fname}",
+                            prompt=deep_prompt,
+                            model_tier="sonnet",
+                            result=deep_result,
+                            metadata={"function_name": fname},
                         )
                         if deep_result.status == "ok":
                             parsed_deep = _parse_json_response(

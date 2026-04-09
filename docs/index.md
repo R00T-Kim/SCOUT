@@ -17,6 +17,9 @@
   - 지금 어디까지 구현됐는지
   - 무엇이 깨져있는지(known issues)
   - 다음 우선순위
+- Tier 2 benchmark contract 변화
+  - old `benchmark-results/legacy/tier2-llm-v2`는 legacy snapshot
+  - 새 benchmark는 archived bundle verifier와 analyst-readiness를 함께 봄
 - `docs/tier1_rebenchmark_frozen_baseline.md`
   - sasquatch 반영 후 Tier 1 재벤치마크의 frozen baseline 수치와 해석
 - `docs/tier1_rebenchmark_final_analysis.md`
@@ -29,6 +32,7 @@
   - (원하면) `python3 -m aiedge analyze` / `python3 -m aiedge stages`도 직접 실행 가능
   - 결정론/계약 검증 스크립트
   - Terminator 연동 E2E(있는 경우)
+  - benchmark re-evaluation / legacy bundle rerun 운영 절차
 - `docs/scout_experimental_protocol.md`
   - 팀원이 SCOUT를 실제로 사용해 취약점 후보를 찾고, 피드백을 남기고, 재현 가능한 실험 결과를 축적하기 위한 운영 프로토콜
 - `docs/scout_evaluation_labeling_criteria.md`
@@ -55,6 +59,8 @@
 - **Ghidra 연동**: `ghidra_bridge.py` + `ghidra_analysis.py` — 선택적 디컴파일
 - **퍼징**: `fuzz_target.py` + `fuzz_harness.py` + `fuzz_campaign.py` + `fuzz_triage.py` — AFL++ 파이프라인
 - **리포트**: `report_export.py` — Markdown executive report 생성
+- **Benchmark fidelity**: `benchmark_eval.py`, `scripts/reevaluate_benchmark_results.py`, `scripts/rerun_benchmark_stages.py`
+  - archived bundle verifier, analyst-readiness, legacy bundle normalize/rerun
 
 ## 6) 파이프라인 (42 stages)
 

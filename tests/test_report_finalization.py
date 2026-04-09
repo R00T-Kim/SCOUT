@@ -94,6 +94,19 @@ def test_analyze_run_emits_ingestion_integrity_chain_and_stage_references(
     assert all(isinstance(x, str) and x for x in extraction_evidence)
 
 
+def test_manifest_includes_legacy_aliases_for_benchmark_consumers(
+    tmp_path: Path,
+) -> None:
+    info = _make_run(tmp_path)
+    _ = analyze_run(info, time_budget_s=0, no_llm=True)
+
+    manifest = _load_report(info.run_dir / "manifest.json")
+    assert isinstance(manifest.get("sha256"), str)
+    assert isinstance(manifest.get("file_size_bytes"), int)
+    assert manifest["sha256"] == manifest["analyzed_input_sha256"]
+    assert manifest["file_size_bytes"] == manifest["analyzed_input_size_bytes"]
+
+
 def test_completeness_gate_marks_missing_required_inputs_and_blocks_clean_conclusion(
     tmp_path: Path,
 ) -> None:

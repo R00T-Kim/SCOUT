@@ -108,7 +108,7 @@
 | :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap |
 | :link: | **Evidence Chain** | SHA-256 anchored artifacts, 2-tier confidence caps (0.40/0.55), 5-tier exploit promotion |
 | :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto attestation |
-| :chart_with_upwards_trend: | **Benchmarking** | FirmAE 1,124 dataset support, CVE rematch, TP/FP analysis scripts |
+| :chart_with_upwards_trend: | **Benchmarking** | FirmAE dataset support, analyst-readiness scoring, verifier-backed archive bundles, TP/FP analysis scripts |
 | :key: | **Vendor Decrypt** | D-Link SHRS AES-128-CBC auto-decryption; Shannon entropy encryption detection (>7.9) |
 
 ---
@@ -155,6 +155,8 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | Static FP Rules (3) | `fp_verification.py` | Constant-sink gate, non-network binary gate, sanitizer detection |
 | 2-Tier Confidence Caps | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
 | Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker-integrated Tier 1.5 emulation with KCRE kernel recovery |
+| Analyst-Readiness Benchmarking | `benchmark_eval.py` + `benchmark_firmae.sh` | Measures archived-bundle verifier pass, actionable candidates, and analyst-ready status |
+| LLM Trace Capture | `llm_driver.py` | Writes per-stage `llm_trace/*.json` with prompt/output/attempt metadata |
 
 **v2.2.0 Benchmark (Tier 1 frozen baseline):**
 
@@ -264,8 +266,19 @@ See:
 --llm                   # Enable LLM-backed stages
 --8mb                   # Use 8MB truncated track
 --full                  # Include dynamic stages
---cleanup               # Archive JSONs, delete run dirs (saves disk)
+--cleanup               # Preserve a verifier-friendly run replica under results/archives/, then delete original run dirs
 --dry-run               # List files without running
+
+# Analyst-readiness re-evaluation for an existing benchmark-results tree
+python3 scripts/reevaluate_benchmark_results.py \
+  --results-dir benchmark-results/<run>
+
+# Normalize legacy bundles and rerun a stage subset (useful for debugging archive fidelity issues)
+python3 scripts/rerun_benchmark_stages.py \
+  --results-dir benchmark-results/<legacy-run> \
+  --out-dir benchmark-results/<rerun-out> \
+  --stages attribution,graph,attack_surface \
+  --no-llm
 
 # Post-benchmark analysis
 PYTHONPATH=src python3 scripts/cve_rematch.py \
@@ -284,6 +297,22 @@ PYTHONPATH=src python3 scripts/analyze_findings.py \
 # - docs/tier1_rebenchmark_frozen_baseline.md
 # - docs/tier1_rebenchmark_final_analysis.md
 ```
+
+**Current benchmark contract**
+
+- Archived benchmark bundles are now expected to be **run replicas**, not flattened JSON snapshots.
+- Benchmark quality is reported in two layers:
+  - **analysis rate** = pipeline completed (`success + partial`)
+  - **analyst-ready rate** = archived bundle passes analyst/verifier checks and remains evidence-navigable
+- `benchmark-results/legacy/tier2-llm-v2` is a **legacy snapshot**. It is useful for historical reference and re-evaluation, but it should not be used as the canonical analyst-readiness baseline.
+- The current contract has been validated on a fresh single-sample run (`benchmark-results/tier2-single-fidelity`) where both analyst verifiers passed from the archived bundle.
+
+**Current LLM quality behavior**
+
+- `llm_triage` model routing: `<=10 haiku`, `11-50 sonnet`, `>50 or chain-backed opus`
+- `llm_triage` retries with `sonnet` if a `haiku` call exits non-zero
+- `llm_triage`, `semantic_classification`, `adversarial_triage`, and `fp_verification` now write `stages/<stage>/llm_trace/*.json`
+- Parse failures are handled fail-closed: repaired when possible, otherwise reported as degraded/partial instead of silently treated as clean success
 
 </details>
 

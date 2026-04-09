@@ -214,7 +214,7 @@ Path(sys.argv[1]).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf
 PYEOF
 
 # CSV header
-echo "index,vendor,firmware,sha256,exit_code,status,extraction_status,inventory_quality_status,files_seen,binaries_seen,stages_ok,stages_partial,stages_failed,stages_skipped,findings_count,cve_count,duration_s,run_dir" \
+echo "index,vendor,firmware,sha256,exit_code,status,extraction_status,inventory_quality_status,files_seen,binaries_seen,stages_ok,stages_partial,stages_failed,stages_skipped,findings_count,cve_count,duration_s,run_dir,artifact_root,digest_verifier_ok,report_verifier_ok,actionable_candidate_count,llm_triage_status,llm_triage_model_tier,llm_triage_ranking_count,adversarial_total,adversarial_parsed_ok,fp_verified_total,fp_unverified,graph_empty,attack_surface_reference_only_count,llm_trace_count,manifest_primary_sha256,manifest_primary_size_bytes,analyst_readiness,analyst_reasons" \
     > "$SUMMARY_CSV"
 
 log "Results: ${RESULTS_DIR}"
@@ -274,115 +274,120 @@ run_one() {
         *)  status="error" ;;
     esac
 
+    local bundle_dir="$run_dir"
+    local archive_dir=""
+    local archive_completed=0
+    if [[ "$CLEANUP_RUNS" == "1" && -n "$run_dir" && -d "$run_dir" ]]; then
+        archive_dir="${RESULTS_DIR}/archives/${vendor}/${sha_short}"
+        if python3 - <<'PYEOF' "$run_dir" "$archive_dir"
+from pathlib import Path
+import sys
+
+from aiedge.benchmark_eval import copy_run_bundle
+
+copy_run_bundle(Path(sys.argv[1]), Path(sys.argv[2]))
+PYEOF
+        then
+            bundle_dir="$archive_dir"
+            archive_completed=1
+        else
+            warn "Archive copy failed for ${vendor}/${fw_name}; keeping original run dir"
+        fi
+    fi
+
     local extraction_status=""
     local inventory_quality_status=""
     local files_seen=0 binaries_seen=0
     local stages_ok=0 stages_partial=0 stages_failed=0 stages_skipped=0
     local findings_count=0 cve_count=0
+    local digest_verifier_ok=0 report_verifier_ok=0
+    local actionable_candidate_count=0
+    local llm_triage_status="" llm_triage_model_tier=""
+    local llm_triage_ranking_count=0
+    local adversarial_total=0 adversarial_parsed_ok=0
+    local fp_verified_total=0 fp_unverified=0
+    local graph_empty=0 attack_surface_reference_only_count=0
+    local llm_trace_count=0
+    local manifest_primary_sha256=""
+    local manifest_primary_size_bytes=0
+    local analyst_readiness="blocked"
+    local analyst_reasons="assessment_unavailable"
 
-    if [[ -n "$run_dir" && -d "$run_dir" ]]; then
+    if [[ -n "$bundle_dir" && -d "$bundle_dir" ]]; then
         local metrics
-        metrics=$(python3 - <<'PYEOF' "$run_dir"
-import json
+        metrics=$(python3 - <<'PYEOF' "$bundle_dir" "$REPO_ROOT"
 import sys
 from pathlib import Path
 
-run_dir = Path(sys.argv[1])
-
-stages_ok = stages_partial = stages_failed = stages_skipped = 0
-for stage_json in run_dir.glob("stages/*/stage.json"):
-    try:
-        obj = json.loads(stage_json.read_text(encoding="utf-8"))
-    except Exception:
-        continue
-    status = obj.get("status", "unknown")
-    if status == "ok":
-        stages_ok += 1
-    elif status == "partial":
-        stages_partial += 1
-    elif status == "failed":
-        stages_failed += 1
-    elif status == "skipped":
-        stages_skipped += 1
-
-findings_count = 0
-findings_path = run_dir / "stages" / "findings" / "findings.json"
-if findings_path.exists():
-    try:
-        data = json.loads(findings_path.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            findings_count = len(data)
-        elif isinstance(data, dict):
-            findings = data.get("findings", data.get("items", []))
-            if isinstance(findings, list):
-                findings_count = len(findings)
-    except Exception:
-        findings_count = 0
+from aiedge.benchmark_eval import (
+    collect_run_metrics,
+    evaluate_analyst_readiness,
+    run_bundle_verifier,
+)
 
 
-def count_listish(obj):
-    if isinstance(obj, list):
-        return len(obj)
-    if isinstance(obj, dict):
-        for key in ("cves", "matches", "items", "findings"):
-            value = obj.get(key)
-            if isinstance(value, list):
-                return len(value)
-    return 0
+def _sanitize(value: object) -> str:
+    text = str(value)
+    text = text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+    return text.replace(",", ";")
 
-cve_count = 0
-for cve_path in (
-    run_dir / "stages" / "cve_scan" / "cve_matches.json",
-    run_dir / "stages" / "cve_scan" / "cve_scan.json",
-):
-    if cve_path.exists():
-        try:
-            cve_count = count_listish(json.loads(cve_path.read_text(encoding="utf-8")))
-        except Exception:
-            cve_count = 0
-        break
 
-extraction_status = ""
-ext_stage = run_dir / "stages" / "extraction" / "stage.json"
-if ext_stage.exists():
-    try:
-        extraction_status = str(json.loads(ext_stage.read_text(encoding="utf-8")).get("status", "") or "")
-    except Exception:
-        extraction_status = ""
+bundle_dir = Path(sys.argv[1])
+repo_root = Path(sys.argv[2])
 
-inventory_quality_status = ""
-files_seen = 0
-binaries_seen = 0
-inventory_path = run_dir / "stages" / "inventory" / "inventory.json"
-if inventory_path.exists():
-    try:
-        inv = json.loads(inventory_path.read_text(encoding="utf-8"))
-        quality = inv.get("quality")
-        if isinstance(quality, dict):
-            inventory_quality_status = str(quality.get("status", "") or "")
-            files_seen = int(quality.get("files_seen", 0) or 0)
-            binaries_seen = int(quality.get("binaries_seen", 0) or 0)
-    except Exception:
-        pass
+metrics = collect_run_metrics(bundle_dir)
+digest_verifier = run_bundle_verifier(
+    repo_root, "scripts/verify_analyst_digest.py", bundle_dir
+)
+report_verifier = run_bundle_verifier(
+    repo_root, "scripts/verify_aiedge_analyst_report.py", bundle_dir
+)
+readiness = evaluate_analyst_readiness(
+    metrics=metrics,
+    digest_verifier=digest_verifier,
+    report_verifier=report_verifier,
+)
 
-print("\t".join([
-    str(stages_ok),
-    str(stages_partial),
-    str(stages_failed),
-    str(stages_skipped),
-    str(findings_count),
-    str(cve_count),
-    extraction_status,
-    inventory_quality_status,
-    str(files_seen),
-    str(binaries_seen),
-]))
+fields = [
+    metrics.get("stages_ok", 0),
+    metrics.get("stages_partial", 0),
+    metrics.get("stages_failed", 0),
+    metrics.get("stages_skipped", 0),
+    metrics.get("findings_count", 0),
+    metrics.get("cve_count", 0),
+    metrics.get("extraction_status", ""),
+    metrics.get("inventory_quality_status", ""),
+    metrics.get("files_seen", 0),
+    metrics.get("binaries_seen", 0),
+    1 if digest_verifier.get("ok") else 0,
+    1 if report_verifier.get("ok") else 0,
+    metrics.get("actionable_candidate_count", 0),
+    metrics.get("llm_triage_status", ""),
+    metrics.get("llm_triage_model_tier", ""),
+    metrics.get("llm_triage_ranking_count", 0),
+    metrics.get("adversarial_total", 0),
+    metrics.get("adversarial_parsed_ok", 0),
+    metrics.get("fp_verified_total", 0),
+    metrics.get("fp_unverified", 0),
+    1 if metrics.get("graph_empty") else 0,
+    metrics.get("attack_surface_reference_only_count", 0),
+    metrics.get("llm_trace_count", 0),
+    metrics.get("manifest_primary_sha256", ""),
+    metrics.get("manifest_primary_size_bytes", 0),
+    readiness.get("analyst_readiness", "blocked"),
+    "|".join(
+        str(item)
+        for item in readiness.get("analyst_reason_codes", [])
+        if isinstance(item, str) and item
+    ),
+]
+print("\t".join(_sanitize(field) for field in fields))
 PYEOF
 )
-        IFS=$'\t' read -r stages_ok stages_partial stages_failed stages_skipped findings_count cve_count extraction_status inventory_quality_status files_seen binaries_seen <<< "$metrics"
+        IFS=$'\t' read -r stages_ok stages_partial stages_failed stages_skipped findings_count cve_count extraction_status inventory_quality_status files_seen binaries_seen digest_verifier_ok report_verifier_ok actionable_candidate_count llm_triage_status llm_triage_model_tier llm_triage_ranking_count adversarial_total adversarial_parsed_ok fp_verified_total fp_unverified graph_empty attack_surface_reference_only_count llm_trace_count manifest_primary_sha256 manifest_primary_size_bytes analyst_readiness analyst_reasons <<< "$metrics"
     fi
 
-    echo "${idx},${vendor},${fw_name},${sha_short},${exit_code},${status},${extraction_status},${inventory_quality_status},${files_seen},${binaries_seen},${stages_ok},${stages_partial},${stages_failed},${stages_skipped},${findings_count},${cve_count},${duration},${run_dir}" \
+    echo "${idx},${vendor},${fw_name},${sha_short},${exit_code},${status},${extraction_status},${inventory_quality_status},${files_seen},${binaries_seen},${stages_ok},${stages_partial},${stages_failed},${stages_skipped},${findings_count},${cve_count},${duration},${run_dir},${bundle_dir},${digest_verifier_ok},${report_verifier_ok},${actionable_candidate_count},${llm_triage_status},${llm_triage_model_tier},${llm_triage_ranking_count},${adversarial_total},${adversarial_parsed_ok},${fp_verified_total},${fp_unverified},${graph_empty},${attack_surface_reference_only_count},${llm_trace_count},${manifest_primary_sha256},${manifest_primary_size_bytes},${analyst_readiness},${analyst_reasons}" \
         >> "$SUMMARY_CSV"
 
     local icon
@@ -391,24 +396,15 @@ PYEOF
         partial) icon="${YELLOW}PARTIAL${NC}" ;;
         *)       icon="${RED}FAIL${NC}" ;;
     esac
-    echo -e "[${idx}/${TOTAL}] ${icon} ${vendor}/${fw_name} (${duration}s) stages=${stages_ok}ok/${stages_partial}p/${stages_failed}f findings=${findings_count} cves=${cve_count} extraction=${extraction_status:-n/a} inventory=${inventory_quality_status:-n/a} files=${files_seen} bins=${binaries_seen}"
+    echo -e "[${idx}/${TOTAL}] ${icon} ${vendor}/${fw_name} (${duration}s) stages=${stages_ok}ok/${stages_partial}p/${stages_failed}f findings=${findings_count} cves=${cve_count} extraction=${extraction_status:-n/a} inventory=${inventory_quality_status:-n/a} analyst=${analyst_readiness} files=${files_seen} bins=${binaries_seen}"
 
-    if [[ "$CLEANUP_RUNS" == "1" && -n "$run_dir" && -d "$run_dir" ]]; then
-        local archive_dir="${RESULTS_DIR}/archives/${vendor}/${sha_short}"
-        mkdir -p "$archive_dir"
-        find "$run_dir"/stages -mindepth 2 -maxdepth 2 -type f \( -name "*.json" -o -name "*.log" \) \
-            -exec cp --parents -t "$archive_dir" {} + 2>/dev/null || true
-        cp "$run_dir"/report/*.json "$archive_dir/" 2>/dev/null || true
-        cp "$run_dir"/firmware_handoff.json "$archive_dir/" 2>/dev/null || true
-        cp "$run_dir"/manifest.json "$archive_dir/" 2>/dev/null || true
-        cp "$run_dir"/metrics.json "$archive_dir/" 2>/dev/null || true
-        cp "$run_dir"/quality_gate.json "$archive_dir/" 2>/dev/null || true
+    if [[ "$CLEANUP_RUNS" == "1" && $archive_completed -eq 1 && -n "$run_dir" && -d "$run_dir" ]]; then
         rm -rf "$run_dir" 2>/dev/null || true
     fi
 }
 
 export -f run_one
-export PYTHONPATH RESULTS_DIR LOG_DIR SUMMARY_CSV TIME_BUDGET_S STAGES
+export PYTHONPATH RESULTS_DIR LOG_DIR SUMMARY_CSV TIME_BUDGET_S STAGES REPO_ROOT
 export NO_LLM_FLAG PROFILE USE_8MB TOTAL CLEANUP_RUNS
 export RED GREEN YELLOW BLUE NC
 
@@ -470,8 +466,12 @@ vendor_stats = defaultdict(lambda: {
     "success": 0,
     "partial": 0,
     "failed": 0,
+    "analyst_ready": 0,
+    "analyst_degraded": 0,
+    "analyst_blocked": 0,
     "findings": 0,
     "cves": 0,
+    "actionable_candidates": 0,
     "duration": 0,
     "files_seen_total": 0,
     "binaries_seen_total": 0,
@@ -480,6 +480,14 @@ vendor_stats = defaultdict(lambda: {
     "extraction_failed": 0,
     "inventory_sufficient": 0,
     "inventory_insufficient": 0,
+    "digest_verifier_ok": 0,
+    "report_verifier_ok": 0,
+    "llm_triage_runs": 0,
+    "llm_triage_ok": 0,
+    "adversarial_total": 0,
+    "adversarial_parsed_ok": 0,
+    "fp_verified_total": 0,
+    "fp_unverified": 0,
 })
 
 for row in rows:
@@ -494,9 +502,30 @@ for row in rows:
         vendor["failed"] += 1
     vendor["findings"] += int(row.get("findings_count", 0) or 0)
     vendor["cves"] += int(row.get("cve_count", 0) or 0)
+    vendor["actionable_candidates"] += int(row.get("actionable_candidate_count", 0) or 0)
     vendor["duration"] += int(row.get("duration_s", 0) or 0)
     vendor["files_seen_total"] += int(row.get("files_seen", 0) or 0)
     vendor["binaries_seen_total"] += int(row.get("binaries_seen", 0) or 0)
+    vendor["digest_verifier_ok"] += int(row.get("digest_verifier_ok", 0) or 0)
+    vendor["report_verifier_ok"] += int(row.get("report_verifier_ok", 0) or 0)
+    vendor["adversarial_total"] += int(row.get("adversarial_total", 0) or 0)
+    vendor["adversarial_parsed_ok"] += int(row.get("adversarial_parsed_ok", 0) or 0)
+    vendor["fp_verified_total"] += int(row.get("fp_verified_total", 0) or 0)
+    vendor["fp_unverified"] += int(row.get("fp_unverified", 0) or 0)
+
+    analyst_readiness = row.get("analyst_readiness", "")
+    if analyst_readiness == "ready":
+        vendor["analyst_ready"] += 1
+    elif analyst_readiness == "degraded":
+        vendor["analyst_degraded"] += 1
+    else:
+        vendor["analyst_blocked"] += 1
+
+    llm_triage_status = row.get("llm_triage_status", "")
+    if llm_triage_status:
+        vendor["llm_triage_runs"] += 1
+        if llm_triage_status == "ok":
+            vendor["llm_triage_ok"] += 1
 
     extraction_status = row.get("extraction_status", "")
     if extraction_status == "ok":
@@ -523,14 +552,26 @@ overall = {
     "success": sum(v["success"] for v in vendor_stats.values()),
     "partial": sum(v["partial"] for v in vendor_stats.values()),
     "failed": sum(v["failed"] for v in vendor_stats.values()),
+    "analyst_ready": sum(v["analyst_ready"] for v in vendor_stats.values()),
+    "analyst_degraded": sum(v["analyst_degraded"] for v in vendor_stats.values()),
+    "analyst_blocked": sum(v["analyst_blocked"] for v in vendor_stats.values()),
     "total_findings": sum(v["findings"] for v in vendor_stats.values()),
     "total_cves": sum(v["cves"] for v in vendor_stats.values()),
+    "actionable_candidates": sum(v["actionable_candidates"] for v in vendor_stats.values()),
     "total_duration_s": sum(v["duration"] for v in vendor_stats.values()),
     "extraction_ok": sum(v["extraction_ok"] for v in vendor_stats.values()),
     "extraction_partial": sum(v["extraction_partial"] for v in vendor_stats.values()),
     "extraction_failed": sum(v["extraction_failed"] for v in vendor_stats.values()),
     "inventory_sufficient": sum(v["inventory_sufficient"] for v in vendor_stats.values()),
     "inventory_insufficient": sum(v["inventory_insufficient"] for v in vendor_stats.values()),
+    "digest_verifier_ok": sum(v["digest_verifier_ok"] for v in vendor_stats.values()),
+    "report_verifier_ok": sum(v["report_verifier_ok"] for v in vendor_stats.values()),
+    "llm_triage_runs": sum(v["llm_triage_runs"] for v in vendor_stats.values()),
+    "llm_triage_ok": sum(v["llm_triage_ok"] for v in vendor_stats.values()),
+    "adversarial_total": sum(v["adversarial_total"] for v in vendor_stats.values()),
+    "adversarial_parsed_ok": sum(v["adversarial_parsed_ok"] for v in vendor_stats.values()),
+    "fp_verified_total": sum(v["fp_verified_total"] for v in vendor_stats.values()),
+    "fp_unverified": sum(v["fp_unverified"] for v in vendor_stats.values()),
     "avg_files_seen": round(sum(int(r.get("files_seen", 0) or 0) for r in rows) / overall_total, 2),
     "avg_binaries_seen": round(sum(int(r.get("binaries_seen", 0) or 0) for r in rows) / overall_total, 2),
 }
@@ -574,8 +615,33 @@ report_lines.append(
 report_lines.append(
     f"Average inventory coverage: files_seen={overall['avg_files_seen']} binaries_seen={overall['avg_binaries_seen']}"
 )
+report_lines.append(
+    f"Analyst readiness (ready/degraded/blocked): {overall['analyst_ready']}/{overall['analyst_degraded']}/{overall['analyst_blocked']}"
+)
+report_lines.append(
+    f"Archive verifier pass (digest/report): {overall['digest_verifier_ok']}/{overall_total} | {overall['report_verifier_ok']}/{overall_total}"
+)
+llm_triage_rate = (
+    (overall["llm_triage_ok"] / overall["llm_triage_runs"]) * 100.0
+    if overall["llm_triage_runs"] > 0
+    else 0.0
+)
+report_lines.append(
+    f"Actionable candidates: {overall['actionable_candidates']} | LLM triage ok rate: {llm_triage_rate:.1f}%"
+)
+adv_rate = (
+    (overall["adversarial_parsed_ok"] / overall["adversarial_total"]) * 100.0
+    if overall["adversarial_total"] > 0
+    else 0.0
+)
+report_lines.append(
+    f"Adversarial parse success: {overall['adversarial_parsed_ok']}/{overall['adversarial_total']} ({adv_rate:.1f}%)"
+)
+report_lines.append(
+    f"FP verification unverified: {overall['fp_unverified']}/{overall['fp_verified_total']}"
+)
 report_lines.append("")
-report_lines.append(f"{'Vendor':<12} {'Images':>6} {'Success':>8} {'Partial':>8} {'Failed':>7} {'Rate':>6} {'FirmAE':>8} {'Findings':>9} {'CVEs':>5}")
+report_lines.append(f"{'Vendor':<12} {'Images':>6} {'Success':>8} {'Partial':>8} {'Failed':>7} {'Ready':>7} {'Rate':>6} {'FirmAE':>8} {'Findings':>9} {'CVEs':>5}")
 report_lines.append("-" * 80)
 for vendor_name in sorted(vendor_stats.keys()):
     stats = vendor_stats[vendor_name]
@@ -584,17 +650,18 @@ for vendor_name in sorted(vendor_stats.keys()):
     firmae_rate = f"{ref.get('emulation_rate', 0) * 100:.1f}%" if ref else "N/A"
     report_lines.append(
         f"{vendor_name:<12} {stats['total']:>6} {stats['success']:>8} {stats['partial']:>8} "
-        f"{stats['failed']:>7} {rate:>5.1f}% {firmae_rate:>8} {stats['findings']:>9} {stats['cves']:>5}"
+        f"{stats['failed']:>7} {stats['analyst_ready']:>7} {rate:>5.1f}% {firmae_rate:>8} {stats['findings']:>9} {stats['cves']:>5}"
     )
 
 total_rate = (overall["success"] + overall["partial"]) / overall_total * 100
 report_lines.append("-" * 80)
 report_lines.append(
     f"{'TOTAL':<12} {overall_total:>6} {overall['success']:>8} {overall['partial']:>8} "
-    f"{overall['failed']:>7} {total_rate:>5.1f}% {'79.4%':>8} {overall['total_findings']:>9} {overall['total_cves']:>5}"
+    f"{overall['failed']:>7} {overall['analyst_ready']:>7} {total_rate:>5.1f}% {'79.4%':>8} {overall['total_findings']:>9} {overall['total_cves']:>5}"
 )
 report_lines.append("")
 report_lines.append("SCOUT analysis rate = (success + partial) / total")
+report_lines.append("SCOUT analyst-ready rate = ready / total")
 report_lines.append("FirmAE rate = web service emulation success (from paper Table 1)")
 report_lines.append("Key insight: SCOUT static pipeline can analyze firmware that FirmAE cannot emulate, providing complementary coverage.")
 report_lines.append("=" * 80)

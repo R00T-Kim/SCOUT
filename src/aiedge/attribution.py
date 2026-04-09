@@ -235,10 +235,9 @@ class AttributionStage:
         else:
             inventory_rel = "stages/inventory/inventory.json"
 
-        extraction_stage_manifest = run_dir / "stages" / "extraction" / "stage.json"
-        extraction_present = extraction_stage_manifest.is_file()
+        extraction_present = bool(roots)
         if not extraction_present:
-            limits.append("Extraction manifest missing: stages/extraction/stage.json")
+            limits.append("Extracted filesystem roots unavailable for attribution")
 
         claims: list[dict[str, JsonValue]] = []
         evidence_refs: set[str] = set()
@@ -504,11 +503,11 @@ class AttributionStage:
             )
         if not extraction_present:
             limits.append(
-                "Attribution used degraded mode because extraction stage manifest is missing"
+                "Attribution used degraded mode because extracted filesystem roots are unavailable"
             )
 
         status: StageStatus
-        if final_claims and inventory_present and extraction_present and not limits:
+        if final_claims and inventory_present and extraction_present:
             status = "ok"
         else:
             status = "partial"

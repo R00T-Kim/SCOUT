@@ -15,7 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .llm_driver import ModelTier, resolve_driver
+from .llm_driver import (
+    LLMDriver,
+    LLMDriverResult,
+    ModelTier,
+    resolve_driver,
+    write_llm_trace,
+)
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
 
@@ -42,6 +48,8 @@ def _select_model_tier(candidate_count: int, has_chains: bool) -> ModelTier:
     """Select model tier based on candidate count and complexity."""
     if candidate_count > 50 or has_chains:
         return "opus"
+    if candidate_count <= 10:
+        return "haiku"
     return "sonnet"
 
 
@@ -172,6 +180,71 @@ def _try_parse_rankings(text: str) -> list[dict[str, object]] | None:
     return validated if validated else None
 
 
+def _build_repair_prompt(raw_output: str) -> str:
+    return textwrap.dedent(
+        f"""\
+        Convert the following model output into a valid JSON object with this exact schema:
+        {{
+          "rankings": [
+            {{
+              "candidate_id": "<id>",
+              "priority": "critical"|"high"|"medium"|"low",
+              "rationale": "<brief explanation>",
+              "chain_potential": ["<other_candidate_id>", ...]
+            }}
+          ]
+        }}
+
+        Rules:
+        - Return JSON only.
+        - Preserve the original meaning; do not invent new candidates.
+        - Use an empty list for chain_potential when absent.
+        - If a required field is missing, omit that ranking entry instead of guessing.
+
+        Model output to repair:
+        {raw_output}
+        """
+    )
+
+
+def _parse_or_repair_rankings(
+    *,
+    driver: LLMDriver,
+    ctx: StageContext,
+    raw_stdout: str,
+    primary_tier: ModelTier,
+    trace_refs: list[str],
+) -> tuple[list[dict[str, object]] | None, bool]:
+    rankings = _parse_triage_response(raw_stdout)
+    if rankings is not None:
+        return rankings, False
+
+    repair_prompt = _build_repair_prompt(raw_stdout)
+    repair_result = driver.execute(
+        prompt=repair_prompt,
+        run_dir=ctx.run_dir,
+        timeout_s=_TRIAGE_TIMEOUT_S,
+        max_attempts=1,
+        retryable_tokens=_RETRYABLE_TOKENS,
+        model_tier="haiku" if primary_tier != "opus" else "sonnet",
+    )
+    trace_refs.append(
+        write_llm_trace(
+            run_dir=ctx.run_dir,
+            stage_name="llm_triage",
+            purpose="repair",
+            prompt=repair_prompt,
+            model_tier="haiku" if primary_tier != "opus" else "sonnet",
+            result=repair_result,
+            metadata={"repair_for": "rankings"},
+        )
+    )
+    if repair_result.status != "ok":
+        return None, False
+    repaired = _parse_triage_response(repair_result.stdout)
+    return repaired, repaired is not None
+
+
 @dataclass(frozen=True)
 class LLMTriageStage:
     """Re-prioritises findings via LLM triage."""
@@ -299,63 +372,111 @@ class LLMTriageStage:
                 limitations=["llm_driver_unavailable"],
             )
 
-        timeout_s = float(os.environ.get("AIEDGE_LLM_TRIAGE_TIMEOUT_S", str(_TRIAGE_TIMEOUT_S)))
-        max_attempts = int(os.environ.get("AIEDGE_LLM_TRIAGE_MAX_ATTEMPTS", str(_TRIAGE_MAX_ATTEMPTS)))
-
-        result = driver.execute(
-            prompt=prompt,
-            run_dir=ctx.run_dir,
-            timeout_s=timeout_s,
-            max_attempts=max(1, min(max_attempts, 8)),
-            retryable_tokens=_RETRYABLE_TOKENS,
-            model_tier=tier,
+        timeout_s = float(
+            os.environ.get("AIEDGE_LLM_TRIAGE_TIMEOUT_S", str(_TRIAGE_TIMEOUT_S))
+        )
+        max_attempts = int(
+            os.environ.get("AIEDGE_LLM_TRIAGE_MAX_ATTEMPTS", str(_TRIAGE_MAX_ATTEMPTS))
         )
 
-        if result.status != "ok":
-            _write_artifact(stage_dir, {
-                "schema_version": _TRIAGE_SCHEMA_VERSION,
-                "status": "partial",
-                "reason": f"llm_{result.status}",
-                "model_tier": tier,
-                "llm_returncode": result.returncode,
-                "rankings": [],
-            })
-            return StageOutcome(
-                status="partial",
-                details=cast(dict[str, JsonValue], {
-                    "reason": f"llm_{result.status}",
-                    "model_tier": tier,
-                }),
-                limitations=[f"llm_{result.status}"],
+        tiers_to_try: list[ModelTier] = [tier]
+        if tier == "haiku":
+            tiers_to_try.append("sonnet")
+
+        trace_refs: list[str] = []
+        attempted_tiers: list[str] = []
+        rankings: list[dict[str, object]] | None = None
+        repair_used = False
+        selected_tier = tier
+        last_result: LLMDriverResult | None = None
+
+        for attempt_tier in tiers_to_try:
+            attempted_tiers.append(attempt_tier)
+            result = driver.execute(
+                prompt=prompt,
+                run_dir=ctx.run_dir,
+                timeout_s=timeout_s,
+                max_attempts=max(1, min(max_attempts, 8)),
+                retryable_tokens=_RETRYABLE_TOKENS,
+                model_tier=attempt_tier,
+            )
+            last_result = result
+            trace_refs.append(
+                write_llm_trace(
+                    run_dir=ctx.run_dir,
+                    stage_name=self.name,
+                    purpose=f"rankings-{attempt_tier}",
+                    prompt=prompt,
+                    model_tier=attempt_tier,
+                    result=result,
+                    metadata={
+                        "candidate_count": len(candidates),
+                        "has_chains": has_chains,
+                    },
+                )
             )
 
-        # Parse response
-        rankings = _parse_triage_response(result.stdout)
+            if result.status != "ok":
+                continue
+
+            parsed_rankings, repaired = _parse_or_repair_rankings(
+                driver=driver,
+                ctx=ctx,
+                raw_stdout=result.stdout,
+                primary_tier=attempt_tier,
+                trace_refs=trace_refs,
+            )
+            if parsed_rankings is None:
+                continue
+            rankings = parsed_rankings
+            repair_used = repaired
+            selected_tier = attempt_tier
+            break
+
         if rankings is None:
-            _write_artifact(stage_dir, {
-                "schema_version": _TRIAGE_SCHEMA_VERSION,
-                "status": "partial",
-                "reason": "unparseable_response",
-                "model_tier": tier,
-                "raw_stdout_len": len(result.stdout),
-                "rankings": [],
-            })
+            if last_result is not None and last_result.status != "ok":
+                reason = f"llm_{last_result.status}"
+                limitations = [reason]
+                llm_returncode = last_result.returncode
+            else:
+                reason = "unparseable_response"
+                limitations = ["unparseable_llm_response"]
+                llm_returncode = last_result.returncode if last_result is not None else -1
+            _write_artifact(
+                stage_dir,
+                {
+                    "schema_version": _TRIAGE_SCHEMA_VERSION,
+                    "status": "partial",
+                    "reason": reason,
+                    "model_tier": tier,
+                    "attempted_tiers": attempted_tiers,
+                    "llm_returncode": llm_returncode,
+                    "trace_refs": cast(list[object], trace_refs),
+                    "rankings": [],
+                },
+            )
             return StageOutcome(
                 status="partial",
-                details=cast(dict[str, JsonValue], {
-                    "reason": "unparseable_response",
-                    "model_tier": tier,
-                }),
-                limitations=["unparseable_llm_response"],
+                details=cast(
+                    dict[str, JsonValue],
+                    {
+                        "reason": reason,
+                        "model_tier": tier,
+                    },
+                ),
+                limitations=limitations,
             )
 
         # Success
         artifact = {
             "schema_version": _TRIAGE_SCHEMA_VERSION,
             "status": "ok",
-            "model_tier": tier,
+            "model_tier": selected_tier,
             "candidate_count": len(candidates),
             "ranking_count": len(rankings),
+            "attempted_tiers": attempted_tiers,
+            "repair_used": repair_used,
+            "trace_refs": cast(list[object], trace_refs),
             "rankings": cast(list[object], rankings),
         }
         _write_artifact(stage_dir, artifact)
@@ -363,7 +484,7 @@ class LLMTriageStage:
         return StageOutcome(
             status="ok",
             details=cast(dict[str, JsonValue], {
-                "model_tier": tier,
+                "model_tier": selected_tier,
                 "candidate_count": len(candidates),
                 "ranking_count": len(rankings),
                 "triage_path": "stages/llm_triage/triage.json",

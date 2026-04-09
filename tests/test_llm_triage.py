@@ -331,6 +331,40 @@ class TestLLMTriageStageSuccess:
         assert call_kwargs.kwargs.get("model_tier") == "opus"
         assert outcome.status == "ok"
 
+    def test_falls_back_from_haiku_to_sonnet_on_nonzero_exit(
+        self, tmp_path: Path
+    ) -> None:
+        ctx = _make_ctx(tmp_path)
+        _write_candidates(
+            tmp_path,
+            [{"candidate_id": "c1", "score": 0.9, "chain_id": ""}],
+        )
+
+        llm_response = json.dumps({
+            "rankings": [
+                {
+                    "candidate_id": "c1",
+                    "priority": "high",
+                    "rationale": "fallback succeeded",
+                    "chain_potential": [],
+                }
+            ]
+        })
+
+        with patch("aiedge.llm_triage.resolve_driver") as mock_resolve:
+            mock_driver = mock_resolve.return_value
+            mock_driver.available.return_value = True
+            mock_driver.execute.side_effect = [
+                _fake_driver_result(status="nonzero_exit", returncode=1),
+                _fake_driver_result(status="ok", stdout=llm_response),
+            ]
+            stage = LLMTriageStage(no_llm=False)
+            outcome = stage.run(ctx)
+
+        assert outcome.status == "ok"
+        assert outcome.details["model_tier"] == "sonnet"
+        assert mock_driver.execute.call_count == 2
+
     def test_unparseable_response(self, tmp_path: Path) -> None:
         ctx = _make_ctx(tmp_path)
         _write_candidates(tmp_path, [{"candidate_id": "c1", "score": 0.9}])

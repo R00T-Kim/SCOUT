@@ -224,6 +224,14 @@ def test_graph_stage_emits_deterministic_json_dot_and_mermaid(tmp_path: Path) ->
     assert comm_summary.get("nodes") == 0
     assert comm_summary.get("edges") == 0
     assert comm_summary.get("neo4j_schema_version") == "neo4j-comm-v2"
+    fallback_any = comm_summary.get("fallback_reference_graph")
+    assert isinstance(fallback_any, dict)
+    fallback = cast(dict[str, object], fallback_any)
+    assert fallback.get("nodes") == len(nodes)
+    assert fallback.get("edges") == len(edges)
+    blocked_codes_any = comm_summary.get("blocked_reason_codes")
+    assert isinstance(blocked_codes_any, list)
+    assert "USE_REFERENCE_GRAPH_FALLBACK" in cast(list[object], blocked_codes_any)
     assert isinstance(communication_matrix_payload.get("status"), str)
     assert isinstance(communication_matrix_payload.get("rows"), list)
     matrix_summary_any = communication_matrix_payload.get("summary")

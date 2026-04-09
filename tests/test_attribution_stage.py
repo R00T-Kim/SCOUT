@@ -156,6 +156,28 @@ def test_attribution_non_android_is_deterministic(tmp_path: Path) -> None:
     )
 
 
+def test_attribution_succeeds_without_extraction_stage_manifest_when_inventory_roots_exist(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx(tmp_path)
+    root_dir = ctx.run_dir / "stages" / "carving" / "roots" / "root0"
+    etc_dir = root_dir / "etc"
+    etc_dir.mkdir(parents=True)
+    _ = (etc_dir / "os-release").write_text(
+        "NAME=OpenWrt\nID=openwrt\nVERSION_ID=23.05.2\nVERSION=23.05.2\n",
+        encoding="utf-8",
+    )
+    _write_inventory(
+        ctx,
+        roots=["stages/carving/roots/root0"],
+        extracted_dir="stages/extraction/_firmware.bin.extracted",
+    )
+
+    outcome = AttributionStage().run(ctx)
+    assert outcome.status == "ok"
+    assert not any("Extraction manifest missing" in x for x in outcome.limitations)
+
+
 def test_attribution_partial_when_inventory_and_extraction_missing(
     tmp_path: Path,
 ) -> None:
@@ -164,7 +186,7 @@ def test_attribution_partial_when_inventory_and_extraction_missing(
     outcome = AttributionStage().run(ctx)
     assert outcome.status == "partial"
     assert any("Inventory output missing" in x for x in outcome.limitations)
-    assert any("Extraction manifest missing" in x for x in outcome.limitations)
+    assert any("Extracted filesystem roots unavailable" in x for x in outcome.limitations)
 
     out_path = ctx.run_dir / "stages" / "attribution" / "attribution.json"
     payload = _read_json_obj(out_path)

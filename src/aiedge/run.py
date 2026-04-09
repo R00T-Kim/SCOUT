@@ -1138,6 +1138,10 @@ def create_run(
         "input_path": input_path,
         "input_sha256": input_sha256,
         "input_size_bytes": input_size_bytes,
+        # Legacy aliases kept for external benchmark tooling that still expects
+        # generic top-level keys instead of the canonical analyzed/source names.
+        "sha256": analyzed_input_sha256,
+        "file_size_bytes": analyzed_input_size_bytes,
         "source_input_sha256": source_input_sha256,
         "source_input_size_bytes": source_input_size_bytes,
         "analyzed_input_path": "input/firmware.bin",

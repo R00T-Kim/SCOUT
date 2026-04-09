@@ -1943,6 +1943,18 @@ class GraphStage:
             "note": "Static-first communication graph inferred from prior artifacts; edges indicate static references and inferred ownership only, not runtime communication.",
         }
 
+        reference_summary: dict[str, JsonValue] = {
+            "nodes": len(node_payload),
+            "edges": len(edge_payload),
+            "components": len([n for n in node_items if n.node_type == "component"]),
+            "endpoints": len([n for n in node_items if n.node_type == "endpoint"]),
+            "surfaces": len([n for n in node_items if n.node_type == "surface"]),
+            "vendors": len([n for n in node_items if n.node_type == "vendor"]),
+            "path_json": _rel_to_run_dir(run_dir, out_ref_json),
+            "path_dot": _rel_to_run_dir(run_dir, out_dot),
+            "path_mermaid": _rel_to_run_dir(run_dir, out_mmd),
+        }
+
         comm_summary: dict[str, JsonValue] = {
             "nodes": 0,
             "edges": 0,
@@ -1955,6 +1967,7 @@ class GraphStage:
             "source_artifacts": cast(list[JsonValue], cast(list[object], [])),
             "classification": "candidate",
             "observation": "runtime_communication",
+            "fallback_reference_graph": cast(dict[str, JsonValue], reference_summary),
         }
         communication_summary_limitations: list[str] = []
 
@@ -2546,11 +2559,25 @@ class GraphStage:
             "neo4j_schema_version": "neo4j-comm-v2",
             "classification": "candidate",
             "observation": "runtime_communication",
+            "fallback_reference_graph": cast(dict[str, JsonValue], reference_summary),
         }
 
         if not communication_node_payload and not communication_edge_payload:
             communication_summary_limitations.append(
                 "Runtime communication evidence not available or could not be mapped to endpoint/component artifacts."
+            )
+            communication_summary_limitations.append(
+                "Static reference graph remains available as fallback context."
+            )
+            comm_summary["blocked_reason_codes"] = cast(
+                list[JsonValue],
+                cast(
+                    list[object],
+                    [
+                        "RUNTIME_COMMUNICATION_UNAVAILABLE",
+                        "USE_REFERENCE_GRAPH_FALLBACK",
+                    ],
+                ),
             )
 
         communication_status: StageStatus = "ok" if communication_edge_payload else "partial"

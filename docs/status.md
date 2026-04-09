@@ -6,6 +6,9 @@
 
 - SCOUT CLI: `./scout analyze`, `./scout stages` (래퍼 권장)
 - 동일 기능은 `python3 -m aiedge analyze`, `python3 -m aiedge stages`로 직접 실행 가능
+- **Benchmark fidelity layer** (`benchmark_eval.py`): archived bundle 기준 metric 수집, manifest legacy/canonical field 호환 해석, analyst-readiness 판정
+- **Benchmark triage scripts**: `scripts/reevaluate_benchmark_results.py`(기존 benchmark 재평가), `scripts/rerun_benchmark_stages.py`(legacy bundle normalize + stage subset rerun)
+- **Fresh fidelity validation**: 새 archive contract는 `benchmark-results/tier2-single-fidelity` single-sample run에서 digest/report verifier 동시 통과로 확인됨
 - Stage evidence store(run_dir): StageFactory stage는 `stages/<name>/stage.json` 기반 artifact hashing을 사용하고, findings는 `run_findings()`가 `stages/findings/*.json`을 직접 생성
 - `analyze`/`analyze-8mb`에 `--rootfs <DIR>` 지원 (사전 추출 rootfs 직접 ingest)
 - `firmware_profile` stage:
@@ -21,13 +24,17 @@
 - `_BINARY_BRIDGE_TOKENS` 탐지 카테고리: `sprintf`/`snprintf`/`strcat`/`strcpy` 등이 `system`/`popen` exec 싱크 근처에 있으면 커맨드 인젝션 브릿지로 플래그. inventory 교차검증(`bridge_sink_cooccurrence`) 포함.
 - `web_ui` 스테이지: HTML/JS 보안 패턴 스캐너. `stages/web_ui/web_ui.json` 산출. JS 9개 패턴 + HTML 4개 패턴 + API 스펙 파일 탐지.
 - LLM Provider 추상화: `llm_driver.py` (LLMDriver Protocol, CodexCLIDriver, `resolve_driver()`). 3개 호출사이트(llm_synthesis, exploit_autopoc, llm_codex) 통합. `AIEDGE_LLM_DRIVER` env var로 provider 선택, ModelTier ("haiku"|"sonnet"|"opus") 지원.
+- **LLM trace capture** (`llm_driver.py`): `stages/<stage>/llm_trace/*.json`에 prompt/output/attempt/usage 메타데이터 기록
 - 바이너리 하드닝: 순수 Python ELF 파서로 NX/PIE/RELRO/Canary/Stripped 수집. inventory `binary_analysis.json`에 `hardening_summary` 포함. findings 점수에 하드닝 기반 보정 적용 (fully hardened: x0.7, no protection: x1.15).
 - 3-Tier 에뮬레이션: FirmAE Docker 이미지(Tier 1) + QEMU user-mode 서비스 프로빙(Tier 2, lighttpd/busybox/dnsmasq/sshd) + rootfs 검사 fallback(Tier 3). `docker/scout-emulation/` Dockerfile 포함. `AIEDGE_EMULATION_IMAGE`, `AIEDGE_FIRMAE_ROOT` env var.
 - 엔디안 인식 아키텍처 감지: MIPS/ARM 빅/리틀엔디안 정확 구분 (`mips_be`, `mips_le`, `arm_be`, `arm_le`).
 - 취약점 유형별 PoC 템플릿: `poc_templates.py` 레지스트리 4종 (cmd_injection, path_traversal, auth_bypass, info_disclosure) + tcp_banner fallback. `poc_skeletons/` 디렉토리에 standalone PoC 파일.
 - exploit_runner 실제 PCAP 캡처: tcpdump 가용 시 실제 패킷 캡처 (기존 placeholder fallback 유지).
 - PoC 재현성 검증: `poc_validation`에서 readback_hash 일관성 확인으로 재현성 보장.
-- LLM 트리아지 스테이지: findings → `llm_triage` → llm_synthesis 순서로 실행. 모델 티어 자동 선택 (<10: haiku, 10-50: sonnet, >50: opus). 하드닝/attack_surface 보안 컨텍스트 포함 프롬프트. `--no-llm`에서 graceful skip.
+- LLM 트리아지 스테이지: findings → `llm_triage` → llm_synthesis 순서로 실행. 모델 티어 자동 선택 (`<=10`: haiku, `11-50`: sonnet, `>50` 또는 chain-backed: opus). 하드닝/attack_surface 보안 컨텍스트 포함 프롬프트. `haiku` nonzero exit 시 `sonnet` fallback, parse repair pass, `--no-llm`에서 graceful skip.
+- `adversarial_triage` / `fp_verification`: parse failure를 조용히 무시하지 않고 repair 시도 후 fail-closed `partial`/`unverified`로 반영
+- `attribution`: extraction stage manifest 자체보다 inventory roots 실제 존재 여부를 우선 사용하여 degraded 오탐 완화
+- `graph`: runtime communication graph가 비어도 `fallback_reference_graph`와 blocked reason code를 남겨 empty vs explained-blocked를 구분
 - Terminator 양방향 피드백 루프: `terminator_feedback.py`가 `firmware_handoff.json`에 `feedback_request` 섹션 추가. Terminator 판정(confirmed boost, false_positive suppress)이 `duplicate_gate`에 반영. `AIEDGE_FEEDBACK_DIR` env var.
 - IPC 감지 파이프라인: Unix socket, D-Bus, SHM, named pipe 감지. ELF `.rodata`/`.dynstr` IPC 심볼 추출. `ipc_channel` 그래프 노드 + IPC 엣지 5종 (`ipc_unix_socket`, `ipc_dbus`, `ipc_shm`, `ipc_pipe`, `ipc_exec_chain`). IPC 리스크 스코어링.
 - Source→Sink 경로 추적: `stages/surfaces/source_sink_graph.json` 생성. 네트워크 엔드포인트 → 서비스 컴포넌트 → exec sink 바이너리 경로 매핑.
@@ -76,6 +83,7 @@
 
 ### 신규 스크립트
 - **`scripts/benchmark_firmae.sh`**: SCOUT vs FirmAE 벤치마크 비교 실행.
+- **`scripts/benchmark_firmae.sh` archive contract 변경**: `--cleanup`가 flattened JSON snapshot이 아니라 verifier-friendly run replica archive를 보존한 뒤 원본 run_dir 삭제
 - **`scripts/unpack_firmae_dataset.sh`**: FirmAE 데이터셋 분류 및 언패커.
 
 ### 신규 문서
@@ -107,6 +115,10 @@
 
 ## Known Issues (중요)
 
+- **Legacy Tier 2 archive는 현재 contract의 공식 baseline이 아님**: `benchmark-results/legacy/tier2-llm-v2`는 historical reference용이며, archived bundle verifier 기준으로는 incomplete/misaligned evidence가 남아 있음
+- old Tier 2 bundle을 normalize + static rerun하면 digest verifier는 상당 부분 회복되지만, 일부 `report` verifier 실패는 **이미 archive에 포함되지 않은 extraction evidence refs** 때문에 코드만으로 복구되지 않음
+- fresh full Tier 2 rerun 전까지 analyst-ready aggregate 수치는 single-sample fidelity 검증 외에는 확정 수치로 간주하면 안 됨
+
 - 샌드박스/호스트 정책에 따라 `serve --once`가 포트 바인딩 권한 문제로 실패할 수 있음 (`Operation not permitted`).
 - 다층 벤더 포맷은 재귀 SquashFS로 많이 개선되었으나, 암호화된 포맷이나 특수 커스텀 헤더는 여전히 수동 추출 필요.
   - 현재는 `--rootfs` 우회가 보완 경로이며, 포맷 전용 extractor 체인 확장은 계속 필요.
@@ -117,12 +129,13 @@
 
 ## 다음 우선순위
 
-1) Reachability 컴포넌트-노드 ID 매칭 로직 개선 (CPE 이름 → graph 노드 ID 정규화)
-2) 벤더 포맷 전용 extraction chain 확장 (QNAP/Synology/ASUS 계열 깊은 중첩 포맷)
-3) FirmAE 호환 펌웨어 커버리지 확대 (Tier 1 에뮬레이션 성공률 향상) -- `benchmark_firmae.sh`로 벤치마킹 가능
-4) Ghidra dataflow 결과를 source-sink 그래프와 findings confidence에 통합
-5) ~~퍼징 크래시를 exploit_autopoc PoC seed로 자동 연계~~ -- v2.0 `poc_refinement` 스테이지로 해결
-6) Public benchmark corpus 확장 (현재 seed fixture → 실제 공개 펌웨어 corpus)
-7) 남은 `_assert_under_dir()` 로컬 복사본을 `path_safety.py` import로 통합 (26파일)
-8) Semantic classification 결과를 taint propagation 초기 seed로 활용하는 피드백 루프 강화
-9) Adversarial triage 라운드 수/모델 티어 자동 조정 (finding 수 기반)
+1) 새 benchmark contract로 Tier 2 full fresh rerun 수행 (legacy snapshot과 분리된 공식 analyst-readiness baseline 생성)
+2) report verifier의 remaining dangling `evidence_refs` assembly 경로 정리
+3) Reachability 컴포넌트-노드 ID 매칭 로직 개선 (CPE 이름 → graph 노드 ID 정규화)
+4) 벤더 포맷 전용 extraction chain 확장 (QNAP/Synology/ASUS 계열 깊은 중첩 포맷)
+5) Ghidra dataflow 결과를 source-sink 그래프와 findings confidence에 통합
+6) ~~퍼징 크래시를 exploit_autopoc PoC seed로 자동 연계~~ -- v2.0 `poc_refinement` 스테이지로 해결
+7) Public benchmark corpus 확장 (현재 seed fixture → 실제 공개 펌웨어 corpus)
+8) 남은 `_assert_under_dir()` 로컬 복사본을 `path_safety.py` import로 통합 (26파일)
+9) Semantic classification 결과를 taint propagation 초기 seed로 활용하는 피드백 루프 강화
+10) Adversarial triage 라운드 수/모델 티어 자동 조정 (finding 수 기반)

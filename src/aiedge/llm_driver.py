@@ -5,6 +5,7 @@ llm_synthesis, exploit_autopoc, and llm_codex into a single module.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
@@ -34,6 +36,54 @@ class LLMDriverResult:
     attempts: list[dict[str, object]]
     returncode: int
     usage: dict[str, int] | None = None
+
+
+def write_llm_trace(
+    *,
+    run_dir: Path,
+    stage_name: str,
+    purpose: str,
+    prompt: str,
+    model_tier: ModelTier,
+    result: LLMDriverResult,
+    metadata: dict[str, object] | None = None,
+) -> str:
+    trace_dir = run_dir / "stages" / stage_name / "llm_trace"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    output_hash = hashlib.sha256(result.stdout.encode("utf-8")).hexdigest()
+    stderr_hash = hashlib.sha256(result.stderr.encode("utf-8")).hexdigest()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    safe_purpose = re.sub(r"[^a-zA-Z0-9_.-]+", "-", purpose).strip("-") or "call"
+    trace_path = trace_dir / f"{stamp}-{safe_purpose}.json"
+
+    payload: dict[str, object] = {
+        "schema_version": "llm-trace-v1",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "stage": stage_name,
+        "purpose": purpose,
+        "model_tier": model_tier,
+        "status": result.status,
+        "returncode": result.returncode,
+        "argv": list(result.argv),
+        "attempts": cast(list[object], result.attempts),
+        "prompt": prompt,
+        "prompt_sha256": prompt_hash,
+        "stdout": result.stdout,
+        "stdout_sha256": output_hash,
+        "stderr": result.stderr,
+        "stderr_sha256": stderr_hash,
+        "usage": result.usage,
+    }
+    if metadata:
+        payload["metadata"] = dict(metadata)
+
+    trace_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+    return trace_path.relative_to(run_dir).as_posix()
 
 
 def parse_json_from_llm_output(text: str) -> dict[str, object] | None:

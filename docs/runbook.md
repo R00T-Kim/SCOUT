@@ -28,6 +28,37 @@ If extraction quality is low for your target format (few files, wrong OS guess),
 
 `--rootfs` writes `manifest.rootfs_input_path` and forces extraction stage to ingest that directory.
 
+## 1.1) Benchmark fidelity / analyst-readiness workflow
+
+Use this flow when you are validating benchmark quality, not just pipeline completion:
+
+```bash
+# Fresh benchmark with verifier-friendly archive bundles
+./scripts/benchmark_firmae.sh --parallel 8 --time-budget 1800 --cleanup
+
+# Re-evaluate an existing benchmark-results tree under analyst-readiness rules
+python3 scripts/reevaluate_benchmark_results.py \
+  --results-dir benchmark-results/<run>
+
+# Normalize a legacy archive layout and rerun selected stages for debugging
+python3 scripts/rerun_benchmark_stages.py \
+  --results-dir benchmark-results/<legacy-run> \
+  --out-dir benchmark-results/<rerun-out> \
+  --stages attribution,graph,attack_surface \
+  --no-llm
+```
+
+Interpret the outputs in this order:
+
+1. `analysis rate` — pipeline completed (`success + partial`)
+2. `digest/report verifier pass`
+3. `analyst_readiness = ready | degraded | blocked`
+
+Operational note:
+
+- `benchmark-results/legacy/tier2-llm-v2` is a **legacy snapshot**. Use it for historical comparison and re-evaluation only.
+- Fresh benchmark claims should come from new archived run replicas, not from old flattened bundles.
+
 ### ER-e50 `analysis` profile note (verifier scope)
 
 - ER-e50 `analysis` runs intentionally omit `manifest.track` in `manifest.json`.
@@ -155,6 +186,14 @@ python3 scripts/verify_analyst_digest.py --run-dir <run_dir>
 
 Expected result: digest files exist and verifier returns `[OK]`.
 
+### Analyst-ready interpretation
+
+- `ready`: archived bundle verifiers pass, extraction/inventory are usable, and the run remains evidence-navigable from the archive alone.
+- `degraded`: findings exist, but LLM parsing / graph / bundle fidelity issues increase analyst manual work.
+- `blocked`: verifier failure, extraction failure, inventory insufficiency, or missing evidence prevents trustworthy analyst use.
+
+Do not treat `success` or `partial` alone as an analyst-facing quality verdict.
+
 ## 6) Run all four verified-chain verifiers
 
 ```bash
@@ -266,7 +305,14 @@ The following weaknesses were found during full pipeline audit and patched:
 ### Trust boundary and authoritative checks
 
 - `viewer.html` is non-authoritative convenience UI only.
-- Verifier scripts are authoritative for release/operator gates:
+- Benchmark re-evaluation scripts are triage helpers, not substitutes for verifier truth:
+
+```bash
+python3 scripts/reevaluate_benchmark_results.py --results-dir <benchmark-results>
+python3 scripts/rerun_benchmark_stages.py --results-dir <legacy-results> --out-dir <rerun-out> --stages attribution,graph,attack_surface --no-llm
+```
+
+- Contract verifiers remain authoritative for release/operator gates:
 
 ```bash
 python3 scripts/verify_analyst_digest.py --run-dir <run_dir>

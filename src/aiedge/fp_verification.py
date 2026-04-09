@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .llm_driver import resolve_driver
+from .llm_driver import LLMDriver, ModelTier, resolve_driver, write_llm_trace
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -217,6 +217,44 @@ def _build_fp_prompt(
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
     return parse_json_from_llm_output(stdout)
+
+
+def _repair_fp_response(
+    *,
+    driver: LLMDriver,
+    run_dir: Path,
+    raw_stdout: str,
+    model_tier: ModelTier,
+    trace_refs: list[str],
+) -> dict[str, object] | None:
+    prompt = (
+        "Convert the following false-positive analysis output into a single valid JSON object "
+        "with keys verdict, fp_pattern, confidence_adjustment, and rationale. "
+        "Return JSON only and do not invent evidence.\n\n"
+        f"{raw_stdout}"
+    )
+    result = driver.execute(
+        prompt=prompt,
+        run_dir=run_dir,
+        timeout_s=_LLM_TIMEOUT_S,
+        max_attempts=1,
+        retryable_tokens=_RETRYABLE_TOKENS,
+        model_tier="haiku" if model_tier != "opus" else "sonnet",
+    )
+    trace_refs.append(
+        write_llm_trace(
+            run_dir=run_dir,
+            stage_name="fp_verification",
+            purpose="repair",
+            prompt=prompt,
+            model_tier="haiku" if model_tier != "opus" else "sonnet",
+            result=result,
+            metadata={"repair_for": "fp_verification"},
+        )
+    )
+    if result.status != "ok":
+        return None
+    return _parse_json_response(result.stdout)
 
 
 @dataclass(frozen=True)
@@ -423,6 +461,8 @@ class FPVerificationStage:
         fp_count = 0
         tp_count = 0
         static_fp_count = 0  # pre-filter FPs (no LLM call)
+        unverified_count = 0
+        trace_refs: list[str] = []
 
         if not driver.available():
             limitations.append("LLM driver not available for FP verification")
@@ -551,9 +591,28 @@ class FPVerificationStage:
                         retryable_tokens=_RETRYABLE_TOKENS,
                         model_tier="sonnet",
                     )
+                    trace_refs.append(
+                        write_llm_trace(
+                            run_dir=run_dir,
+                            stage_name=self.name,
+                            purpose="classification",
+                            prompt=prompt,
+                            model_tier="sonnet",
+                            result=result,
+                            metadata={"sink_symbol": sink_sym, "source_api": src_api},
+                        )
+                    )
 
                     if result.status == "ok":
                         parsed = _parse_json_response(result.stdout)
+                        if parsed is None:
+                            parsed = _repair_fp_response(
+                                driver=driver,
+                                run_dir=run_dir,
+                                raw_stdout=result.stdout,
+                                model_tier="sonnet",
+                                trace_refs=trace_refs,
+                            )
                         if parsed is not None:
                             verdict = str(parsed.get("verdict", "TP")).upper()
                             fp_pattern = parsed.get("fp_pattern")
@@ -577,12 +636,19 @@ class FPVerificationStage:
                         else:
                             alert_copy["fp_verdict"] = "unverified"
                             alert_copy["fp_rationale"] = "LLM response parse failure"
+                            unverified_count += 1
                             limitations.append(
                                 "One or more FP verification responses could not be parsed"
                             )
                     else:
                         alert_copy["fp_verdict"] = "unverified"
                         alert_copy["fp_rationale"] = f"LLM call failed: {result.status}"
+                        unverified_count += 1
+
+                if trace_refs:
+                    alert_copy["trace_refs"] = cast(
+                        list[JsonValue], cast(list[object], trace_refs[-2:])
+                    )
 
                 verified.append(cast(dict[str, JsonValue], alert_copy))
 
@@ -593,8 +659,10 @@ class FPVerificationStage:
                 verified.append(cast(dict[str, JsonValue], a_copy))
 
         status: StageStatus = "ok"
-        if not verified:
+        if not verified or unverified_count > max(1, int(len(eligible) * 0.10)):
             status = "partial"
+        if unverified_count > 0:
+            limitations.append("FP verification left one or more alerts unverified")
 
         payload = {
             "schema_version": _SCHEMA_VERSION,
@@ -608,10 +676,12 @@ class FPVerificationStage:
                 "false_positives": fp_count,
                 "true_positives": tp_count,
                 "static_prefilter_fps": static_fp_count,
+                "unverified": unverified_count,
                 "ghidra_functions_loaded": len(func_map),
                 "xref_edges_loaded": sum(len(v) for v in xref_map.values()),
                 "ipc_edges_loaded": len(ipc_edges),
             },
+            "trace_refs": cast(list[JsonValue], cast(list[object], trace_refs)),
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
             ),
@@ -627,6 +697,7 @@ class FPVerificationStage:
             "false_positives": fp_count,
             "true_positives": tp_count,
             "static_prefilter_fps": static_fp_count,
+            "unverified": unverified_count,
         }
         return StageOutcome(
             status=status,

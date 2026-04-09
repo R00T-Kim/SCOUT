@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .llm_driver import resolve_driver
+from .llm_driver import LLMDriver, ModelTier, resolve_driver, write_llm_trace
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -152,6 +152,45 @@ def _build_critic_prompt(
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
     return parse_json_from_llm_output(stdout)
+
+
+def _repair_debate_response(
+    *,
+    driver: LLMDriver,
+    run_dir: Path,
+    stage_name: str,
+    purpose: str,
+    raw_stdout: str,
+    model_tier: ModelTier,
+    trace_refs: list[str],
+) -> dict[str, object] | None:
+    prompt = (
+        "Convert the following security analysis output into a single valid JSON object. "
+        "Return JSON only. Preserve meaning, omit unsupported fields, and do not invent evidence.\n\n"
+        f"{raw_stdout}"
+    )
+    result = driver.execute(
+        prompt=prompt,
+        run_dir=run_dir,
+        timeout_s=_LLM_TIMEOUT_S,
+        max_attempts=1,
+        retryable_tokens=_RETRYABLE_TOKENS,
+        model_tier="haiku" if model_tier != "opus" else "sonnet",
+    )
+    trace_refs.append(
+        write_llm_trace(
+            run_dir=run_dir,
+            stage_name=stage_name,
+            purpose=f"{purpose}-repair",
+            prompt=prompt,
+            model_tier="haiku" if model_tier != "opus" else "sonnet",
+            result=result,
+            metadata={"repair_for": purpose},
+        )
+    )
+    if result.status != "ok":
+        return None
+    return _parse_json_response(result.stdout)
 
 
 def _has_strong_rebuttal(critic_response: dict[str, object]) -> bool:
@@ -389,6 +428,8 @@ class AdversarialTriageStage:
         triaged: list[dict[str, JsonValue]] = []
         debated_count = 0
         downgraded_count = 0
+        parsed_ok_count = 0
+        trace_refs: list[str] = []
 
         if not driver.available():
             limitations.append("LLM driver not available for adversarial triage")
@@ -409,17 +450,33 @@ class AdversarialTriageStage:
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier="sonnet",
                 )
+                trace_refs.append(
+                    write_llm_trace(
+                        run_dir=run_dir,
+                        stage_name=self.name,
+                        purpose="advocate",
+                        prompt=advocate_prompt,
+                        model_tier="sonnet",
+                        result=advocate_result,
+                    )
+                )
 
                 advocate_argument = ""
                 advocate_parsed: dict[str, object] | None = None
                 if advocate_result.status == "ok":
-                    advocate_parsed = _parse_json_response(
-                        advocate_result.stdout
-                    )
-                    if advocate_parsed is not None:
-                        advocate_argument = str(
-                            advocate_parsed.get("argument", "")
+                    advocate_parsed = _parse_json_response(advocate_result.stdout)
+                    if advocate_parsed is None:
+                        advocate_parsed = _repair_debate_response(
+                            driver=driver,
+                            run_dir=run_dir,
+                            stage_name=self.name,
+                            purpose="advocate",
+                            raw_stdout=advocate_result.stdout,
+                            model_tier="sonnet",
+                            trace_refs=trace_refs,
                         )
+                    if advocate_parsed is not None:
+                        advocate_argument = str(advocate_parsed.get("argument", ""))
 
                 # Critic prompt
                 critic_prompt = _build_critic_prompt(
@@ -434,12 +491,30 @@ class AdversarialTriageStage:
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier="sonnet",
                 )
+                trace_refs.append(
+                    write_llm_trace(
+                        run_dir=run_dir,
+                        stage_name=self.name,
+                        purpose="critic",
+                        prompt=critic_prompt,
+                        model_tier="sonnet",
+                        result=critic_result,
+                    )
+                )
 
                 critic_parsed: dict[str, object] | None = None
                 if critic_result.status == "ok":
-                    critic_parsed = _parse_json_response(
-                        critic_result.stdout
-                    )
+                    critic_parsed = _parse_json_response(critic_result.stdout)
+                    if critic_parsed is None:
+                        critic_parsed = _repair_debate_response(
+                            driver=driver,
+                            run_dir=run_dir,
+                            stage_name=self.name,
+                            purpose="critic",
+                            raw_stdout=critic_result.stdout,
+                            model_tier="sonnet",
+                            trace_refs=trace_refs,
+                        )
 
                 # Compare: strong rebuttal -> reduce confidence
                 if critic_parsed is not None and _has_strong_rebuttal(
@@ -465,6 +540,12 @@ class AdversarialTriageStage:
                     if critic_parsed is not None
                     else {"error": "parse_failure"}
                 )
+                finding_copy["trace_refs"] = cast(
+                    list[JsonValue], cast(list[object], trace_refs[-4:])
+                )
+
+                if advocate_parsed is not None and critic_parsed is not None:
+                    parsed_ok_count += 1
 
                 triaged.append(cast(dict[str, JsonValue], finding_copy))
                 debated_count += 1
@@ -476,8 +557,10 @@ class AdversarialTriageStage:
                 triaged.append(cast(dict[str, JsonValue], f_copy))
 
         status: StageStatus = "ok"
-        if not triaged:
+        if not triaged or (debated_count > 0 and parsed_ok_count < debated_count):
             status = "partial"
+        if debated_count > 0 and parsed_ok_count < debated_count:
+            limitations.append("One or more adversarial triage responses could not be parsed")
 
         payload = {
             "schema_version": _SCHEMA_VERSION,
@@ -491,7 +574,10 @@ class AdversarialTriageStage:
                 "debated": debated_count,
                 "downgraded": downgraded_count,
                 "maintained": debated_count - downgraded_count,
+                "parsed_ok": parsed_ok_count,
+                "parse_failures": max(0, debated_count - parsed_ok_count),
             },
+            "trace_refs": cast(list[JsonValue], cast(list[object], trace_refs)),
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
             ),
@@ -506,6 +592,7 @@ class AdversarialTriageStage:
             "triaged": len(triaged),
             "debated": debated_count,
             "downgraded": downgraded_count,
+            "parsed_ok": parsed_ok_count,
         }
         return StageOutcome(
             status=status,
