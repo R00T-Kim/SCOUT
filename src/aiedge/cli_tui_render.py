@@ -81,7 +81,7 @@ def _build_tui_snapshot_lines(
     section_rule = horizontal * 96
 
     lines: list[str] = []
-    lines.append(_ansi(f"AIEdge TUI :: {run_dir}", _ANSI_BOLD, _ANSI_CYAN, enabled=use_ansi))
+    lines.append(_ansi(f"SCOUT :: {run_dir}", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
     lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(
         _ansi("Status", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
@@ -645,7 +645,7 @@ def _build_tui_color_theme(*, curses_mod: object) -> dict[str, int]:
 
     # pair id -> foreground / background(default)
     pair_defs: list[tuple[int, int]] = [
-        (1, getattr(curses, "COLOR_CYAN")),  # header
+        (1, getattr(curses, "COLOR_MAGENTA")),  # header
         (2, getattr(curses, "COLOR_GREEN")),  # success
         (3, getattr(curses, "COLOR_YELLOW")),  # warning
         (4, getattr(curses, "COLOR_RED")),  # error/high
@@ -764,7 +764,7 @@ def _draw_interactive_tui_frame(
         win,
         y=0,
         x=0,
-        text=f"AIEdge Interactive TUI :: {run_dir.name}",
+        text=f"SCOUT Interactive TUI :: {run_dir.name}",
         attr=_attr("header"),
     )
     _safe_curses_addstr(

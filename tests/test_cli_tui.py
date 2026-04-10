@@ -100,7 +100,7 @@ def test_tui_cli_renders_candidate_dashboard(
     captured = capsys.readouterr()
     assert rc == 0
     out = captured.out
-    assert "AIEdge TUI ::" in out
+    assert "SCOUT ::" in out
     assert "Exploit Candidate Map" in out
     assert "candidate_count=1" in out
     assert "Top 1 grouped candidate(s) [compact]" in out

@@ -60,6 +60,11 @@ _ANSI_RED = "\x1b[31m"
 _ANSI_MAGENTA = "\x1b[35m"
 _ANSI_BLUE = "\x1b[34m"
 
+# Extended colors (256-color mode) for richer branding
+_ANSI_PURPLE_256 = "\x1b[38;5;141m"       # Soft violet (#af87ff) - brand accent
+_ANSI_DEEP_PURPLE_256 = "\x1b[38;5;98m"   # Deep purple (#875fd7) - secondary
+_ANSI_LIME_256 = "\x1b[38;5;149m"         # Lime green (#afd75f) - highlight
+
 
 def _tui_ansi_supported() -> bool:
     no_color = os.environ.get("NO_COLOR")
