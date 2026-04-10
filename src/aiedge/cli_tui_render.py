@@ -9,7 +9,6 @@ from typing import cast
 from .cli_common import (
     _ANSI_BLUE,
     _ANSI_BOLD,
-    _ANSI_CYAN,
     _ANSI_DIM,
     _ANSI_GREEN,
     _ANSI_MAGENTA,
