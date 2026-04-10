@@ -165,10 +165,13 @@ class CodexCLIDriver:
                 returncode=-1,
             )
 
+        codex_model = os.environ.get("AIEDGE_CODEX_MODEL", "gpt-5.3-codex")
         base_argv = [
             "codex",
             "exec",
             "--ephemeral",
+            "-m",
+            codex_model,
             "-s",
             "read-only",
             "-C",
