@@ -382,12 +382,12 @@ class AdversarialTriageStage:
         eligible = [
             f for f in findings
             if isinstance(f.get("confidence"), (int, float))
-            and float(f.get("original_confidence", f["confidence"])) >= _AT_THRESHOLD
+            and float(str(f.get("original_confidence", f["confidence"]))) >= _AT_THRESHOLD
         ]
         below_threshold = [
             f for f in findings
             if not isinstance(f.get("confidence"), (int, float))
-            or float(f.get("original_confidence", f["confidence"])) < _AT_THRESHOLD
+            or float(str(f.get("original_confidence", f["confidence"]))) < _AT_THRESHOLD
         ]
 
         # --- Load decompiled functions for code-backed debate ---
@@ -529,7 +529,7 @@ class AdversarialTriageStage:
                 if critic_parsed is not None and _has_strong_rebuttal(
                     critic_parsed
                 ):
-                    orig_conf = float(finding.get("confidence", 0.5))
+                    orig_conf = float(str(finding.get("confidence", 0.5)))
                     new_conf = _clamp01(orig_conf - _CONFIDENCE_REDUCTION)
                     finding_copy["confidence"] = new_conf
                     finding_copy["original_confidence"] = orig_conf
