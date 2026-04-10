@@ -8,6 +8,9 @@ Skips under ``--no-llm``.
 """
 
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -436,11 +439,16 @@ class AdversarialTriageStage:
             for f in findings:
                 triaged.append(cast(dict[str, JsonValue], dict(f)))
         else:
-            for finding in eligible:
+            _ADV_PARALLEL = int(os.environ.get("AIEDGE_ADV_PARALLEL", "8"))
+            _trace_lock = threading.Lock()
+
+            def _debate_one(finding: dict[str, object]) -> dict[str, object]:
+                """Run advocate/critic debate for a single finding (thread-safe)."""
                 finding_copy = dict(finding)
                 dec_ctx = _find_decompiled_for(finding)
+                local_traces: list[str] = []
 
-                # Advocate prompt
+                # Advocate
                 advocate_prompt = _build_advocate_prompt(finding, dec_ctx)
                 advocate_result = driver.execute(
                     prompt=advocate_prompt,
@@ -450,7 +458,7 @@ class AdversarialTriageStage:
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier="sonnet",
                 )
-                trace_refs.append(
+                local_traces.append(
                     write_llm_trace(
                         run_dir=run_dir,
                         stage_name=self.name,
@@ -473,12 +481,12 @@ class AdversarialTriageStage:
                             purpose="advocate",
                             raw_stdout=advocate_result.stdout,
                             model_tier="sonnet",
-                            trace_refs=trace_refs,
+                            trace_refs=local_traces,
                         )
                     if advocate_parsed is not None:
                         advocate_argument = str(advocate_parsed.get("argument", ""))
 
-                # Critic prompt
+                # Critic
                 critic_prompt = _build_critic_prompt(
                     finding, advocate_argument or "(advocate failed to respond)",
                     dec_ctx,
@@ -491,7 +499,7 @@ class AdversarialTriageStage:
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier="sonnet",
                 )
-                trace_refs.append(
+                local_traces.append(
                     write_llm_trace(
                         run_dir=run_dir,
                         stage_name=self.name,
@@ -513,10 +521,11 @@ class AdversarialTriageStage:
                             purpose="critic",
                             raw_stdout=critic_result.stdout,
                             model_tier="sonnet",
-                            trace_refs=trace_refs,
+                            trace_refs=local_traces,
                         )
 
                 # Compare: strong rebuttal -> reduce confidence
+                _local_downgraded = False
                 if critic_parsed is not None and _has_strong_rebuttal(
                     critic_parsed
                 ):
@@ -525,11 +534,10 @@ class AdversarialTriageStage:
                     finding_copy["confidence"] = new_conf
                     finding_copy["original_confidence"] = orig_conf
                     finding_copy["triage_outcome"] = "downgraded"
-                    downgraded_count += 1
+                    _local_downgraded = True
                 else:
                     finding_copy["triage_outcome"] = "maintained"
 
-                # Record debate
                 finding_copy["advocate_argument"] = (
                     cast(dict[str, JsonValue], advocate_parsed)
                     if advocate_parsed is not None
@@ -541,14 +549,28 @@ class AdversarialTriageStage:
                     else {"error": "parse_failure"}
                 )
                 finding_copy["trace_refs"] = cast(
-                    list[JsonValue], cast(list[object], trace_refs[-4:])
+                    list[JsonValue], cast(list[object], local_traces[-4:])
                 )
+                finding_copy["_parsed_ok"] = (
+                    advocate_parsed is not None and critic_parsed is not None
+                )
+                finding_copy["_downgraded"] = _local_downgraded
 
-                if advocate_parsed is not None and critic_parsed is not None:
-                    parsed_ok_count += 1
+                with _trace_lock:
+                    trace_refs.extend(local_traces)
 
-                triaged.append(cast(dict[str, JsonValue], finding_copy))
-                debated_count += 1
+                return finding_copy
+
+            with ThreadPoolExecutor(max_workers=_ADV_PARALLEL) as pool:
+                futures = {pool.submit(_debate_one, f): f for f in eligible}
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result.pop("_parsed_ok", False):
+                        parsed_ok_count += 1
+                    if result.pop("_downgraded", False):
+                        downgraded_count += 1
+                    triaged.append(cast(dict[str, JsonValue], result))
+                    debated_count += 1
 
             # Add below-threshold findings unchanged
             for f in below_threshold:
