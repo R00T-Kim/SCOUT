@@ -11,7 +11,7 @@
 <br />
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
 [![Version](https://img.shields.io/badge/Version-2.2.0-red?style=for-the-badge)]()
@@ -468,7 +468,7 @@ SCOUT은 계약된 보안 감사, 취약점 연구 (책임 있는 공개), CTF/�
 
 ## 라이선스
 
-MIT
+Apache 2.0
 
 ---
 
