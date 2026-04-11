@@ -233,6 +233,8 @@ All configuration is environment-variable-driven (no config files). Key variable
 | `AIEDGE_PRIV_RUNNER` | Privileged command prefix for dynamic validation | — |
 | `AIEDGE_TUI_ASCII` | Force ASCII-only TUI rendering | — |
 | `AIEDGE_RUNS_DIRS` | Custom run output directories | — |
+| `AIEDGE_CODEX_MODEL` | Codex CLI model override | `gpt-5.3-codex` |
+| `AIEDGE_ADV_PARALLEL` | Adversarial triage finding-level parallelism | `8` |
 
 Additional prefixes: `AIEDGE_PORTSCAN_*` (port scanning), `AIEDGE_LLM_CHAIN_*` (LLM synthesis), `AIEDGE_AUTOPOC_LLM_*` (auto-PoC), `AIEDGE_ATTACK_SURFACE_MAX_*` (scan limits), `AIEDGE_DUPLICATE_*` (dedup), `AIEDGE_SBOM_MAX_COMPONENTS` (default 500), `AIEDGE_CVE_SCAN_MAX_COMPONENTS` (default 50), `AIEDGE_CVE_SCAN_TIMEOUT_S` (default 30).
 
