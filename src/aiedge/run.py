@@ -962,6 +962,33 @@ def _write_firmware_handoff(
         },
         "bundles": cast(list[JsonValue], cast(list[object], bundles)),
     }
+
+    # --- Adversarial triage schema reference for downstream consumers ---
+    _adv_stage_json = info.run_dir / "stages" / "adversarial_triage" / "triaged_findings.json"
+    if _adv_stage_json.is_file():
+        try:
+            _adv_data = json.loads(_adv_stage_json.read_text(encoding="utf-8"))
+            _adv_summary = _adv_data.get("summary", {})
+            handoff["adversarial_triage"] = {
+                "artifact": "stages/adversarial_triage/triaged_findings.json",
+                "schema": {
+                    "version": _adv_data.get("schema_version", "adversarial-triage-v1"),
+                    "findings_key": "triaged_findings",
+                    "verdict_field": "triage_outcome",
+                    "verdict_values": ["maintained", "downgraded", "below_threshold"],
+                    "key_fields": [
+                        "source_binary", "sink_symbol", "source_api", "confidence",
+                        "original_confidence", "fp_verdict", "fp_pattern", "fp_rationale",
+                        "no_xref_path", "source_address", "web_server", "method",
+                        "path_description", "advocate_argument", "critic_rebuttal",
+                        "triage_outcome", "trace_refs",
+                    ],
+                },
+                "summary": cast(dict[str, JsonValue], _adv_summary) if isinstance(_adv_summary, dict) else {},
+            }
+        except Exception:
+            pass  # fail-open
+
     if profile == "exploit" and exploit_gate is not None:
         handoff["exploit_gate"] = exploit_gate
 
