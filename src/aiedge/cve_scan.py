@@ -962,6 +962,13 @@ class CveScanStage:
                 multiplier = _REACHABILITY_MULTIPLIERS.get(reach_status, _REACHABILITY_MULTIPLIERS["unknown"])
                 confidence = min(_STATIC_CONFIDENCE_CAP, confidence * multiplier)
 
+            # Backport detection: if component has a distro patch revision,
+            # the vulnerability may already be patched despite old version number.
+            _patch_rev = str(comp.get("patch_revision", ""))
+            _det_method = str(comp.get("detection_method", ""))
+            if _patch_rev and _det_method == "opkg":
+                confidence = max(0.0, confidence - 0.30)
+
             # Stable SBOM reference key
             sbom_ref_part = f"sbom:comp-{comp_name_f}"
             if comp_ver_f:

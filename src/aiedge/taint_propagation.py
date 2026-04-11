@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .confidence_caps import STATIC_CODE_VERIFIED_CAP, SYMBOL_COOCCURRENCE_CAP
+from .confidence_caps import PCODE_VERIFIED_CAP, STATIC_CODE_VERIFIED_CAP, SYMBOL_COOCCURRENCE_CAP
 from .llm_driver import resolve_driver
 from .path_safety import assert_under_dir
 from .schema import JsonValue
@@ -359,9 +359,94 @@ class TaintPropagationStage:
                     if caller and callee:
                         xref_map.setdefault(caller, []).append(callee)
 
+        # === P-CODE TAINT (Ghidra P-code SSA verified paths — highest confidence) ===
+        pcode_verified_binaries: set[str] = set()
+        trace_count = 0
+        for pcode_file in ghidra_dir.rglob("pcode_taint.json"):
+            pcode_data = _load_json_file(pcode_file)
+            if not isinstance(pcode_data, dict):
+                continue
+            pcode_traces = pcode_data.get("traces", [])
+            if not isinstance(pcode_traces, list):
+                continue
+            for pt in cast(list[object], pcode_traces):
+                if not isinstance(pt, dict):
+                    continue
+                pt_d = cast(dict[str, object], pt)
+                src_api = str(pt_d.get("source_api", ""))
+                sink_sym = str(pt_d.get("sink", ""))
+                func_name = str(pt_d.get("function", ""))
+                func_addr = str(pt_d.get("function_address", ""))
+                src_addr = str(pt_d.get("source_address", "0x0"))
+                sink_addr = str(pt_d.get("sink_address", "0x0"))
+                sanitized = bool(pt_d.get("sanitized", False))
+                depth = int(pt_d.get("depth", 0)) if pt_d.get("depth") is not None else 0
+
+                # Resolve binary from parent dir name (hash-keyed cache)
+                pcode_binary = pcode_file.parent.name
+
+                trace_method = str(pt_d.get("method", "pcode_dataflow"))
+                conf = float(str(pt_d.get("confidence", 0.75)))
+                if sanitized:
+                    conf = min(conf, 0.20)
+                # Apply method-specific confidence cap
+                if trace_method == "pcode_dataflow":
+                    conf = min(conf, PCODE_VERIFIED_CAP)  # 0.75
+                elif trace_method in ("pcode_colocated", "decompiled_colocated"):
+                    conf = min(conf, 0.65)  # between code-verified(0.55) and pcode(0.75)
+                else:
+                    conf = min(conf, PCODE_VERIFIED_CAP)
+
+                method_label = {
+                    "pcode_dataflow": "P-code verified dataflow",
+                    "pcode_colocated": "P-code colocated (same function, no direct flow)",
+                    "decompiled_colocated": "Decompiled function colocated",
+                }.get(trace_method, "P-code verified")
+                path_desc = (
+                    f"{method_label}: {src_api}() and "
+                    f"{sink_sym}() in {func_name} @ {func_addr}. "
+                    f"Depth: {depth}."
+                    + (" Sanitizer detected — taint neutralized." if sanitized else "")
+                )
+
+                taint_entry: dict[str, JsonValue] = {
+                    "source_api": src_api,
+                    "source_binary": pcode_binary,
+                    "sink_symbol": sink_sym,
+                    "taint_reaches_sink": not sanitized,
+                    "confidence": _clamp01(conf),
+                    "path_description": path_desc,
+                    "method": trace_method if trace_method != "pcode_dataflow" else "pcode_verified",
+                    "source_type": trace_method,
+                    "web_server": False,
+                    "call_chain": cast(list[JsonValue], [
+                        {"step": "source", "function": f"{func_name}:{src_api}", "address": src_addr},
+                        {"step": "sink", "function": f"{func_name}:{sink_sym}", "address": sink_addr},
+                    ]),
+                }
+                taint_results.append(taint_entry)
+                if not sanitized:
+                    alerts.append({
+                        "source_api": src_api,
+                        "source_binary": pcode_binary,
+                        "source_address": src_addr,
+                        "sink_symbol": sink_sym,
+                        "confidence": _clamp01(conf),
+                        "path_description": path_desc,
+                        "method": trace_method if trace_method != "pcode_dataflow" else "pcode_verified",
+                        "source_type": trace_method,
+                        "web_server": False,
+                    })
+                pcode_verified_binaries.add(pcode_binary)
+                trace_count += 1
+                if trace_count >= _MAX_PATHS:
+                    break
+            if trace_count >= _MAX_PATHS:
+                break
+
         # === STATIC TAINT INFERENCE (always runs, no LLM needed) ===
         # Infer taint paths from binaries that have both input and sink symbols
-        trace_count = 0
+        # Skip binaries already covered by P-code verified traces
 
         # From enhanced_source sources (which now contain matched_sink_apis)
         # Prioritize web server binaries so they don't get crowded out by _MAX_PATHS
@@ -400,6 +485,13 @@ class TaintPropagationStage:
                 seen_static.add(dedup_key)
                 if trace_count >= _MAX_PATHS:
                     break
+
+                # Skip if P-code already verified this binary with higher confidence
+                src_basename_for_pcode = (
+                    src_binary.rsplit("/", 1)[-1] if "/" in src_binary else src_binary
+                )
+                if src_basename_for_pcode in pcode_verified_binaries:
+                    continue
 
                 hardening_any = source.get("hardening")
                 hardening_str = ""

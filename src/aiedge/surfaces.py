@@ -232,6 +232,42 @@ def _build_source_sink_graph(
                     }
                 )
 
+    # --- Augment sources from Ghidra string_refs: CGI handler functions ---
+    ghidra_dir = run_dir / "stages" / "ghidra_analysis"
+    for sr_file in ghidra_dir.rglob("string_refs.json"):
+        try:
+            sr_data = json.loads(sr_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(sr_data, dict):
+            continue
+        strings_any = sr_data.get("strings")
+        if not isinstance(strings_any, list):
+            continue
+        for s_any in cast(list[object], strings_any):
+            if not isinstance(s_any, dict):
+                continue
+            s = cast(dict[str, object], s_any)
+            val = str(s.get("value", ""))
+            # Detect CGI path patterns (e.g., "/cgi-bin/xxx", "apply.cgi", "appGet.cgi")
+            if ".cgi" in val.lower() and "/" in val:
+                sources.append({
+                    "type": "cgi_path",
+                    "value": val,
+                    "confidence": 0.65,
+                })
+            # Detect embedded CGI handler function names (do_*_cgi, apply_cgi)
+            refs_any = s.get("xrefs") or s.get("referencing_functions")
+            if isinstance(refs_any, list):
+                for ref in cast(list[object], refs_any):
+                    ref_name = str(ref) if isinstance(ref, str) else str(ref)
+                    if ref_name.startswith("do_") and "cgi" in ref_name.lower():
+                        sources.append({
+                            "type": "cgi_path",
+                            "value": f"/{ref_name}",
+                            "confidence": 0.60,
+                        })
+
     if not sources:
         limitations.append(
             "No network-facing source endpoints found; source→sink tracing skipped"

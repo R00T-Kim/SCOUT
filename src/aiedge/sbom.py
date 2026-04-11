@@ -207,24 +207,28 @@ class _Component:
     confidence: float
     source_file: str       # run-dir-relative path or "" if unknown
     evidence_ref: str      # sha256: of source evidence or ""
+    patch_revision: str = ""  # distro patch revision (e.g., "1" from "1.33.2-1")
 
     def to_cyclonedx(self) -> dict[str, JsonValue]:
         ref = _bom_ref(self.name, self.version)
+        props: list[dict[str, str]] = [
+            {"name": "scout:confidence",       "value": f"{self.confidence:.2f}"},
+            {"name": "scout:detection_method", "value": self.detection_method},
+        ]
+        if self.patch_revision:
+            props.append({"name": "scout:patch_revision", "value": self.patch_revision})
         obj: dict[str, JsonValue] = {
             "bom-ref": ref,
             "cpe": _cpe(self.name, self.version),
             "name": self.name,
-            "properties": [
-                {"name": "scout:confidence",       "value": f"{self.confidence:.2f}"},
-                {"name": "scout:detection_method", "value": self.detection_method},
-            ],
+            "properties": props,
             "type": self.comp_type,
             "version": self.version,
         }
         return obj
 
     def to_cpe_entry(self) -> dict[str, JsonValue]:
-        return {
+        entry: dict[str, JsonValue] = {
             "confidence": self.confidence,
             "cpe": _cpe(self.name, self.version),
             "detection_method": self.detection_method,
@@ -233,6 +237,9 @@ class _Component:
             "source_file": self.source_file,
             "version": self.version,
         }
+        if self.patch_revision:
+            entry["patch_revision"] = self.patch_revision
+        return entry
 
 
 # ---------------------------------------------------------------------------
@@ -299,9 +306,16 @@ def _parse_opkg_status(
         if not _is_pkg_installed(status_line):
             continue
         name = name_m.group(1).strip()
-        version = ver_m.group(1).strip()
-        if not name or not version:
+        raw_version = ver_m.group(1).strip()
+        if not name or not raw_version:
             continue
+        # Extract distro patch revision: "1.33.2-1" → base "1.33.2", rev "1"
+        patch_rev = ""
+        version = raw_version
+        rev_m = re.match(r"^(.+)-(\d+(?:\.\d+)*)$", raw_version)
+        if rev_m:
+            version = rev_m.group(1)
+            patch_rev = rev_m.group(2)
         comp = _Component(
             comp_type="library",
             name=name,
@@ -310,6 +324,7 @@ def _parse_opkg_status(
             confidence=0.90,
             source_file=source_rel,
             evidence_ref=f"sha256:{sha256_text(stanza)}",
+            patch_revision=patch_rev,
         )
         if registry.add(comp):
             added += 1

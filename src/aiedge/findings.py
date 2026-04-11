@@ -1764,6 +1764,41 @@ def _iter_text_rule_hits(
             0.6,
         ),
     ]
+    # --- New rule families: SQL injection, format string, path traversal, SSRF ---
+    rule_specs.extend(
+        [
+            (
+                "format_string_risk",
+                "c_format_string_vuln",
+                "other",
+                re.compile(
+                    r"\b(?:printf|fprintf|sprintf|syslog|snprintf)\s*\([^,)]*\b(?:argv|buf|input|param|arg)",
+                    re.IGNORECASE,
+                ),
+                0.50,
+            ),
+            (
+                "ssrf_risk",
+                "python_ssrf_sink",
+                "python",
+                re.compile(
+                    r"(?:requests\.get|urllib\.request\.urlopen|httplib|http\.client)\s*\([^\n]*(?:request\.|input|param|url)",
+                    re.IGNORECASE,
+                ),
+                0.50,
+            ),
+            (
+                "ssrf_risk",
+                "shell_ssrf_sink",
+                "shell",
+                re.compile(
+                    r"\b(?:curl|wget)\s+[^\n]*\$",
+                    re.IGNORECASE,
+                ),
+                0.48,
+            ),
+        ]
+    )
     if include_php:
         rule_specs.extend(
             [
@@ -1792,6 +1827,36 @@ def _iter_text_rule_hits(
                     "php",
                     re.compile(r"\$_FILES|move_uploaded_file\s*\(", re.IGNORECASE),
                     0.5,
+                ),
+                (
+                    "sql_injection_risk",
+                    "php_sql_concat",
+                    "php",
+                    re.compile(
+                        r"\$[^\n]*(?:mysql_query|mysqli_query|PDO::query|sqlite_query)\s*\([^\n]*\$",
+                        re.IGNORECASE,
+                    ),
+                    0.55,
+                ),
+                (
+                    "path_traversal_risk",
+                    "php_path_traversal",
+                    "php",
+                    re.compile(
+                        r"(?:file_get_contents|include|require|fopen|readfile)\s*\([^\n]*\$_(?:GET|POST|REQUEST|COOKIE)",
+                        re.IGNORECASE,
+                    ),
+                    0.55,
+                ),
+                (
+                    "ssrf_risk",
+                    "php_ssrf_sink",
+                    "php",
+                    re.compile(
+                        r"(?:file_get_contents|curl_exec|fopen)\s*\([^\n]*\$_(?:GET|POST|REQUEST)",
+                        re.IGNORECASE,
+                    ),
+                    0.52,
                 ),
             ]
         )
@@ -2024,6 +2089,10 @@ _RULE_FAMILY_TO_V1 = {
     "csrf_bypass_patterns": "csrf_bypass",
     "upload_exec_chains": "upload_exec_chain",
     "command_execution_injection_risk": "cmd_exec_injection_risk",
+    "sql_injection_risk": "sql_injection",
+    "format_string_risk": "format_string",
+    "path_traversal_risk": "path_traversal",
+    "ssrf_risk": "ssrf",
 }
 
 

@@ -36,6 +36,9 @@ INPUT_APIS: frozenset[str] = frozenset({
     "acosNvramConfig_get",
     "json_object_get_string",
     "cJSON_GetObjectItem",
+    "cJSON_Parse",
+    "json_tokener_parse",
+    "xmlParseMemory",
     "getParameter",
     "wp_getVar",
 })

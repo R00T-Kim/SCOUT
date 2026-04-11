@@ -204,6 +204,7 @@ def analyze_binary(
         ("decompile_all.py", False),
         ("xref_graph.py", False),
         ("dataflow_trace.py", False),
+        ("pcode_taint.py", False),  # P-code SSA forward taint analysis
         ("string_refs.py", True),   # -noanalysis for string extraction only
     ]
 

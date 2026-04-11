@@ -186,12 +186,14 @@ def _run_pyghidra_decompile(
 
     decompile_out = cache_dir / "decompile_all.json"
     xref_out = cache_dir / "xref_graph.json"
+    pcode_out = cache_dir / "pcode_taint.json"
 
     # We run pyghidra in a subprocess to isolate JVM state and enforce timeout
     script = _PYGHIDRA_SCRIPT.format(
         binary_path=str(binary_path),
         decompile_out=str(decompile_out),
         xref_out=str(xref_out),
+        pcode_out=str(pcode_out),
         max_functions=_MAX_FUNCTIONS_PER_BINARY,
     )
 
@@ -224,7 +226,7 @@ def _run_pyghidra_decompile(
     duration = time.monotonic() - t0
 
     result_files: dict[str, str | None] = {}
-    for name, path in [("decompile_all.json", decompile_out), ("xref_graph.json", xref_out)]:
+    for name, path in [("decompile_all.json", decompile_out), ("xref_graph.json", xref_out), ("pcode_taint.json", pcode_out)]:
         if path.is_file():
             try:
                 result_files[name] = str(path.relative_to(run_dir))
@@ -259,7 +261,112 @@ import json, sys, os
 binary_path = r"{binary_path}"
 decompile_out = r"{decompile_out}"
 xref_out = r"{xref_out}"
+pcode_out = r"{pcode_out}"
 max_functions = {max_functions}
+
+SOURCE_APIS = frozenset([
+    "recv", "recvfrom", "recvmsg", "read", "fread", "fgets", "gets",
+    "getenv", "nvram_get", "nvram_safe_get", "acosNvramConfig_get",
+    "websGetVar", "httpGetEnv", "wp_getVar",
+    "scanf", "sscanf", "fscanf",
+    "cJSON_GetObjectItem", "json_object_get_string",
+    "cJSON_Parse", "json_tokener_parse",
+])
+SINK_APIS = frozenset([
+    "system", "popen", "execve", "execv", "execl", "execlp", "execle",
+    "strcpy", "strcat", "sprintf", "vsprintf", "gets", "memcpy",
+    "doSystemCmd", "twsystem", "doSystem",
+])
+SANITIZER_APIS = frozenset([
+    "atoi", "atol", "atoll", "strtol", "strtoul", "strtoll", "strtoull",
+    "inet_aton", "inet_addr", "inet_pton",
+])
+HIGH_RISK_SINKS = frozenset([
+    "system", "popen", "execve", "execv", "execl", "execlp", "execle",
+    "doSystemCmd", "twsystem", "doSystem",
+])
+
+def resolve_call_target(call_op, high_func):
+    if call_op.getNumInputs() < 1:
+        return ""
+    target_vn = call_op.getInput(0)
+    if target_vn is None:
+        return ""
+    addr = target_vn.getAddress()
+    if addr is None:
+        return ""
+    prog = high_func.getFunction().getProgram()
+    f = prog.getFunctionManager().getFunctionAt(addr)
+    if f is not None:
+        return f.getName()
+    s = prog.getSymbolTable().getPrimarySymbol(addr)
+    if s is not None:
+        return s.getName()
+    return ""
+
+def trace_pcode_forward(high_func, source_call_addr, max_depth=8):
+    traces = []
+    if high_func is None:
+        return traces
+    pcode_iter = high_func.getPcodeOps()
+    if pcode_iter is None:
+        return traces
+    all_ops = []
+    while pcode_iter.hasNext():
+        all_ops.append(pcode_iter.next())
+    # Find CALL ops near source address
+    source_outputs = []
+    for op in all_ops:
+        if op.getOpcode() not in (4, 5):
+            continue
+        diff = abs(op.getSeqnum().getTarget().getOffset() - source_call_addr.getOffset())
+        if diff > 16:
+            continue
+        out = op.getOutput()
+        if out is not None:
+            source_outputs.append(out)
+    if not source_outputs:
+        return traces
+    visited = set()
+    queue = list(source_outputs)
+    sanitized = False
+    reached = []
+    depth = 0
+    while queue and depth < max_depth:
+        nxt = []
+        for vn in queue:
+            vid = vn.getUniqueId()
+            if vid in visited:
+                continue
+            visited.add(vid)
+            desc = vn.getDescendants()
+            if desc is None:
+                continue
+            while desc.hasNext():
+                use_op = desc.next()
+                if use_op.getOpcode() in (4, 5):
+                    callee = resolve_call_target(use_op, high_func)
+                    if callee in SINK_APIS:
+                        reached.append({{"sink": callee, "address": str(use_op.getSeqnum().getTarget()), "depth": depth}})
+                    elif callee in SANITIZER_APIS:
+                        sanitized = True
+                out = use_op.getOutput()
+                if out is not None:
+                    nxt.append(out)
+        queue = nxt
+        depth += 1
+    for r in reached:
+        conf = 0.75
+        if sanitized:
+            conf = 0.20
+        elif r["sink"] in HIGH_RISK_SINKS:
+            conf = 0.80
+        traces.append({{
+            "sink": r["sink"], "sink_address": r["address"], "depth": r["depth"],
+            "sanitized": sanitized, "confidence": max(0.10, min(0.90, conf)),
+            "source_address": str(source_call_addr),
+        }})
+    return traces
 
 try:
     import pyghidra
@@ -268,11 +375,16 @@ try:
 
     functions_data = []
     xref_data = []
+    pcode_traces = []
+    pcode_errors = []
 
     with pyghidra.open_program(binary_path) as flat:
         prog = flat.getCurrentProgram()
         decomp = DecompInterface()
         decomp.openProgram(prog)
+        sym_table = prog.getSymbolTable()
+        ref_mgr = prog.getReferenceManager()
+        fm = prog.getFunctionManager()
 
         func = flat.getFirstFunction()
         count = 0
@@ -312,12 +424,245 @@ try:
             func = flat.getFunctionAfter(func)
             count += 1
 
+        # --- P-code taint analysis ---
+        # Strategy 1: symbol table xrefs (works for non-stripped binaries)
+        source_sites = {{}}
+        sink_funcs = set()
+        for api in SOURCE_APIS:
+            for sym in sym_table.getGlobalSymbols(api):
+                for ref in ref_mgr.getReferencesTo(sym.getAddress()):
+                    if not ref.getReferenceType().isCall():
+                        continue
+                    caller = fm.getFunctionContaining(ref.getFromAddress())
+                    if caller:
+                        e = caller.getEntryPoint()
+                        source_sites.setdefault(e, []).append((ref.getFromAddress(), api))
+
+        for api in SINK_APIS:
+            for sym in sym_table.getGlobalSymbols(api):
+                for ref in ref_mgr.getReferencesTo(sym.getAddress()):
+                    if ref.getReferenceType().isCall():
+                        caller = fm.getFunctionContaining(ref.getFromAddress())
+                        if caller:
+                            sink_funcs.add(caller.getEntryPoint())
+
+        candidates = set(source_sites.keys()) & sink_funcs
+
+        # Strategy 2: fallback — scan decompiled body text for source/sink calls
+        # This handles stripped binaries where getGlobalSymbols returns nothing
+        if not candidates and functions_data:
+            import re as _re
+            _src_pat = _re.compile(r'\b(' + '|'.join(sorted(SOURCE_APIS)) + r')\s*\(')
+            _sink_pat = _re.compile(r'\b(' + '|'.join(sorted(SINK_APIS)) + r')\s*\(')
+            _body_source_funcs = {{}}  # func_entry -> [(entry_addr, api_name)]
+            _body_sink_funcs = set()
+            _func_lookup = {{}}  # name -> Function
+            f2 = flat.getFirstFunction()
+            while f2:
+                _func_lookup[f2.getName()] = f2
+                f2 = flat.getFunctionAfter(f2)
+
+            for fd in functions_data:
+                fname = fd.get("name", "")
+                body = fd.get("body", "")
+                if not body or not fname:
+                    continue
+                f_obj = _func_lookup.get(fname)
+                if f_obj is None:
+                    continue
+                entry = f_obj.getEntryPoint()
+                src_matches = _src_pat.findall(body)
+                sink_matches = _sink_pat.findall(body)
+                if src_matches:
+                    for api in set(src_matches):
+                        _body_source_funcs.setdefault(entry, []).append((entry, api))
+                if sink_matches:
+                    _body_sink_funcs.add(entry)
+
+            candidates = set(_body_source_funcs.keys()) & _body_sink_funcs
+            if candidates:
+                source_sites = _body_source_funcs
+        analyzed_pcode = 0
+        for func_entry in sorted(candidates, key=lambda a: a.getOffset()):
+            if analyzed_pcode >= 100:
+                break
+            f = fm.getFunctionAt(func_entry)
+            if f is None:
+                continue
+            try:
+                res = decomp.decompileFunction(f, 10, None)
+                if res is None or not res.decompileCompleted():
+                    continue
+                hf = res.getHighFunction()
+                if hf is None:
+                    continue
+
+                # Collect source APIs expected in this function
+                expected_sources = set()
+                for _, api in source_sites.get(func_entry, []):
+                    expected_sources.add(api)
+
+                # Scan ALL CALL ops in P-code to find source API calls directly
+                pcode_iter2 = hf.getPcodeOps()
+                if pcode_iter2 is not None:
+                    source_call_ops = []
+                    while pcode_iter2.hasNext():
+                        op = pcode_iter2.next()
+                        if op.getOpcode() in (4, 5):
+                            callee = resolve_call_target(op, hf)
+                            if callee in expected_sources or callee in SOURCE_APIS:
+                                out = op.getOutput()
+                                if out is not None:
+                                    source_call_ops.append((op, callee, out))
+
+                    # For each source call, do forward taint from its output varnode
+                    for src_op, src_api_name, src_out in source_call_ops:
+                        visited = set()
+                        queue = [src_out]
+                        sanitized = False
+                        reached = []
+                        depth = 0
+                        while queue and depth < 8:
+                            nxt = []
+                            for vn in queue:
+                                vid = vn.getUniqueId()
+                                if vid in visited:
+                                    continue
+                                visited.add(vid)
+                                desc = vn.getDescendants()
+                                if desc is None:
+                                    continue
+                                while desc.hasNext():
+                                    use_op = desc.next()
+                                    if use_op.getOpcode() in (4, 5):
+                                        callee2 = resolve_call_target(use_op, hf)
+                                        if callee2 in SINK_APIS:
+                                            reached.append({{"sink": callee2, "address": str(use_op.getSeqnum().getTarget()), "depth": depth}})
+                                        elif callee2 in SANITIZER_APIS:
+                                            sanitized = True
+                                    out2 = use_op.getOutput()
+                                    if out2 is not None:
+                                        nxt.append(out2)
+                            queue = nxt
+                            depth += 1
+
+                        for r in reached:
+                            conf = 0.75
+                            if sanitized:
+                                conf = 0.20
+                            elif r["sink"] in HIGH_RISK_SINKS:
+                                conf = 0.80
+                            pcode_traces.append({{
+                                "source_api": src_api_name,
+                                "sink": r["sink"],
+                                "sink_address": r["address"],
+                                "source_address": str(src_op.getSeqnum().getTarget()),
+                                "function": f.getName(),
+                                "function_address": str(func_entry),
+                                "depth": r["depth"],
+                                "sanitized": sanitized,
+                                "confidence": max(0.10, min(0.90, conf)),
+                                "risk": "high" if r["sink"] in HIGH_RISK_SINKS else "medium",
+                                "method": "pcode_dataflow",
+                            }})
+
+                # Fallback: if no dataflow traces found but source+sink CALLs both exist
+                # in P-code, emit a "pcode_colocated" trace (higher than symbol co-occurrence)
+                if not any(t.get("function") == f.getName() for t in pcode_traces):
+                    pcode_iter3 = hf.getPcodeOps()
+                    found_sources_in_pcode = set()
+                    found_sinks_in_pcode = set()
+                    if pcode_iter3 is not None:
+                        while pcode_iter3.hasNext():
+                            op3 = pcode_iter3.next()
+                            if op3.getOpcode() in (4, 5):
+                                callee3 = resolve_call_target(op3, hf)
+                                if callee3 in SOURCE_APIS:
+                                    found_sources_in_pcode.add(callee3)
+                                elif callee3 in SINK_APIS:
+                                    found_sinks_in_pcode.add(callee3)
+                    if found_sources_in_pcode and found_sinks_in_pcode:
+                        for src_a in found_sources_in_pcode:
+                            for sink_a in found_sinks_in_pcode:
+                                conf = 0.60
+                                if sink_a in HIGH_RISK_SINKS:
+                                    conf = 0.65
+                                pcode_traces.append({{
+                                    "source_api": src_a,
+                                    "sink": sink_a,
+                                    "sink_address": "0x0",
+                                    "source_address": "0x0",
+                                    "function": f.getName(),
+                                    "function_address": str(func_entry),
+                                    "depth": -1,
+                                    "sanitized": False,
+                                    "confidence": conf,
+                                    "risk": "high" if sink_a in HIGH_RISK_SINKS else "medium",
+                                    "method": "pcode_colocated",
+                                }})
+            except Exception as ex:
+                pcode_errors.append({{"function": f.getName(), "error": str(ex)}})
+            analyzed_pcode += 1
+
+        # Strategy 3: decompiled body text analysis (most robust for stripped binaries)
+        # If P-code analysis found no traces, fall back to function-level body scanning
+        if not pcode_traces and functions_data:
+            import re as _re2
+            _src_pat2 = _re2.compile(r'\b(' + '|'.join(sorted(SOURCE_APIS)) + r')\s*\(')
+            _sink_pat2 = _re2.compile(r'\b(' + '|'.join(sorted(SINK_APIS)) + r')\s*\(')
+            _san_pat2 = _re2.compile(r'\b(' + '|'.join(sorted(SANITIZER_APIS)) + r')\s*\(')
+            for fd in functions_data:
+                fname = fd.get("name", "")
+                body = fd.get("body", "")
+                addr = fd.get("address", "0x0")
+                if not body or not fname:
+                    continue
+                src_hits = set(_src_pat2.findall(body))
+                sink_hits = set(_sink_pat2.findall(body))
+                if not src_hits or not sink_hits:
+                    continue
+                san_hits = set(_san_pat2.findall(body))
+                sanitized = len(san_hits) > 0
+                for src_a in src_hits:
+                    for sink_a in sink_hits:
+                        conf = 0.60
+                        if sanitized:
+                            conf = 0.25
+                        elif sink_a in HIGH_RISK_SINKS:
+                            conf = 0.65
+                        pcode_traces.append({{
+                            "source_api": src_a,
+                            "sink": sink_a,
+                            "sink_address": "0x0",
+                            "source_address": "0x0",
+                            "function": fname,
+                            "function_address": addr,
+                            "depth": -1,
+                            "sanitized": sanitized,
+                            "confidence": conf,
+                            "risk": "high" if sink_a in HIGH_RISK_SINKS else "medium",
+                            "method": "decompiled_colocated",
+                        }})
+
         decomp.dispose()
 
     with open(decompile_out, "w") as f:
         json.dump(functions_data, f, indent=2)
     with open(xref_out, "w") as f:
         json.dump(xref_data, f, indent=2)
+    with open(pcode_out, "w") as f:
+        json.dump({{
+            "schema_version": "pcode-taint-v1",
+            "traces": pcode_traces,
+            "summary": {{
+                "candidate_functions": len(candidates),
+                "analyzed_functions": analyzed_pcode,
+                "total_traces": len(pcode_traces),
+                "high_risk_traces": sum(1 for t in pcode_traces if t.get("risk") == "high"),
+                "sanitized_traces": sum(1 for t in pcode_traces if t.get("sanitized")),
+            }},
+            "errors": pcode_errors,
+        }}, f, indent=2)
 
 except Exception as e:
     print(f"pyghidra error: {{e}}", file=sys.stderr)
