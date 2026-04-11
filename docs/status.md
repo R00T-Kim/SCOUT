@@ -61,6 +61,19 @@
 - 파이프라인 29 → 34 stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
 - 파이프라인 34 → 41 stages (v2.0): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
 
+## v2.3.0 업그레이드 (2026-04-11)
+
+- **Adversarial triage 병렬화**: `ThreadPoolExecutor` 기반 finding 단위 병렬 실행 (6h→50min). `AIEDGE_ADV_PARALLEL` env var (기본 8).
+- **Codex 모델 설정**: `AIEDGE_CODEX_MODEL` env var 추가 (기본 `gpt-5.3-codex`).
+- **ClaudeCodeCLIDriver**: Claude Code CLI OAuth 세션 기반 LLM 드라이버 추가.
+- **실시간 CLI 진행률**: `ProgressTracker` 모듈로 파이프라인 스테이지별 진행 표시.
+- **benchmark_eval.py**: analyst readiness 평가, bundle verifier, metrics 수집.
+- **TUI 리브랜딩**: AIEdge → SCOUT, 색상 cyan → magenta, viewer indigo/purple 팔레트.
+- **Apache 2.0 라이선스**: MIT에서 전환.
+- **LLM JSON 파싱 통합**: `parse_json_from_llm_output()` 3-stage fallback으로 7개 중복 구현 대체.
+- **Tier 2 LLM 벤치마크**: 36 firmware, 2430 findings debated, 99.3% FPR reduction, 18 maintained true findings.
+- 파이프라인 41 → 42 stages: `csource_identification` 추가.
+
 ## v2.0 업그레이드 (2026-03-27)
 
 ### 신규 스테이지 (34 → 41)

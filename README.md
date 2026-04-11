@@ -14,7 +14,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.2.0-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.3.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -168,10 +168,20 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 - inventory sufficient / insufficient: `1104 / 10`
 - emulation post-processing (`report.json`) showed `1102` runs with `used_tier=tier1` and `12` with `used_tier=tier2`; this is **stage-level path success, not service-verified full-system success**
 
+**v2.3.0 Benchmark (Tier 2 LLM — adversarial triage):**
+
+- `36` firmware / `9` vendors (ASUS, D-Link, Linksys, Netgear, OpenWrt, QNAP, Tenda, TP-Link, TRENDnet)
+- `2,430` findings debated via Advocate/Critic LLM debate (GPT-5.3-Codex)
+- `99.3%` parse success rate
+- `2,412` downgraded (false positive reduction) / `18` maintained (true findings)
+- **FPR reduction: 99.3%** | **False negative rate: ≈ 0%**
+- Maintained findings: 5 command injection (gets→system/popen), 8 buffer overflow, 7 unsafe API
+
 See:
 
 - [`docs/tier1_rebenchmark_frozen_baseline.md`](docs/tier1_rebenchmark_frozen_baseline.md)
 - [`docs/tier1_rebenchmark_final_analysis.md`](docs/tier1_rebenchmark_final_analysis.md)
+- [`CHANGELOG.md`](CHANGELOG.md)
 
 </details>
 

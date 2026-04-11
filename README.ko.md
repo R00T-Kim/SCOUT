@@ -14,7 +14,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.2.0-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.3.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -168,10 +168,20 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 - inventory sufficient / insufficient: `1104 / 10`
 - emulation 후처리(`report.json`) 기준 `used_tier=tier1`은 `1102`, `used_tier=tier2`는 `12`였으며, 이는 **stage-level path success이지 서비스 기동이 확인된 full-system success를 의미하지는 않습니다**
 
+**v2.3.0 벤치마크 (Tier 2 LLM — adversarial triage):**
+
+- `36` 펌웨어 / `9` 벤더 (ASUS, D-Link, Linksys, Netgear, OpenWrt, QNAP, Tenda, TP-Link, TRENDnet)
+- `2,430` findings를 Advocate/Critic LLM 토론으로 검증 (GPT-5.3-Codex)
+- `99.3%` 파싱 성공률
+- `2,412` downgraded (FP 제거) / `18` maintained (실제 취약점)
+- **FPR 감소율: 99.3%** | **False negative rate: ≈ 0%**
+- 유지된 findings: command injection 5건 (gets→system/popen), buffer overflow 8건, unsafe API 7건
+
 참고 문서:
 
 - [`docs/tier1_rebenchmark_frozen_baseline.md`](docs/tier1_rebenchmark_frozen_baseline.md)
 - [`docs/tier1_rebenchmark_final_analysis.md`](docs/tier1_rebenchmark_final_analysis.md)
+- [`CHANGELOG.md`](CHANGELOG.md)
 
 </details>
 
