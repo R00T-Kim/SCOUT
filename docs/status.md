@@ -61,6 +61,13 @@
 - 파이프라인 29 → 34 stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
 - 파이프라인 34 → 41 stages (v2.0): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
 
+## v2.4.1 패치 (2026-04-11)
+
+- **Confidence 보정**: `decompiled_colocated` 0.60→0.45 (high-risk 0.50). Terminator 피드백: symbol co-occurrence와 증거 수준 동일.
+- **addr_diff 제거**: P-code taint에서 주소 근접 매칭 → callee name 매칭으로 변경. 컴파일러 최적화에 robust.
+- **Interprocedural taint (Strategy 4)**: xref call graph 기반 cross-function source→sink 탐지. 1-hop 제한.
+- **검증**: RT-AX88U에서 `fread→vsprintf` interprocedural trace 1건 신규 발견.
+
 ## v2.4.0 업그레이드 (2026-04-11)
 
 - **Ghidra P-code taint 분석**: `pcode_taint.py` — 3-strategy (P-code SSA dataflow → P-code colocated → decompiled body). 함수 수준 source→sink 검증.
