@@ -625,11 +625,11 @@ try:
                 sanitized = len(san_hits) > 0
                 for src_a in src_hits:
                     for sink_a in sink_hits:
-                        conf = 0.60
+                        conf = 0.45
                         if sanitized:
                             conf = 0.25
                         elif sink_a in HIGH_RISK_SINKS:
-                            conf = 0.65
+                            conf = 0.50
                         pcode_traces.append({{
                             "source_api": src_a,
                             "sink": sink_a,
@@ -643,6 +643,78 @@ try:
                             "risk": "high" if sink_a in HIGH_RISK_SINKS else "medium",
                             "method": "decompiled_colocated",
                         }})
+
+        # Strategy 4: Interprocedural — cross-function source→sink via xref chain
+        # Uses xref_data (caller→callee) to find: func A has source, calls func B which has sink
+        if functions_data and xref_data:
+            import re as _re3
+            _src_pat3 = _re3.compile(r'\b(' + '|'.join(sorted(SOURCE_APIS)) + r')\s*\(')
+            _sink_pat3 = _re3.compile(r'\b(' + '|'.join(sorted(SINK_APIS)) + r')\s*\(')
+            _san_pat3 = _re3.compile(r'\b(' + '|'.join(sorted(SANITIZER_APIS)) + r')\s*\(')
+
+            # Build per-function source/sink sets from body text
+            _func_sources = {{}}  # fname -> set of source APIs
+            _func_sinks = {{}}    # fname -> set of sink APIs
+            _func_addr = {{}}     # fname -> address
+            _func_san = {{}}      # fname -> bool (has sanitizer)
+            for fd in functions_data:
+                fn = fd.get("name", "")
+                body = fd.get("body", "")
+                if not fn or not body:
+                    continue
+                _func_addr[fn] = fd.get("address", "0x0")
+                s = set(_src_pat3.findall(body))
+                k = set(_sink_pat3.findall(body))
+                if s:
+                    _func_sources[fn] = s
+                if k:
+                    _func_sinks[fn] = k
+                _func_san[fn] = bool(_san_pat3.findall(body))
+
+            # Build caller→callee map (1-hop)
+            _call_graph = {{}}  # caller_name -> [callee_names]
+            for xr in xref_data:
+                if not isinstance(xr, dict):
+                    continue
+                caller_n = xr.get("caller", "")
+                callee_n = xr.get("callee", "")
+                if caller_n and callee_n:
+                    _call_graph.setdefault(caller_n, []).append(callee_n)
+
+            # Find interprocedural pairs: source_func calls sink_func
+            _seen_interproc = set()
+            for src_func, src_apis in _func_sources.items():
+                if src_func in _func_sinks:
+                    continue  # already intraprocedural — handled by Strategy 3
+                for callee_name in _call_graph.get(src_func, []):
+                    if callee_name not in _func_sinks:
+                        continue
+                    sink_apis_in_callee = _func_sinks[callee_name]
+                    sanitized = _func_san.get(src_func, False) or _func_san.get(callee_name, False)
+                    for src_a in src_apis:
+                        for sink_a in sink_apis_in_callee:
+                            pair_key = (src_func, callee_name, src_a, sink_a)
+                            if pair_key in _seen_interproc:
+                                continue
+                            _seen_interproc.add(pair_key)
+                            conf = 0.55
+                            if sanitized:
+                                conf = 0.25
+                            elif sink_a in HIGH_RISK_SINKS:
+                                conf = 0.60
+                            pcode_traces.append({{
+                                "source_api": src_a,
+                                "sink": sink_a,
+                                "sink_address": _func_addr.get(callee_name, "0x0"),
+                                "source_address": _func_addr.get(src_func, "0x0"),
+                                "function": "{{0}}->{{1}}".format(src_func, callee_name),
+                                "function_address": _func_addr.get(src_func, "0x0"),
+                                "depth": 1,
+                                "sanitized": sanitized,
+                                "confidence": conf,
+                                "risk": "high" if sink_a in HIGH_RISK_SINKS else "medium",
+                                "method": "decompiled_interprocedural",
+                            }})
 
         decomp.dispose()
 

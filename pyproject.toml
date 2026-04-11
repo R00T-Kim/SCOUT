@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scout-firmware"
-version = "2.4.0"
+version = "2.4.1"
 description = "Deterministic firmware-to-exploit evidence engine with hash-anchored artifact chains"
 license = {text = "Apache-2.0"}
 dependencies = []

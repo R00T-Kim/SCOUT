@@ -3,6 +3,21 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.4.1] — 2026-04-11
+
+### Fixed
+- `decompiled_colocated` confidence reduced 0.60→0.45 (0.50 for high-risk sinks) — Terminator feedback: evidence level same as symbol co-occurrence
+- P-code taint `addr_diff > 16` replaced with callee name matching via `resolve_call_target()` — robust against compiler optimizations
+
+### Added
+- **Interprocedural taint** (Strategy 4): cross-function source→sink detection via xref call graph
+  - `decompiled_interprocedural` method: caller has source + calls callee with sink → conf 0.55-0.60
+  - 1-hop depth limit to control false positives
+  - Verified: `fread→vsprintf` across `FUN_00012514→FUN_00011fe0` in RT-AX88U
+
+### Changed
+- `taint_propagation.py`: separate confidence caps per method (pcode_colocated 0.65, decompiled_colocated 0.50, decompiled_interprocedural 0.60)
+
 ## [2.4.0] — 2026-04-11
 
 ### Added

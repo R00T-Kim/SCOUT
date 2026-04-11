@@ -392,8 +392,12 @@ class TaintPropagationStage:
                 # Apply method-specific confidence cap
                 if trace_method == "pcode_dataflow":
                     conf = min(conf, PCODE_VERIFIED_CAP)  # 0.75
-                elif trace_method in ("pcode_colocated", "decompiled_colocated"):
-                    conf = min(conf, 0.65)  # between code-verified(0.55) and pcode(0.75)
+                elif trace_method == "pcode_colocated":
+                    conf = min(conf, 0.65)  # P-code verified colocated
+                elif trace_method == "decompiled_colocated":
+                    conf = min(conf, 0.50)  # body text heuristic, slightly above co-occurrence(0.40)
+                elif trace_method == "decompiled_interprocedural":
+                    conf = min(conf, 0.60)  # cross-function body text, higher than colocated
                 else:
                     conf = min(conf, PCODE_VERIFIED_CAP)
 

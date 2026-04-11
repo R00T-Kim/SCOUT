@@ -82,7 +82,7 @@ def _resolve_symbol_refs(prog, sym_table, ref_mgr, fm, api_names):
     return call_sites
 
 
-def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis):
+def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis, source_api_name=""):
     """Forward taint trace using P-code SSA varnodes.
 
     Starting from the output varnode of a source call, follow def-use chains
@@ -112,18 +112,24 @@ def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis)
         if out is not None:
             ops_by_output[out.getUniqueId()] = op
 
-    # Find CALL ops near the source call address
+    # Find CALL ops that call the source API by name (or by address fallback)
     source_output_varnodes = []
     for op in all_ops:
         opcode = op.getOpcode()
         # CALL = 4, CALLIND = 5
         if opcode not in (4, 5):
             continue
-        op_addr = op.getSeqnum().getTarget()
-        # Check if this call is at or near the source call address
-        addr_diff = abs(op_addr.getOffset() - source_call_addr.getOffset())
-        if addr_diff > 16:
-            continue
+        # Match by callee function name (robust against compiler optimizations)
+        if source_api_name:
+            callee_name = _resolve_call_target(op, high_func)
+            if callee_name != source_api_name:
+                continue
+        else:
+            # Fallback: address proximity (legacy behavior)
+            op_addr = op.getSeqnum().getTarget()
+            addr_diff = abs(op_addr.getOffset() - source_call_addr.getOffset())
+            if addr_diff > 16:
+                continue
         out = op.getOutput()
         if out is not None:
             source_output_varnodes.append(out)
@@ -283,7 +289,8 @@ def run():
                         break
 
                     traces = _trace_forward_pcode(
-                        high_func, call_addr, SINK_APIS, SANITIZER_APIS
+                        high_func, call_addr, SINK_APIS, SANITIZER_APIS,
+                        source_api_name=source_api,
                     )
 
                     for trace in traces:
