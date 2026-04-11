@@ -20,6 +20,18 @@
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
 [![SLSA](https://img.shields.io/badge/SLSA-Level_2-purple?style=for-the-badge)]()
 
+<br />
+
+<table>
+<tr>
+<td align="center"><strong>1,123</strong><br/><sub>펌웨어 분석 완료<br/>(Tier 1)</sub></td>
+<td align="center"><strong>99.2%</strong><br/><sub>분석 성공률</sub></td>
+<td align="center"><strong>13,893</strong><br/><sub>CVE 매칭</sub></td>
+<td align="center"><strong>99.3%</strong><br/><sub>FPR 감소율<br/>(Tier 2 LLM)</sub></td>
+<td align="center"><strong>≈ 0%</strong><br/><sub>False Negative<br/>Rate</sub></td>
+</tr>
+</table>
+
 [English](README.md) | [한국어 (이 파일)](README.ko.md)
 
 </div>
