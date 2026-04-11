@@ -61,6 +61,17 @@
 - 파이프라인 29 → 34 stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
 - 파이프라인 34 → 41 stages (v2.0): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
 
+## v2.4.0 업그레이드 (2026-04-11)
+
+- **Ghidra P-code taint 분석**: `pcode_taint.py` — 3-strategy (P-code SSA dataflow → P-code colocated → decompiled body). 함수 수준 source→sink 검증.
+- **3-tier confidence**: `PCODE_VERIFIED_CAP = 0.75` 추가. co-occurrence(0.40) < code-verified(0.55) < pcode-verified(0.75).
+- **소스 룰 확장**: SQL injection, format string, path traversal, SSRF 4개 패밀리 + 9개 regex 패턴.
+- **CGI 핸들러 탐지**: Ghidra string_refs에서 `do_*_cgi` 함수명 추출 → source endpoint 등록.
+- **INPUT_APIS 확장**: `cJSON_Parse`, `json_tokener_parse`, `xmlParseMemory` 추가.
+- **SBOM 백포트 감지**: opkg 패치 리비전 파싱, CVE 매칭 시 confidence -0.30.
+- **Handoff 스키마**: `firmware_handoff.json`에 adversarial triage 스키마 레퍼런스 추가.
+- **검증**: ASUS RT-AX88U 재분석 — 5건 신규 decompiled_colocated traces, confidence 0.40→0.60 (+50%).
+
 ## v2.3.0 업그레이드 (2026-04-11)
 
 - **Adversarial triage 병렬화**: `ThreadPoolExecutor` 기반 finding 단위 병렬 실행 (6h→50min). `AIEDGE_ADV_PARALLEL` env var (기본 8).

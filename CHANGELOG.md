@@ -3,6 +3,28 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.4.0] — 2026-04-11
+
+### Added
+- **Ghidra P-code taint analysis** (`ghidra_scripts/pcode_taint.py`): 3-strategy dataflow tracing (P-code SSA → P-code colocated → decompiled body), replacing symbol co-occurrence
+- `PCODE_VERIFIED_CAP = 0.75` — 3-tier confidence system: co-occurrence (0.40) < code-verified (0.55) < P-code verified (0.75)
+- 4 new source pattern rule families: `sql_injection`, `format_string`, `path_traversal`, `ssrf` (9 regex patterns across PHP/Python/C/shell)
+- CGI handler detection in `surfaces.py`: extracts `do_*_cgi` function names from Ghidra string_refs as source endpoints
+- `INPUT_APIS` expanded: `cJSON_Parse`, `json_tokener_parse`, `xmlParseMemory`
+- SBOM backport detection: `_Component.patch_revision` field, opkg version revision parsing
+- CVE scan backport filter: -0.30 confidence for opkg packages with patch revision
+- `adversarial_triage` schema reference in `firmware_handoff.json` for downstream consumers (Terminator)
+- pyghidra fallback now generates `pcode_taint.json` with decompiled body analysis
+
+### Changed
+- `taint_propagation.py`: P-code verified results prioritized over static inference; P-code-covered binaries skipped in static fallback
+- `ghidra_bridge.py`: `pcode_taint.py` added to default script set
+- Detection engine confidence: symbol co-occurrence findings now differentiated from function-level verified findings
+
+### Verified
+- ASUS RT-AX88U: 5 new `decompiled_colocated` traces (nvram_get→vsprintf conf 0.60, sanitizer detection working)
+- Before/after: 10 static_inference → 10 static + 5 Ghidra-verified, confidence 0.40→0.60 (+50%)
+
 ## [2.3.0] — 2026-04-11
 
 ### Added

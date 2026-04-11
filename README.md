@@ -4,9 +4,11 @@
 
 # SCOUT
 
-### Firmware-to-Exploit Evidence Engine
+### Deterministic Firmware Security Analysis Pipeline
 
-**Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, and a hash-anchored evidence chain.**
+**Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, and a hash-anchored evidence chain -- in one command.**
+
+*Automated firmware vulnerability discovery with Ghidra P-code taint analysis, adversarial LLM debate, and zero pip dependencies.*
 
 <br />
 
@@ -14,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.3.0-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.4.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -43,8 +45,8 @@
 > **Every finding has a hash-anchored evidence chain.**
 > No finding without a file path, byte offset, SHA-256 hash, and rationale. Artifacts are immutable and traceable from firmware blob to final verdict.
 
-> **Static-only findings capped with 2-tier system -- honest confidence.**
-> SYMBOL_COOCCURRENCE capped at 0.40, STATIC_CODE_VERIFIED at 0.55. Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
+> **3-tier confidence with Ghidra P-code verification -- honest scoring.**
+> SYMBOL_COOCCURRENCE capped at 0.40, STATIC_CODE_VERIFIED at 0.55, PCODE_VERIFIED at 0.75. Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
 
 > **SARIF + CycloneDX VEX + SLSA provenance -- standard formats.**
 > GitHub Code Scanning, VS Code, CI/CD integration out of the box.

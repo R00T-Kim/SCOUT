@@ -117,7 +117,7 @@ Stages have **no in-memory coupling**. Each stage reads JSON artifacts from pred
 | `ModelTier` | `llm_driver.py` | `Literal["haiku", "sonnet", "opus"]` for LLM tier selection |
 | `AIEdgePolicyViolation` | `policy.py` | Security exception raised by `assert_under_dir()` and authorization checks |
 | `VendorDecryptor` | `vendor_decrypt.py` | D-Link SHRS AES-128-CBC decryption; invoked by extraction stage on SHRS magic detection |
-| `ConfidenceCaps` | `confidence_caps.py` | 2-tier caps: `SYMBOL_COOCCURRENCE_CAP=0.40`, `STATIC_CODE_VERIFIED_CAP=0.55` (v2.2.0) |
+| `ConfidenceCaps` | `confidence_caps.py` | 3-tier caps: `SYMBOL_COOCCURRENCE_CAP=0.40`, `STATIC_CODE_VERIFIED_CAP=0.55`, `PCODE_VERIFIED_CAP=0.75` (v2.4.0) |
 
 ### LLM Driver Abstraction
 
@@ -133,7 +133,7 @@ Shared JSON parsing utility: `parse_json_from_llm_output()` in `llm_driver.py` p
 
 ### Evidence & Governance Layers
 
-- **Confidence caps** (`confidence_caps.py`): 2-tier caps — `SYMBOL_COOCCURRENCE_CAP=0.40`, `STATIC_CODE_VERIFIED_CAP=0.55` (v2.2.0; previously flat 0.60)
+- **Confidence caps** (`confidence_caps.py`): 3-tier caps — `SYMBOL_COOCCURRENCE_CAP=0.40`, `STATIC_CODE_VERIFIED_CAP=0.55`, `PCODE_VERIFIED_CAP=0.75` (v2.4.0)
 - **Exploit tiering** (`exploit_tiering.py`): suspected → strong_static → dynamic_repro → exploitability_assessed
 - **Determinism** (`determinism.py`): Canonical JSON bundles ensure reproducible runs
 - **Quality gates** (`quality_policy.py`, `quality_metrics.py`): Threshold checks and corpus-based evaluation

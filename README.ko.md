@@ -4,9 +4,11 @@
 
 # SCOUT
 
-### Firmware-to-Exploit Evidence Engine
+### Deterministic Firmware Security Analysis Pipeline
 
-**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인이 나옵니다.**
+**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인이 나옵니다 -- 명령어 하나로.**
+
+*Ghidra P-code taint 분석, adversarial LLM 토론, pip 의존성 제로로 펌웨어 취약점을 자동 탐지합니다.*
 
 <br />
 
@@ -14,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.3.0-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.4.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -43,8 +45,8 @@
 > **모든 finding에 해시 기반 증거 체인이 있습니다.**
 > 파일 경로, 바이트 오프셋, SHA-256 해시, 근거 없이는 finding을 생성하지 않습니다. 펌웨어 블롭에서 최종 판정까지 추적 가능.
 
-> **2-tier 신뢰도 상한 적용 -- 정직한 점수.**
-> SYMBOL_COOCCURRENCE는 0.40, STATIC_CODE_VERIFIED는 0.55로 제한. `confirmed` 승격에는 동적 검증이 필요합니다. 점수를 부풀리지 않습니다.
+> **3-tier 신뢰도 상한 + Ghidra P-code 검증 -- 정직한 점수.**
+> SYMBOL_COOCCURRENCE 0.40, STATIC_CODE_VERIFIED 0.55, PCODE_VERIFIED 0.75. `confirmed` 승격에는 동적 검증이 필요합니다. 점수를 부풀리지 않습니다.
 
 > **SARIF + CycloneDX VEX + SLSA -- 표준 포맷.**
 > GitHub Code Scanning, VS Code, CI/CD 즉시 연동.
