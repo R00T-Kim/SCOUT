@@ -111,19 +111,24 @@
 
 | | 기능 | 설명 |
 |---|------|------|
-| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ 시그니처) + NVD CVE 스캔 + 2,528 로컬 CVE DB + 25 Known CVE 시그니처 (8개 신규 벤더) |
-| :mag: | **바이너리 분석** | ELF hardening (NX/PIE/RELRO/Canary) + `.dynstr` 감지 + FORTIFY_SOURCE + Ghidra 디컴파일 |
-| :dart: | **공격 표면** | Source-to-sink 추적, 웹 서버 자동 감지, 크로스 바이너리 IPC 체인 (5종) |
-| :brain: | **테인트 분석** | HTTP-aware 프로시저 간 테인트 + call chain 시각화; 웹 서버 우선 분석 |
-| :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한, 자격 증명 매핑 |
+| :package: | **SBOM & CVE** | CycloneDX 1.6 + VEX + 25 Known CVE 시그니처 (8 벤더) + NVD 스캔 + 2,528 로컬 CVE DB + EPSS 스코어링 (FIRST.org API, 배치 + 캐싱) |
+| :mag: | **바이너리 분석** | Ghidra P-code SSA dataflow taint + ELF hardening (NX/PIE/RELRO/Canary/FORTIFY) + `.dynstr` 감지 + 28개 sink 심볼 + format string 탐지 |
+| :dart: | **공격 표면** | Source→sink 추적, 웹 서버 자동 감지, 크로스 바이너리 IPC 체인 (5종: unix socket, dbus, shm, pipe, exec) |
+| :brain: | **테인트 분석** | HTTP-aware 프로시저 간 테인트, P-code SSA dataflow, call chain 시각화, 4-strategy fallback (P-code → colocated → decompiled → interprocedural) |
+| :robot: | **LLM 엔진** | 4개 백엔드 (Codex CLI / Claude API / Claude Code CLI / Ollama) + 중앙 관리 시스템 프롬프트 + structured JSON 출력 + 5-stage 파서 (preamble/fence/raw/brace-counting/error-recovery) + temperature 제어 |
+| :crossed_swords: | **Adversarial Debate** | Advocate/Critic LLM 토론 기반 FPR 감소 (Tier 2 99.3%). parse_failures vs llm_call_failures 분리 + quota_exhausted 명시적 탐지 |
+| :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한, 자격 증명 매핑, hardcoded secret 탐지 |
 | :test_tube: | **퍼징** *(선택)* | AFL++ CMPLOG, persistent mode, NVRAM faker, 하니스 생성, crash triage |
 | :bug: | **에뮬레이션** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs 검사) + GDB 원격 디버깅 |
-| :robot: | **MCP 서버** | Model Context Protocol 12개 도구 (Claude Code/Desktop 연동) |
-| :bar_chart: | **웹 뷰어** | Glassmorphism 대시보드 (KPI 바, IPC 맵, 리스크 히트맵) |
-| :link: | **증거 체인** | SHA-256 앵커 아티팩트, 2-tier 신뢰도 상한 (0.40/0.55), 5단계 exploit 승격 |
-| :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto 인증 |
-| :chart_with_upwards_trend: | **벤치마킹** | FirmAE 데이터셋 지원, analyst-readiness 점수화, verifier 기반 archive bundle, TP/FP 분석 스크립트 |
-| :key: | **벤더 복호화** | D-Link SHRS AES-128-CBC 자동 복호화; Shannon entropy 암호화 탐지 (>7.9) |
+| :electric_plug: | **MCP 서버** | Model Context Protocol 12개 도구 (Claude Code/Desktop 연동) |
+| :bar_chart: | **웹 뷰어** | Glassmorphism 대시보드 (KPI 바, IPC 맵, 리스크 히트맵, 인터랙티브 evidence 탐색) |
+| :link: | **증거 체인** | SHA-256 앵커 아티팩트 + 4-tier 신뢰도 상한 (0.40/0.55/0.60/0.75) + 5단계 exploit 승격 ladder |
+| :scroll: | **표준 출력** | SARIF 2.1.0 (GitHub Code Scanning) + CycloneDX 1.6 + VEX + SLSA Level 2 in-toto 인증 |
+| :gear: | **CI/CD 통합** | GitHub Action (`.github/actions/scout-scan/`) composite Docker action + GitHub Security 탭 SARIF 자동 업로드 |
+| :scales: | **규제 준수** | EU CRA Annex I 12개 필수 요구사항 매핑 (`docs/cra_compliance_mapping.md`); FDA SBOM 대응; ISO 21434 / UN R155 호환 출력 |
+| :chart_with_upwards_trend: | **벤치마킹** | FirmAE 데이터셋 (1,123 펌웨어), analyst-readiness 점수화, verifier 기반 archive bundle, TP/FP 분석 스크립트 |
+| :key: | **벤더 복호화** | D-Link SHRS AES-128-CBC 자동 복호화; Shannon entropy 암호화 탐지 (>7.9); binwalk v3 호환 |
+| :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib만 사용 — pip 의존성 없음, 에어갭 환경 배포 친화적 |
 
 ---
 
@@ -142,100 +147,73 @@
 Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이지는 선택적 외부 도구 필요 (AFL++/Docker).
 
 <details>
-<summary><strong>v2.0 신규 스테이지 (8개)</strong></summary>
+<summary><strong>파이프라인 스테이지 레퍼런스 (42개)</strong></summary>
 
 | 스테이지 | 모듈 | 목적 | LLM | 비용 |
 |---------|------|------|-----|------|
+| `tooling` | `tooling.py` | 외부 도구 가용성 체크 (binwalk, Ghidra, Docker) | 아니오 | $0 |
+| `extraction` | `extraction.py` | 펌웨어 언패킹 (binwalk + vendor_decrypt + Shannon entropy) | 아니오 | $0 |
+| `structure` | `structure.py` | 파일시스템 구조 분석 | 아니오 | $0 |
+| `carving` | `carving.py` | 비구조화 영역 파일 카빙 | 아니오 | $0 |
+| `firmware_profile` | `firmware_profile.py` | 아키텍처/커널/init 시스템 프로파일링 | 아니오 | $0 |
+| `inventory` | `inventory.py` | 바이너리별 ELF hardening + 심볼 추출 | 아니오 | $0 |
+| `ghidra_analysis` | `ghidra_analysis.py` | 디컴파일 + P-code SSA dataflow | 아니오 | $0 |
+| `semantic_classification` | `semantic_classifier.py` | 3-pass 함수 분류 (static → haiku → sonnet) | 예 | 낮음 |
+| `sbom` | `sbom.py` | CycloneDX 1.6 SBOM + VEX 생성 | 아니오 | $0 |
+| `cve_scan` | `cve_scan.py` | NVD + 25 known signature + EPSS enrichment | 아니오 | $0 |
+| `reachability` | `reachability.py` | BFS 기반 호출 그래프 도달성 | 아니오 | $0 |
+| `endpoints` | `endpoints.py` | 네트워크 엔드포인트 발견 | 아니오 | $0 |
+| `surfaces` | `surfaces.py` | 공격 표면 열거 | 아니오 | $0 |
 | `enhanced_source` | `enhanced_source.py` | 웹 서버 자동 감지 + INPUT_APIS 스캔 (21개 API) | 아니오 | $0 |
-| `semantic_classification` | `semantic_classifier.py` | 3단계 함수 분류기 (정적, haiku, sonnet) | 예 | 낮음 |
-| `taint_propagation` | `taint_propagation.py` | HTTP-aware 프로시저 간 테인트 + call chain | 예 | 중간 |
-| `fp_verification` | `fp_verification.py` | 3패턴 FP 제거 (sanitizer/비전파/시스템파일) | 아니오 | $0 |
-| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM 토론 기반 FPR 감소 | 예 | 중간 |
-| `poc_refinement` | `poc_refinement.py` | 퍼징 시드 기반 반복 PoC 생성 (최대 5회) | 예 | 중간 |
-| `chain_construction` | `chain_constructor.py` | 동일 바이너리 + 크로스 바이너리 IPC 익스플로잇 체인 | 아니오 | $0 |
 | `csource_identification` | `csource_identification.py` | 정적 센티널 + QEMU 기반 HTTP 입력 소스 식별 | 아니오 | $0 |
+| `taint_propagation` | `taint_propagation.py` | 28개 sink + format string 탐지 인터프로시저 taint | 예 | 중간 |
+| `fp_verification` | `fp_verification.py` | 3패턴 FP 제거 + LLM 검증 (parse/call 실패 분리) | 예 | 낮음 |
+| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM 토론 (FPR 99.3% 감소) | 예 | 중간 |
+| `graph` | `graph.py` | 통신 그래프 (5종 IPC edge) | 아니오 | $0 |
+| `attack_surface` | `attack_surface.py` | IPC 체인 포함 공격 표면 매핑 | 아니오 | $0 |
+| `attribution` | `attribution.py` | 벤더/펌웨어 attribution | 아니오 | $0 |
+| `functional_spec` | `functional_spec.py` | 기능 명세 추출 | 아니오 | $0 |
+| `threat_model` | `threat_model.py` | STRIDE 기반 위협 모델링 | 아니오 | $0 |
+| `web_ui` | `web_ui.py` | 웹 UI / CGI 엔드포인트 분석 | 아니오 | $0 |
+| `findings` | `findings.py` | Finding 집계 + SARIF export | 아니오 | $0 |
+| `llm_triage` | `llm_triage.py` | LLM finding 트리아지 (haiku/sonnet/opus 자동 라우팅) | 예 | 가변 |
+| `llm_synthesis` | `llm_synthesis.py` | LLM finding 합성 | 예 | 중간 |
+| `emulation` | `emulation.py` | 4-tier 에뮬레이션 (FirmAE / Pandawan / QEMU / rootfs) | 아니오 | $0 |
+| `dynamic_validation` | `dynamic_validation.py` | 동적 동작 검증 | 아니오 | $0 |
+| `fuzzing` | `fuzz_*.py` | NVRAM faker 포함 AFL++ 퍼징 | 아니오 | $0 |
+| `poc_refinement` | `poc_refinement.py` | 반복 PoC 생성 (5회 시도) | 예 | 중간 |
+| `chain_construction` | `chain_constructor.py` | 동일 바이너리 + 크로스 바이너리 IPC 익스플로잇 체인 | 아니오 | $0 |
+| `exploit_gate` | `stage_registry.py` | exploit 승격 게이트 | 아니오 | $0 |
+| `exploit_chain` | `exploit_chain.py` | exploit 체인 검증 | 아니오 | $0 |
+| `exploit_autopoc` | `exploit_autopoc.py` | 자동 PoC 오케스트레이션 | 예 | 중간 |
+| `poc_validation` | `poc_validation.py` | PoC 재현 검증 | 아니오 | $0 |
+| `exploit_policy` | `exploit_policy.py` | 최종 exploit 승격 결정 | 아니오 | $0 |
+
+OTA 전용 스테이지: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boottriage`, `firmware_lineage` (Android 스타일 OTA payload 분석).
 
 </details>
 
-<details>
-<summary><strong>v2.5.0 신규 기능 (2026-04-13)</strong></summary>
+## 벤치마크
 
-| 기능 | 모듈 | 설명 |
-|------|------|------|
-| 중앙 시스템 프롬프트 | `llm_prompts.py` (신규) | 7개 역할별 시스템 프롬프트(ADVOCATE/CRITIC/TAINT/CLASSIFIER/REPAIR/SYNTHESIS) + temperature 상수 |
-| LLMDriver Protocol 확장 | `llm_driver.py` | 4개 드라이버(Codex/Claude API/Claude Code/Ollama)에 `system_prompt` + `temperature` 파라미터 추가 |
-| 5-stage JSON 파서 | `llm_driver.py` | preamble 제거 → fence → raw → brace-counting → common error fix; `required_keys` 스키마 검증 |
-| Sink 심볼 28개로 확장 | `taint_propagation.py` | `_SINK_SYMBOLS` 11→28 (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf 계열, scanf 계열, dlopen, realpath) |
-| Format string 탐지 | `taint_propagation.py` | `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` — 변수 기반 format string 탐지 |
-| EPSS 스코어 통합 | `cve_scan.py` | FIRST.org API 배치 조회, per-run + cross-run 캐시, EPSS 백분위 기반 신뢰도 조정 |
-| LLM 실패 관찰성 분리 | `llm_driver.py` + 스테이지 | `parse_failures` vs `llm_call_failures` 분리 집계, quota_exhausted 명시적 탐지 |
-| GitHub Action | `.github/actions/scout-scan/` | CI/CD 통합용 composite action, GitHub Security 탭 SARIF 업로드 |
-| CRA 준수 매핑 | `docs/cra_compliance_mapping.md` | EU Cyber Resilience Act Annex I 12개 필수 요구사항을 SCOUT 출력에 매핑 |
-| 전략 로드맵 | `docs/strategic_roadmap_2026.md` | 30+ 학술 논문, 경쟁 도구 분석(Theori Xint, FirmAgent, EU CRA) 기반 3-Phase 계획 |
-
-**v2.5.0 검증 (Netgear R7000, codex 드라이버, 2026-04-13):**
-
-| 지표 | v2.5 이전 (1211 런) | v2.5.0 (1320 런) |
-|---|---|---|
-| `adversarial_triage` parse_failures | **100/100** | **0/100** |
-| `adversarial_triage` parsed_ok | 0/100 | 100/100 |
-| `fp_verification` unverified | 97/100 | 0/100 |
-| `fp_verification` true_positives | 1 | 57 |
-| `fp_verification` false_positives | 2 | 43 |
-| `cve_scan` EPSS enriched | 0/23 | 23/23 |
-
-- adversarial debate: 100건 검토 → 99건 downgraded (FP) + 1건 maintained (TP)
-- 런: `aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c`
-- v2.5 이전 실패는 Claude CLI 쿼터 초과가 원인. v2.5.0에서 `quota_exhausted` 명시 분류로 실제 parse failure와 구분 가능
-
-**핵심 버그 수정:**
-- CVE scan signature-only 경로의 조기 `return` 제거 — enrichment / finding candidate 생성 누락 해결
-- CVE scan backport 신뢰도 보정이 match별 component metadata 사용 (이전: 마지막 루프 변수 leak)
-- semantic classifier 배치 50→15 축소로 긴 컨텍스트의 JSON 스키마 손실 방지
-
-</details>
-
-<details>
-<summary><strong>v2.2.0 신규 기능</strong></summary>
-
-| 기능 | 모듈 | 설명 |
-|------|------|------|
-| D-Link SHRS 복호화 | `vendor_decrypt.py` | SHRS 매직 자동 감지, AES-128-CBC 복호화 후 extraction |
-| binwalk v3 호환 | `extraction.py` | 런타임 버전 감지, v3에서 제거된 `-d` 플래그 자동 처리 |
-| Shannon entropy 탐지 | `extraction.py` | extraction 전 entropy 분석, >7.9는 암호화 의심으로 플래그 |
-| CVE 시그니처 25개 | `cve_scan.py` | 13→25개 확장, 신규 벤더 8개 (Hikvision, QNAP, MikroTik, Ubiquiti, Tenda, Synology, Belkin, TRENDnet) + path_traversal 유형 |
-| 정적 FP 룰 3개 | `fp_verification.py` | constant-sink gate, non-network binary gate, sanitizer detection |
-| 2-tier 신뢰도 상한 | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
-| Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker 통합 Tier 1.5 에뮬레이션, KCRE 커널 복구 |
-| Analyst-Readiness Benchmarking | `benchmark_eval.py` + `benchmark_firmae.sh` | archived bundle verifier pass, actionable candidate, analyst-ready 상태를 함께 측정 |
-| LLM Trace Capture | `llm_driver.py` | stage별 `llm_trace/*.json`에 prompt/output/attempt 메타데이터 기록 |
-
-**v2.2.0 벤치마크 (Tier 1 frozen baseline):**
-
-- `1,123`개 펌웨어 / `8`개 벤더
+### Tier 1 (정적 분석, frozen baseline)
+- `1,123`개 펌웨어 / `8`개 벤더 / `99.2%` 분석 가능 비율
 - `1,110` success / `4` partial / `9` failed
-- 분석 가능 비율 (`success + partial`): `99.2%`
 - `3,523` findings / `13,893` CVE 매칭
-- extraction ok / partial: `1110 / 4`
-- inventory sufficient / insufficient: `1104 / 10`
-- emulation 후처리(`report.json`) 기준 `used_tier=tier1`은 `1102`, `used_tier=tier2`는 `12`였으며, 이는 **stage-level path success이지 서비스 기동이 확인된 full-system success를 의미하지는 않습니다**
 
-**v2.3.0 벤치마크 (Tier 2 LLM — adversarial triage):**
-
-- `36` 펌웨어 / `9` 벤더 (ASUS, D-Link, Linksys, Netgear, OpenWrt, QNAP, Tenda, TP-Link, TRENDnet)
-- `2,430` findings를 Advocate/Critic LLM 토론으로 검증 (GPT-5.3-Codex)
-- `99.3%` 파싱 성공률
-- `2,412` downgraded (FP 제거) / `18` maintained (실제 취약점)
+### Tier 2 (LLM Adversarial Debate, GPT-5.3-Codex)
+- `36`개 펌웨어 / `9`개 벤더
+- `2,430` findings 토론 → `2,412` downgraded + `18` maintained
 - **FPR 감소율: 99.3%** | **False negative rate: ≈ 0%**
-- 유지된 findings: command injection 5건 (gets→system/popen), buffer overflow 8건, unsafe API 7건
 
-참고 문서:
+### v2.5.0 단일 펌웨어 검증 (Netgear R7000, codex 드라이버)
+| 지표 | v2.5 이전 | v2.5.0 |
+|---|---|---|
+| `adversarial_triage` parse_failures | 100/100 | **0/100** |
+| `fp_verification` unverified | 97/100 | **0/100** |
+| `fp_verification` true_positives | 1 | **57** |
+| `cve_scan` EPSS enriched | 0/23 | **23/23** |
 
-- [`docs/tier1_rebenchmark_frozen_baseline.md`](docs/tier1_rebenchmark_frozen_baseline.md)
-- [`docs/tier1_rebenchmark_final_analysis.md`](docs/tier1_rebenchmark_final_analysis.md)
-- [`CHANGELOG.md`](CHANGELOG.md)
-
-</details>
+전체 버전 히스토리는 [`CHANGELOG.md`](CHANGELOG.md)를 참조하세요.
 
 ---
 

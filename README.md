@@ -111,19 +111,24 @@
 
 | | Feature | Description |
 |---|---------|-------------|
-| :package: | **SBOM & CVE** | CycloneDX 1.6 (40+ signatures) + NVD CVE scan + 2,528 local CVE DB + 25 known CVE signatures (8 new vendors) |
-| :mag: | **Binary Analysis** | ELF hardening (NX/PIE/RELRO/Canary) + `.dynstr` detection + FORTIFY_SOURCE + Ghidra decompilation |
-| :dart: | **Attack Surface** | Source-to-sink tracing, web server auto-detection, cross-binary IPC chains (5 types) |
-| :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint with call chain visualization; web server priority |
-| :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping |
+| :package: | **SBOM & CVE** | CycloneDX 1.6 + VEX + 25 known CVE signatures (8 vendors) + NVD scan + 2,528 local CVE DB + EPSS scoring (FIRST.org API, batched + cached) |
+| :mag: | **Binary Analysis** | Ghidra P-code SSA dataflow taint + ELF hardening (NX/PIE/RELRO/Canary/FORTIFY) + `.dynstr` detection + 28 sink symbols + format string detection |
+| :dart: | **Attack Surface** | Source→sink tracing, web server auto-detection, cross-binary IPC chains (5 types: unix socket, dbus, shm, pipe, exec) |
+| :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint, P-code SSA dataflow, call chain visualization, 4-strategy fallback (P-code → colocated → decompiled → interprocedural) |
+| :robot: | **LLM Engine** | 4 backends (Codex CLI / Claude API / Claude Code CLI / Ollama) + centralized system prompts + structured JSON output + 5-stage parser (preamble/fence/raw/brace-counting/error-recovery) + temperature control |
+| :crossed_swords: | **Adversarial Debate** | Advocate/Critic LLM debate for FPR reduction (99.3% on Tier 2). Separate parse_failures vs llm_call_failures observability with quota_exhausted detection |
+| :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping, hardcoded secret detection |
 | :test_tube: | **Fuzzing** *(optional)* | AFL++ with CMPLOG, persistent mode, NVRAM faker, harness generation, crash triage |
 | :bug: | **Emulation** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs inspection) + GDB remote debug |
-| :robot: | **MCP Server** | 12 tools via Model Context Protocol for Claude Code/Desktop |
-| :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap |
-| :link: | **Evidence Chain** | SHA-256 anchored artifacts, 2-tier confidence caps (0.40/0.55), 5-tier exploit promotion |
-| :scroll: | **SARIF & SLSA** | SARIF 2.1.0 findings + SLSA Level 2 in-toto attestation |
-| :chart_with_upwards_trend: | **Benchmarking** | FirmAE dataset support, analyst-readiness scoring, verifier-backed archive bundles, TP/FP analysis scripts |
-| :key: | **Vendor Decrypt** | D-Link SHRS AES-128-CBC auto-decryption; Shannon entropy encryption detection (>7.9) |
+| :electric_plug: | **MCP Server** | 12 tools via Model Context Protocol for Claude Code/Desktop integration |
+| :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap, interactive evidence navigation |
+| :link: | **Evidence Chain** | SHA-256 anchored artifacts + 4-tier confidence caps (0.40/0.55/0.60/0.75) + 5-tier exploit promotion ladder |
+| :scroll: | **Standard Output** | SARIF 2.1.0 (GitHub Code Scanning) + CycloneDX 1.6 + VEX + SLSA Level 2 in-toto attestation |
+| :gear: | **CI/CD Integration** | GitHub Action (`.github/actions/scout-scan/`) with composite Docker action + automatic SARIF upload to GitHub Security tab |
+| :scales: | **Regulatory Compliance** | EU CRA Annex I 12 essential requirements mapped (`docs/cra_compliance_mapping.md`); FDA SBOM ready; ISO 21434 / UN R155 compatible outputs |
+| :chart_with_upwards_trend: | **Benchmarking** | FirmAE dataset (1,123 firmware), analyst-readiness scoring, verifier-backed archive bundles, TP/FP analysis scripts |
+| :key: | **Vendor Decrypt** | D-Link SHRS AES-128-CBC auto-decryption; Shannon entropy encryption detection (>7.9); binwalk v3 compatibility |
+| :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib only — no pip dependencies, air-gap friendly deployment |
 
 ---
 
@@ -142,100 +147,73 @@ Firmware --> Unpack --> Profile --> Inventory --> Ghidra --> Semantic Classifica
 Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require optional external tools (AFL++/Docker).
 
 <details>
-<summary><strong>v2.0 New Stages (8)</strong></summary>
+<summary><strong>Pipeline Stages Reference (42)</strong></summary>
 
 | Stage | Module | Purpose | LLM? | Cost |
 |-------|--------|---------|------|------|
+| `tooling` | `tooling.py` | External tool availability check (binwalk, Ghidra, Docker) | No | $0 |
+| `extraction` | `extraction.py` | Firmware unpacking (binwalk + vendor_decrypt + Shannon entropy detection) | No | $0 |
+| `structure` | `structure.py` | Filesystem structure analysis | No | $0 |
+| `carving` | `carving.py` | File carving from unstructured regions | No | $0 |
+| `firmware_profile` | `firmware_profile.py` | Architecture, kernel, init system fingerprinting | No | $0 |
+| `inventory` | `inventory.py` | Per-binary ELF hardening + symbol extraction | No | $0 |
+| `ghidra_analysis` | `ghidra_analysis.py` | Decompilation + P-code SSA dataflow analysis | No | $0 |
+| `semantic_classification` | `semantic_classifier.py` | 3-pass function classifier (static → haiku → sonnet) | Yes | Low |
+| `sbom` | `sbom.py` | CycloneDX 1.6 SBOM generation with VEX | No | $0 |
+| `cve_scan` | `cve_scan.py` | NVD + 25 known signatures + EPSS enrichment | No | $0 |
+| `reachability` | `reachability.py` | BFS-based call-graph reachability | No | $0 |
+| `endpoints` | `endpoints.py` | Network endpoint discovery | No | $0 |
+| `surfaces` | `surfaces.py` | Attack surface enumeration | No | $0 |
 | `enhanced_source` | `enhanced_source.py` | Web server auto-detection + INPUT_APIS scan (21 APIs) | No | $0 |
-| `semantic_classification` | `semantic_classifier.py` | 3-pass function classifier (static, haiku, sonnet) | Yes | Low |
-| `taint_propagation` | `taint_propagation.py` | HTTP-aware inter-procedural taint with call chain | Yes | Medium |
-| `fp_verification` | `fp_verification.py` | 3-pattern FP removal (sanitizer/non-propagating/sysfile) | No | $0 |
-| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM debate for FPR reduction | Yes | Medium |
-| `poc_refinement` | `poc_refinement.py` | Iterative PoC generation from fuzzing seeds (5 attempts) | Yes | Medium |
-| `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
 | `csource_identification` | `csource_identification.py` | HTTP input source identification via static sentinel + QEMU | No | $0 |
+| `taint_propagation` | `taint_propagation.py` | Inter-procedural taint with 28 sinks + format string detection | Yes | Medium |
+| `fp_verification` | `fp_verification.py` | 3-pattern FP removal + LLM verification with parse/call failure separation | Yes | Low |
+| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM debate (99.3% FPR reduction) | Yes | Medium |
+| `graph` | `graph.py` | Communication graph (5 IPC edge types) | No | $0 |
+| `attack_surface` | `attack_surface.py` | Attack surface mapping with IPC chains | No | $0 |
+| `attribution` | `attribution.py` | Vendor/firmware attribution | No | $0 |
+| `functional_spec` | `functional_spec.py` | Functional specification extraction | No | $0 |
+| `threat_model` | `threat_model.py` | STRIDE-based threat modeling | No | $0 |
+| `web_ui` | `web_ui.py` | Web UI / CGI endpoint analysis | No | $0 |
+| `findings` | `findings.py` | Finding aggregation + SARIF export | No | $0 |
+| `llm_triage` | `llm_triage.py` | LLM finding triage (haiku/sonnet/opus auto-routing) | Yes | Variable |
+| `llm_synthesis` | `llm_synthesis.py` | LLM finding synthesis | Yes | Medium |
+| `emulation` | `emulation.py` | 4-tier emulation (FirmAE / Pandawan / QEMU / rootfs) | No | $0 |
+| `dynamic_validation` | `dynamic_validation.py` | Dynamic behavior verification | No | $0 |
+| `fuzzing` | `fuzz_*.py` | AFL++ fuzzing with NVRAM faker | No | $0 |
+| `poc_refinement` | `poc_refinement.py` | Iterative PoC generation (5 attempts) | Yes | Medium |
+| `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
+| `exploit_gate` | `stage_registry.py` | Exploit promotion gate | No | $0 |
+| `exploit_chain` | `exploit_chain.py` | Exploit chain validation | No | $0 |
+| `exploit_autopoc` | `exploit_autopoc.py` | Automated PoC orchestration | Yes | Medium |
+| `poc_validation` | `poc_validation.py` | PoC reproduction validation | No | $0 |
+| `exploit_policy` | `exploit_policy.py` | Final exploit promotion decision | No | $0 |
+
+OTA-specific stages: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boottriage`, `firmware_lineage` (Android-style OTA payload analysis).
 
 </details>
 
-<details>
-<summary><strong>v2.5.0 New Features (2026-04-13)</strong></summary>
+## Benchmarks
 
-| Feature | Module | Description |
-|---------|--------|-------------|
-| Centralized System Prompts | `llm_prompts.py` (new) | 7 role-based system prompts (ADVOCATE/CRITIC/TAINT/CLASSIFIER/REPAIR/SYNTHESIS) + temperature constants |
-| LLMDriver Protocol Extension | `llm_driver.py` | `system_prompt` + `temperature` parameters wired into all 4 drivers (Codex/Claude API/Claude Code/Ollama) |
-| 5-Stage JSON Parser | `llm_driver.py` | preamble strip → fence → raw → brace-counting → common error fix; optional `required_keys` schema validation |
-| Sink Symbol Expansion 28x | `taint_propagation.py` | `_SINK_SYMBOLS` 11→28 (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf family, scanf family, dlopen, realpath) |
-| Format String Detection | `taint_propagation.py` | `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` for variable-controlled format strings |
-| EPSS Scoring | `cve_scan.py` | FIRST.org API integration, batched queries, per-run + cross-run cache, confidence adjustment by EPSS percentile |
-| LLM Failure Observability | `llm_driver.py` + stages | Separate `parse_failures` vs `llm_call_failures` counters, quota_exhausted detection |
-| GitHub Action | `.github/actions/scout-scan/` | Composite action for CI/CD with SARIF upload to GitHub Security tab |
-| CRA Compliance Mapping | `docs/cra_compliance_mapping.md` | EU Cyber Resilience Act Annex I 12 essential requirements mapped to SCOUT outputs |
-| Strategic Roadmap | `docs/strategic_roadmap_2026.md` | 3-Phase plan based on 30+ academic papers and competitive analysis (Theori Xint, FirmAgent, EU CRA) |
-
-**v2.5.0 Verification (Netgear R7000, codex driver, 2026-04-13):**
-
-| Metric | Pre-v2.5 (1211 run) | v2.5.0 (1320 run) |
-|---|---|---|
-| `adversarial_triage` parse_failures | **100/100** | **0/100** |
-| `adversarial_triage` parsed_ok | 0/100 | 100/100 |
-| `fp_verification` unverified | 97/100 | 0/100 |
-| `fp_verification` true_positives | 1 | 57 |
-| `fp_verification` false_positives | 2 | 43 |
-| `cve_scan` EPSS enriched | 0/23 | 23/23 |
-
-- adversarial debate: 100 debated → 99 downgraded (FP) + 1 maintained (TP)
-- run: `aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c`
-- pre-v2.5 baseline failure was caused by Claude CLI quota; v2.5.0 added explicit `quota_exhausted` classification to distinguish from genuine parse failures
-
-**Key Bug Fixes:**
-- CVE scan signature-only path no longer skips enrichment / finding-candidate generation (early `return` removed)
-- CVE scan backport confidence adjustment now uses per-match component metadata (was incorrectly leaking last loop variable)
-- Semantic classifier batch size reduced 50→15 to prevent JSON schema loss in long contexts
-
-</details>
-
-<details>
-<summary><strong>v2.2.0 New Features</strong></summary>
-
-| Feature | Module | Description |
-|---------|--------|-------------|
-| D-Link SHRS Decryption | `vendor_decrypt.py` | Auto-detects SHRS magic, decrypts AES-128-CBC before extraction |
-| binwalk v3 Compatibility | `extraction.py` | Runtime version detection; auto-strips `-d` flag removed in v3 |
-| Shannon Entropy Detection | `extraction.py` | Pre-extraction entropy analysis; >7.9 flagged as encrypted |
-| CVE Signatures 25x | `cve_scan.py` | Expanded 13→25 signatures; 8 new vendors (Hikvision, QNAP, MikroTik, Ubiquiti, Tenda, Synology, Belkin, TRENDnet) + path_traversal type |
-| Static FP Rules (3) | `fp_verification.py` | Constant-sink gate, non-network binary gate, sanitizer detection |
-| 2-Tier Confidence Caps | `confidence_caps.py` | SYMBOL_COOCCURRENCE_CAP=0.40, STATIC_CODE_VERIFIED_CAP=0.55 |
-| Pandawan/FirmSolo Tier 1.5 | `emulation.py` | Docker-integrated Tier 1.5 emulation with KCRE kernel recovery |
-| Analyst-Readiness Benchmarking | `benchmark_eval.py` + `benchmark_firmae.sh` | Measures archived-bundle verifier pass, actionable candidates, and analyst-ready status |
-| LLM Trace Capture | `llm_driver.py` | Writes per-stage `llm_trace/*.json` with prompt/output/attempt metadata |
-
-**v2.2.0 Benchmark (Tier 1 frozen baseline):**
-
-- `1,123` firmware / `8` vendors
+### Tier 1 (Static, frozen baseline)
+- `1,123` firmware / `8` vendors / `99.2%` analysis rate
 - `1,110` success / `4` partial / `9` failed
-- analysis rate (`success + partial`): `99.2%`
 - `3,523` findings / `13,893` CVE matches
-- extraction ok / partial: `1110 / 4`
-- inventory sufficient / insufficient: `1104 / 10`
-- emulation post-processing (`report.json`) showed `1102` runs with `used_tier=tier1` and `12` with `used_tier=tier2`; this is **stage-level path success, not service-verified full-system success**
 
-**v2.3.0 Benchmark (Tier 2 LLM — adversarial triage):**
-
-- `36` firmware / `9` vendors (ASUS, D-Link, Linksys, Netgear, OpenWrt, QNAP, Tenda, TP-Link, TRENDnet)
-- `2,430` findings debated via Advocate/Critic LLM debate (GPT-5.3-Codex)
-- `99.3%` parse success rate
-- `2,412` downgraded (false positive reduction) / `18` maintained (true findings)
+### Tier 2 (LLM Adversarial Debate, GPT-5.3-Codex)
+- `36` firmware / `9` vendors
+- `2,430` findings debated → `2,412` downgraded + `18` maintained
 - **FPR reduction: 99.3%** | **False negative rate: ≈ 0%**
-- Maintained findings: 5 command injection (gets→system/popen), 8 buffer overflow, 7 unsafe API
 
-See:
+### v2.5.0 Single-Firmware Verification (Netgear R7000, codex driver)
+| Metric | Pre-v2.5 | v2.5.0 |
+|---|---|---|
+| `adversarial_triage` parse_failures | 100/100 | **0/100** |
+| `fp_verification` unverified | 97/100 | **0/100** |
+| `fp_verification` true_positives | 1 | **57** |
+| `cve_scan` EPSS enriched | 0/23 | **23/23** |
 
-- [`docs/tier1_rebenchmark_frozen_baseline.md`](docs/tier1_rebenchmark_frozen_baseline.md)
-- [`docs/tier1_rebenchmark_final_analysis.md`](docs/tier1_rebenchmark_final_analysis.md)
-- [`CHANGELOG.md`](CHANGELOG.md)
-
-</details>
+See [`CHANGELOG.md`](CHANGELOG.md) for full version history.
 
 ---
 
