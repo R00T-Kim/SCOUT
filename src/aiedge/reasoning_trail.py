@@ -36,10 +36,14 @@ __all__ = [
     "ReasoningEntry",
     "append_entry",
     "empty_trail",
+    "format_trail_for_markdown",
+    "format_trail_for_tui",
+    "normalize_trail",
     "redact_excerpt",
 ]
 
 _MAX_EXCERPT_CHARS = 200
+_TUI_RATIONALE_MAX_CHARS = 80
 
 
 def _iso_utc_now() -> str:
@@ -111,3 +115,144 @@ def append_entry(
 def empty_trail() -> list[dict[str, Any]]:
     """Return an empty trail (helper for call sites that want an explicit init)."""
     return []
+
+
+def normalize_trail(trail: object) -> list[dict[str, Any]]:
+    """Return only the dict entries from ``trail`` (or empty list).
+
+    Used by viewer/markdown/TUI render sites that need to defensively read
+    a finding's ``reasoning_trail`` field without trusting its shape. Any
+    non-dict entry is silently dropped, matching the additive-first
+    pattern from PR #11 (consumers that ignore malformed entries keep
+    working).
+    """
+    if not isinstance(trail, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for entry in trail:
+        if isinstance(entry, dict):
+            out.append(entry)
+    return out
+
+
+def _entry_field(entry: dict[str, Any], key: str, default: str = "") -> str:
+    value = entry.get(key, default)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _entry_delta(entry: dict[str, Any]) -> float:
+    delta = entry.get("delta", 0.0)
+    if isinstance(delta, bool) or not isinstance(delta, (int, float)):
+        return 0.0
+    return float(delta)
+
+
+def _format_delta(delta: float) -> str:
+    """Render a non-zero delta as a signed two-decimal string ("+0.10", "-0.15").
+
+    Returns an empty string when ``delta`` is zero so callers can branch on
+    truthiness.
+    """
+    if delta == 0.0:
+        return ""
+    sign = "+" if delta > 0 else ""
+    return f"{sign}{delta:.2f}"
+
+
+def format_trail_for_markdown(trail: object) -> list[str]:
+    """Render a reasoning trail as analyst-markdown lines.
+
+    Returns the empty list when ``trail`` is missing/empty/malformed so
+    callers can use it as a section gate. Each entry becomes one numbered
+    line of the form ``"<idx>. <stage> <step> [(model)] [delta] -- <rationale>"``
+    matching the example in the PR #13 plan. The leading
+    ``**Reasoning Trail (N steps)**`` header is the caller's responsibility
+    so this helper stays free of formatting opinions.
+    """
+    entries = normalize_trail(trail)
+    if not entries:
+        return []
+    lines: list[str] = []
+    for idx, entry in enumerate(entries, start=1):
+        stage = _entry_field(entry, "stage")
+        step = _entry_field(entry, "step")
+        verdict = _entry_field(entry, "verdict")
+        rationale = _entry_field(entry, "rationale")
+        llm_model = _entry_field(entry, "llm_model")
+        delta = _entry_delta(entry)
+        delta_text = _format_delta(delta)
+
+        head_parts: list[str] = []
+        if stage:
+            head_parts.append(stage)
+        if step:
+            head_parts.append(step)
+        head = " ".join(head_parts) if head_parts else "(unknown step)"
+        if llm_model:
+            head = f"{head} ({llm_model})"
+
+        suffix_parts: list[str] = []
+        if verdict:
+            suffix_parts.append(f"-> {verdict}")
+        if delta_text:
+            suffix_parts.append(delta_text)
+        suffix = " ".join(suffix_parts)
+
+        line = f"{idx}. {head}"
+        if suffix:
+            line = f"{line} {suffix}"
+        if rationale:
+            line = f"{line} -- {rationale}"
+        lines.append(line)
+    return lines
+
+
+def format_trail_for_tui(
+    trail: object,
+    *,
+    max_rationale_chars: int = _TUI_RATIONALE_MAX_CHARS,
+    use_unicode: bool = True,
+) -> list[str]:
+    """Render a reasoning trail as compact TUI lines.
+
+    Each line is one trail step indented under the caller-supplied header.
+    Long rationales are truncated to ``max_rationale_chars`` with a
+    ``"..."`` suffix so the TUI never breaks layout. When ``use_unicode``
+    is False (e.g. ``AIEDGE_TUI_ASCII=1``), the arrow glyph degrades to
+    the ASCII ``"->"`` form.
+
+    Returns the empty list when ``trail`` is missing/empty/malformed.
+    """
+    entries = normalize_trail(trail)
+    if not entries:
+        return []
+    arrow = "\u2192" if use_unicode else "->"
+    lines: list[str] = []
+    for idx, entry in enumerate(entries, start=1):
+        stage = _entry_field(entry, "stage") or "?"
+        step = _entry_field(entry, "step") or "?"
+        verdict = _entry_field(entry, "verdict")
+        rationale = _entry_field(entry, "rationale")
+        llm_model = _entry_field(entry, "llm_model")
+        delta = _entry_delta(entry)
+        delta_text = _format_delta(delta)
+
+        if max_rationale_chars > 3 and len(rationale) > max_rationale_chars:
+            rationale_render = rationale[: max_rationale_chars - 3] + "..."
+        else:
+            rationale_render = rationale
+
+        head_parts = [f"[{stage}]", step]
+        if llm_model:
+            head_parts.append(f"({llm_model})")
+        head_parts.append(arrow)
+        head_parts.append(verdict or "(no verdict)")
+        if delta_text:
+            head_parts.append(delta_text)
+        line = f"  {idx}. " + " ".join(head_parts)
+        if rationale_render:
+            line = f"{line} -- {rationale_render}"
+        lines.append(line)
+    return lines
