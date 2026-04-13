@@ -217,6 +217,11 @@ def _finding_to_result(finding: dict[str, Any]) -> dict[str, Any]:
     if isinstance(tier, str) and tier:
         properties["exploitability_tier"] = tier
 
+    # PR #7a: category field is optional; expose when present
+    category = finding.get("category")
+    if isinstance(category, str) and category:
+        properties["scout_category"] = category
+
     if properties:
         result["properties"] = properties
 

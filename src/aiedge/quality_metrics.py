@@ -397,3 +397,30 @@ def format_quality_metrics(payload: dict[str, object]) -> str:
 
 def write_quality_metrics(path: Path, payload: dict[str, object]) -> None:
     _ = path.write_text(format_quality_metrics(payload), encoding="utf-8")
+
+
+def count_findings_by_category(findings: list[object]) -> dict[str, int]:
+    """Count findings by their 'category' field (PR #7a additive).
+
+    Iterates over a findings list (as produced by findings.py) and tallies
+    the optional 'category' field.  Findings without a 'category' key are
+    counted under 'unclassified'.
+
+    This function is read-only — it never modifies the findings list.
+    Callers that want to annotate findings in-place should call
+    ``finding_categories.annotate_findings_with_categories()`` first.
+
+    Args:
+        findings: List of finding dicts (any extra fields are ignored).
+
+    Returns:
+        Dict mapping category name -> count.  Keys present only when count > 0.
+    """
+    counts: dict[str, int] = {}
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        cat = cast(object, item.get("category"))
+        key = cat if isinstance(cat, str) and cat else "unclassified"
+        counts[key] = counts.get(key, 0) + 1
+    return counts

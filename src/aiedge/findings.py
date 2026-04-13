@@ -294,7 +294,11 @@ def _build_credential_mapping(
                     path_any = hit.get("path") or hit.get("file")
                     if not isinstance(text_any, str) or not text_any:
                         continue
-                    file_rel = str(path_any) if isinstance(path_any, str) else "stages/inventory/string_hits.json"
+                    file_rel = (
+                        str(path_any)
+                        if isinstance(path_any, str)
+                        else "stages/inventory/string_hits.json"
+                    )
                     for compiled_pat, ctype in compiled:
                         m = compiled_pat.search(text_any)
                         if m:
@@ -959,10 +963,18 @@ _WEB_INVENTORY_NAME_TOKENS: tuple[str, ...] = (
     "webapi",
     "webman",
 )
-_WEB_BINARY_NAMES: frozenset[str] = frozenset({
-    "httpd", "lighttpd", "uhttpd", "mini_httpd", "boa",
-    "goahead", "thttpd", "nginx",
-})
+_WEB_BINARY_NAMES: frozenset[str] = frozenset(
+    {
+        "httpd",
+        "lighttpd",
+        "uhttpd",
+        "mini_httpd",
+        "boa",
+        "goahead",
+        "thttpd",
+        "nginx",
+    }
+)
 _EXEC_SINK_SYMBOLS: frozenset[str] = frozenset(
     {
         "system",
@@ -975,12 +987,21 @@ _EXEC_SINK_SYMBOLS: frozenset[str] = frozenset(
         "posix_spawnp",
     }
 )
-_BRIDGE_SYMBOLS: frozenset[str] = frozenset({
-    "sprintf", "snprintf", "strcat", "strcpy", "vsprintf", "vsnprintf",
-})
+_BRIDGE_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "sprintf",
+        "snprintf",
+        "strcat",
+        "strcpy",
+        "vsprintf",
+        "vsnprintf",
+    }
+)
 
 
-def _inventory_ref_evidence(path_s: str, *, note: str | None = None) -> dict[str, JsonValue] | None:
+def _inventory_ref_evidence(
+    path_s: str, *, note: str | None = None
+) -> dict[str, JsonValue] | None:
     cleaned = _safe_ascii_text(path_s, max_len=220).replace("\\", "/")
     if not cleaned or cleaned.startswith("/"):
         return None
@@ -1023,15 +1044,23 @@ def _correlate_web_binaries(
         syms_any = hit.get("matched_symbols")
         syms: set[str] = set()
         if isinstance(syms_any, list):
-            syms = {str(s).lower() for s in cast(list[object], syms_any) if isinstance(s, str)}
+            syms = {
+                str(s).lower()
+                for s in cast(list[object], syms_any)
+                if isinstance(s, str)
+            }
 
         exec_syms = sorted(syms & {s.lower() for s in _EXEC_SINK_SYMBOLS})
         if not exec_syms:
             continue
 
-        input_syms = sorted(syms & {"getenv", "recv", "recvfrom", "read", "fgets", "gets"})
+        input_syms = sorted(
+            syms & {"getenv", "recv", "recvfrom", "read", "fgets", "gets"}
+        )
         hardening_raw = hit.get("hardening", {})
-        hardening: dict[str, object] = hardening_raw if isinstance(hardening_raw, dict) else {}
+        hardening: dict[str, object] = (
+            hardening_raw if isinstance(hardening_raw, dict) else {}
+        )
 
         base_no_ext = basename.rsplit(".", 1)[0] if "." in basename else basename
         if base_no_ext in _WEB_BINARY_NAMES or basename in web_names:
@@ -1041,13 +1070,15 @@ def _correlate_web_binaries(
         else:
             continue  # Only include web-related binaries
 
-        affected.append({
-            "binary": path,
-            "sink_symbols": exec_syms,
-            "input_symbols": input_syms,
-            "hardening": hardening,
-            "web_role": web_role,
-        })
+        affected.append(
+            {
+                "binary": path,
+                "sink_symbols": exec_syms,
+                "input_symbols": input_syms,
+                "hardening": hardening,
+                "web_role": web_role,
+            }
+        )
 
     return affected
 
@@ -1091,15 +1122,23 @@ def _inventory_web_exec_overlap_signals(
             path_any = cast(dict[str, object], first_any).get("path")
             if not isinstance(path_any, str):
                 continue
-            ev = _inventory_ref_evidence(path_any, note=f"inventory_web_candidate:{kind or 'unknown'}")
+            ev = _inventory_ref_evidence(
+                path_any, note=f"inventory_web_candidate:{kind or 'unknown'}"
+            )
             if ev is not None:
                 web_evidence.append(ev)
 
     binary_analysis_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
     artifacts_any = inv_obj.get("artifacts")
     if isinstance(artifacts_any, dict):
-        artifact_path_any = cast(dict[str, object], artifacts_any).get("binary_analysis")
-        if isinstance(artifact_path_any, str) and artifact_path_any and not artifact_path_any.startswith("/"):
+        artifact_path_any = cast(dict[str, object], artifacts_any).get(
+            "binary_analysis"
+        )
+        if (
+            isinstance(artifact_path_any, str)
+            and artifact_path_any
+            and not artifact_path_any.startswith("/")
+        ):
             candidate_path = run_dir / artifact_path_any
             if candidate_path.exists() and candidate_path.is_file():
                 binary_analysis_path = candidate_path
@@ -1141,7 +1180,9 @@ def _inventory_web_exec_overlap_signals(
                 notes: list[str] = ["inventory_exec_sinks:" + ",".join(exec_syms)]
                 bridge_syms = sorted(syms.intersection(_BRIDGE_SYMBOLS))
                 if exec_syms and bridge_syms:
-                    notes.append(f"bridge_sink_cooccurrence:{','.join(bridge_syms)}+{','.join(exec_syms)}")
+                    notes.append(
+                        f"bridge_sink_cooccurrence:{','.join(bridge_syms)}+{','.join(exec_syms)}"
+                    )
                 ev = _inventory_ref_evidence(
                     path_any,
                     note=";".join(notes),
@@ -1301,8 +1342,13 @@ def _classify_binary_token(text_l: str) -> tuple[str, str, str] | None:
 
 
 def _binary_anchor_score(
-    *, near_shell: int, mid_shell: int, near_source: int, mid_source: int,
-    near_bridge: int = 0, mid_bridge: int = 0,
+    *,
+    near_shell: int,
+    mid_shell: int,
+    near_source: int,
+    mid_source: int,
+    near_bridge: int = 0,
+    mid_bridge: int = 0,
 ) -> float:
     score = 0.2
     if near_shell > 0:
@@ -1317,8 +1363,14 @@ def _binary_anchor_score(
         score += 0.15
     elif mid_bridge > 0:
         score += 0.08
-    if (near_shell == 0 and mid_shell == 0 and near_source == 0
-            and mid_source == 0 and near_bridge == 0 and mid_bridge == 0):
+    if (
+        near_shell == 0
+        and mid_shell == 0
+        and near_source == 0
+        and mid_source == 0
+        and near_bridge == 0
+        and mid_bridge == 0
+    ):
         return 0.25
     return min(score, 0.85)
 
@@ -1661,7 +1713,14 @@ def _path_signal_weight_for_static_hit(
         weight += 0.08
     if any(
         token in rel
-        for token in ("/cgi-bin/", "/www/", "/htdocs/", "/api/", "/routes/", "/handlers/")
+        for token in (
+            "/cgi-bin/",
+            "/www/",
+            "/htdocs/",
+            "/api/",
+            "/routes/",
+            "/handlers/",
+        )
     ):
         weight += 0.08
     if any(
@@ -1680,8 +1739,13 @@ def _path_signal_weight_for_static_hit(
         for token in ("/cgi", "/web", "/handler", "/route", "/service", "/daemon")
     ):
         weight += 0.06
-    if rule_id in {"python_route_without_auth", "upload_source_signal", "php_upload_source"} and any(
-        token in rel for token in ("/app/", "/api/", "/route", "/handler", "/controller")
+    if rule_id in {
+        "python_route_without_auth",
+        "upload_source_signal",
+        "php_upload_source",
+    } and any(
+        token in rel
+        for token in ("/app/", "/api/", "/route", "/handler", "/controller")
     ):
         weight += 0.05
     return min(1.35, weight), False
@@ -1924,7 +1988,10 @@ def _iter_text_rule_hits(
                         continue
 
                 weighted_score = min(0.95, max(0.05, float(base_score) * path_weight))
-                if weighted_score < 0.4 and family != "command_execution_injection_risk":
+                if (
+                    weighted_score < 0.4
+                    and family != "command_execution_injection_risk"
+                ):
                     continue
 
                 fid = _stable_finding_id(
@@ -2362,8 +2429,12 @@ def _candidate_next_steps(
         add("Verify extraction path normalization and archive traversal protections.")
     if "authenticated_mgmt_cmd_path" in families:
         add("Validate SSH-reachable identities can invoke management command wrappers.")
-        add("Trace authenticated input from SSH/CLI surfaces into command sink arguments.")
-        add("Reproduce authenticated command path in emulation with safe canary inputs.")
+        add(
+            "Trace authenticated input from SSH/CLI surfaces into command sink arguments."
+        )
+        add(
+            "Reproduce authenticated command path in emulation with safe canary inputs."
+        )
     if "cmd_exec_injection_risk" in families:
         add("Trace sink arguments to identify untrusted input propagation.")
         add("Confirm shell execution context and quoting/sanitization boundaries.")
@@ -2434,8 +2505,12 @@ def _candidate_attack_context(
         add_h(
             "Authenticated management access may expose command-injection-relevant command wrappers."
         )
-        add_p("Attacker must obtain valid credentials and reach management-plane service.")
-        add_p("Authenticated parameters must flow into shell/eval sinks without robust sanitization.")
+        add_p(
+            "Attacker must obtain valid credentials and reach management-plane service."
+        )
+        add_p(
+            "Authenticated parameters must flow into shell/eval sinks without robust sanitization."
+        )
         add_i("Post-authenticated remote command execution in management context.")
     if "cmd_exec_injection_risk" in family_set:
         add_h(
@@ -2446,7 +2521,9 @@ def _candidate_attack_context(
     if "archive_extraction" in family_set:
         add_h("Archive extraction path may allow traversal/overwrite in unsafe flows.")
         add_p("Attacker must influence archive content or extraction source.")
-        add_i("File overwrite leading to persistence, config tampering, or code execution.")
+        add_i(
+            "File overwrite leading to persistence, config tampering, or code execution."
+        )
     if "upload_exec_chain" in family_set:
         add_h("Upload-to-execution chain may allow hostile artifact execution.")
         add_p("Upload endpoint must permit attacker-controlled file write.")
@@ -2456,7 +2533,9 @@ def _candidate_attack_context(
         add_p("Route must be externally reachable without compensating middleware.")
         add_i("Unauthorized access to sensitive operation or data.")
     if "weak_ssh_password_auth" in family_set:
-        add_h("SSH password authentication may allow brute-force or credential-stuffing.")
+        add_h(
+            "SSH password authentication may allow brute-force or credential-stuffing."
+        )
         add_p("SSH daemon must be reachable from attacker-controlled network segment.")
         add_i("Compromise of administrative shell access via weak/reused credentials.")
     if "weak_ssh_root_login" in family_set:
@@ -2468,19 +2547,25 @@ def _candidate_attack_context(
         add_p("At least one account with empty password must exist or be creatable.")
         add_i("Unauthenticated or near-unauthenticated remote shell access.")
     if "credential_material_exposure" in family_set:
-        add_h("Credential-like strings suggest potential secret disclosure in firmware.")
+        add_h(
+            "Credential-like strings suggest potential secret disclosure in firmware."
+        )
         add_p("At least one discovered credential must map to a reachable service.")
         add_i("Credential reuse or secret leakage enabling lateral movement.")
 
     if source == "chain":
         add_p("Static chain links must be validated end-to-end in dynamic context.")
     else:
-        add_p("Standalone static signal requires chain construction to confirm exploitability.")
+        add_p(
+            "Standalone static signal requires chain construction to confirm exploitability."
+        )
 
     if isinstance(path, str):
         path_l = path.lower().replace("\\", "/")
         if "/ubnt-" in path_l or "/vyatta/" in path_l:
-            add_i("Management-plane helper compromise may provide high-leverage foothold.")
+            add_i(
+                "Management-plane helper compromise may provide high-leverage foothold."
+            )
         if "/wireguard/" in path_l:
             add_i("VPN-related path abuse may impact secure channel integrity.")
 
@@ -2492,7 +2577,9 @@ def _candidate_attack_context(
     if not impacts:
         impacts.append("Security impact unknown until dynamic verification completes.")
     if not preconditions:
-        preconditions.append("Exploit preconditions unknown; perform data-flow validation.")
+        preconditions.append(
+            "Exploit preconditions unknown; perform data-flow validation."
+        )
 
     return {
         "attack_hypothesis": _safe_ascii_text(attack_hypothesis, max_len=220),
@@ -2802,7 +2889,11 @@ def _build_exploit_candidates_payload(
     best_standalone: dict[tuple[str, str], dict[str, JsonValue]] = {}
     for finding in pattern_scan_findings:
         fid_any = finding.get("finding_id")
-        if not isinstance(fid_any, str) or not fid_any or fid_any in chain_backed_finding_ids:
+        if (
+            not isinstance(fid_any, str)
+            or not fid_any
+            or fid_any in chain_backed_finding_ids
+        ):
             continue
         family = str(finding.get("family", ""))
         if family not in promote_families:
@@ -2810,7 +2901,9 @@ def _build_exploit_candidates_payload(
         path_s = _first_static_evidence_path(finding) or ""
         key = (family, path_s)
         prev = best_standalone.get(key)
-        if prev is None or _as_float(finding.get("score")) > _as_float(prev.get("score")):
+        if prev is None or _as_float(finding.get("score")) > _as_float(
+            prev.get("score")
+        ):
             best_standalone[key] = finding
 
     family_emitted: dict[str, int] = {}
@@ -2892,7 +2985,9 @@ def _build_exploit_candidates_payload(
             "priority": _candidate_priority_from_score(score),
             "finding_ids": cast(
                 list[JsonValue],
-                cast(list[object], ["aiedge.findings.config.ssh_password_authentication"]),
+                cast(
+                    list[object], ["aiedge.findings.config.ssh_password_authentication"]
+                ),
             ),
             "families": cast(list[JsonValue], cast(list[object], [family])),
             "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
@@ -2904,7 +2999,9 @@ def _build_exploit_candidates_payload(
         }
         if path_s:
             candidate["path"] = _safe_ascii_text(path_s, max_len=240)
-        steps = _candidate_next_steps(families=[family], source="heuristic", path=path_s)
+        steps = _candidate_next_steps(
+            families=[family], source="heuristic", path=path_s
+        )
         candidate["analyst_next_steps"] = cast(
             list[JsonValue], cast(list[object], steps)
         )
@@ -2940,7 +3037,9 @@ def _build_exploit_candidates_payload(
         }
         if path_s:
             candidate["path"] = _safe_ascii_text(path_s, max_len=240)
-        steps = _candidate_next_steps(families=[family], source="heuristic", path=path_s)
+        steps = _candidate_next_steps(
+            families=[family], source="heuristic", path=path_s
+        )
         candidate["analyst_next_steps"] = cast(
             list[JsonValue], cast(list[object], steps)
         )
@@ -2960,14 +3059,17 @@ def _build_exploit_candidates_payload(
         path_s = _first_rule_evidence_path(ssh_empty_passwords_evidence)
         score = 0.84
         candidate = {
-            "candidate_id": "candidate:" + _sha256_text("heuristic|ssh_empty_passwords"),
+            "candidate_id": "candidate:"
+            + _sha256_text("heuristic|ssh_empty_passwords"),
             "source": "heuristic",
             "score": score,
             "confidence": _confidence_from_score(score),
             "priority": _candidate_priority_from_score(score),
             "finding_ids": cast(
                 list[JsonValue],
-                cast(list[object], ["aiedge.findings.config.ssh_permit_empty_passwords"]),
+                cast(
+                    list[object], ["aiedge.findings.config.ssh_permit_empty_passwords"]
+                ),
             ),
             "families": cast(list[JsonValue], cast(list[object], [family])),
             "evidence_refs": cast(list[JsonValue], cast(list[object], evidence_refs)),
@@ -2978,7 +3080,9 @@ def _build_exploit_candidates_payload(
         }
         if path_s:
             candidate["path"] = _safe_ascii_text(path_s, max_len=240)
-        steps = _candidate_next_steps(families=[family], source="heuristic", path=path_s)
+        steps = _candidate_next_steps(
+            families=[family], source="heuristic", path=path_s
+        )
         candidate["analyst_next_steps"] = cast(
             list[JsonValue], cast(list[object], steps)
         )
@@ -3002,7 +3106,8 @@ def _build_exploit_candidates_payload(
         family = "credential_material_exposure"
         inv_ref = "stages/inventory/string_hits.json"
         candidate = {
-            "candidate_id": "candidate:" + _sha256_text("heuristic|credential_string_hits"),
+            "candidate_id": "candidate:"
+            + _sha256_text("heuristic|credential_string_hits"),
             "source": "heuristic",
             "score": round(score, 4),
             "confidence": _confidence_from_score(score),
@@ -3276,9 +3381,13 @@ def run_findings(
 
     findings: list[dict[str, JsonValue]] = []
     string_hit_counts = _load_nonzero_string_hit_counts(inv_strings)
-    web_candidate_count, exec_sink_count, web_exec_evidence, web_exec_limits, web_exec_affected = (
-        _inventory_web_exec_overlap_signals(ctx.run_dir, inv_json)
-    )
+    (
+        web_candidate_count,
+        exec_sink_count,
+        web_exec_evidence,
+        web_exec_limits,
+        web_exec_affected,
+    ) = _inventory_web_exec_overlap_signals(ctx.run_dir, inv_json)
     for limitation in web_exec_limits:
         if limitation not in limitations:
             limitations.append(limitation)
@@ -3792,7 +3901,8 @@ def run_findings(
                 _bpath = str(_ab.get("binary", ""))
                 _bname = _bpath.rsplit("/", 1)[-1] if "/" in _bpath else _bpath
                 _sinks = ", ".join(
-                    str(s) + "()" for s in cast(list[object], _ab.get("sink_symbols", []))
+                    str(s) + "()"
+                    for s in cast(list[object], _ab.get("sink_symbols", []))
                 )
                 _h = _ab.get("hardening", {})
                 _h_parts: list[str] = []
@@ -3818,7 +3928,9 @@ def run_findings(
                 "confidence": 0.78,
                 "disposition": "suspected",
                 "description": web_exec_description,
-                "affected_binaries": cast(list[JsonValue], cast(list[object], web_exec_affected)),
+                "affected_binaries": cast(
+                    list[JsonValue], cast(list[object], web_exec_affected)
+                ),
                 "evidence": cast(
                     list[JsonValue],
                     cast(
@@ -3976,12 +4088,25 @@ def run_findings(
             }
         ]
 
+    # PR #7a — additive category annotation (optional field; consumers may ignore)
+    try:
+        from .finding_categories import (
+            annotate_findings_with_categories as _annotate_cats,
+        )
+
+        _category_counts = _annotate_cats(
+            cast(list[dict[str, object]], cast(list[object], normalized))
+        )
+    except Exception:
+        _category_counts = {}  # fail-open: categories are best-effort
+
     payload: dict[str, JsonValue] = {
         "status": "ok" if normalized else "partial",
         "generated_at": _iso_utc_now(),
         "findings": cast(list[JsonValue], cast(list[object], normalized)),
         "evidence": cast(list[JsonValue], cast(list[object], stage_evidence)),
         "extracted_file_count": int(extracted_files),
+        "category_counts": cast(JsonValue, dict(_category_counts)),
     }
 
     out_path = stage_dir / "findings.json"
