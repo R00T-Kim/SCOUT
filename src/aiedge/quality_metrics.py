@@ -424,3 +424,70 @@ def count_findings_by_category(findings: list[object]) -> dict[str, int]:
         key = cat if isinstance(cat, str) and cat else "unclassified"
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+# ---------------------------------------------------------------------------
+# PR #15 -- per-priority bucket aggregation (additive)
+# ---------------------------------------------------------------------------
+
+# Priority bucket boundaries (inclusive lower bound):
+#   critical >= 0.8
+#   high     >= 0.6
+#   medium   >= 0.4
+#   low      <  0.4
+PRIORITY_BUCKET_LABELS: tuple[str, ...] = ("critical", "high", "medium", "low")
+
+
+def _priority_bucket_label(score: float) -> str:
+    """Classify a priority score into an operational bucket.
+
+    Mirrors :func:`aiedge.scoring.priority_bucket` but kept inline so that
+    quality_metrics has zero hard dependency on scoring (allows the metric
+    to be computed against archived runs that predate the scoring module).
+    """
+    if score >= 0.8:
+        return "critical"
+    if score >= 0.6:
+        return "high"
+    if score >= 0.4:
+        return "medium"
+    return "low"
+
+
+def count_findings_by_priority(findings: list[object]) -> dict[str, int]:
+    """Count findings by their 'priority_score' bucket (PR #15 additive).
+
+    Read-only aggregation -- complements (does NOT replace) the existing
+    per-confidence and per-category aggregations. Findings with a missing
+    or non-numeric ``priority_score`` field are counted under
+    ``"unscored"``.
+
+    Buckets:
+      - critical  : priority_score >= 0.8
+      - high      : 0.6 <= priority_score <  0.8
+      - medium    : 0.4 <= priority_score <  0.6
+      - low       :        priority_score <  0.4
+      - unscored  : missing / non-numeric priority_score
+
+    Args:
+        findings: List of finding dicts as produced by ``findings.py``
+            (post-PR #15). Pre-PR #15 findings will all land in
+            ``unscored``.
+
+    Returns:
+        Dict mapping bucket label -> count. All five keys are always
+        present (zero counts included) so downstream dashboards can render
+        a stable bar chart.
+    """
+    counts: dict[str, int] = {label: 0 for label in PRIORITY_BUCKET_LABELS}
+    counts["unscored"] = 0
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        score_any = cast(object, item.get("priority_score"))
+        if isinstance(score_any, bool) or not isinstance(score_any, (int, float)):
+            counts["unscored"] += 1
+            continue
+        bucket = _priority_bucket_label(float(score_any))
+        counts[bucket] = counts.get(bucket, 0) + 1
+    return counts
