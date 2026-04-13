@@ -30,6 +30,7 @@ from .llm_prompts import (
     TEMPERATURE_DETERMINISTIC,
 )
 from .path_safety import assert_under_dir
+from .reasoning_trail import ReasoningEntry, append_entry, redact_excerpt
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
@@ -458,6 +459,21 @@ class AdversarialTriageStage:
                 finding_copy = dict(finding)
                 dec_ctx = _find_decompiled_for(finding)
                 local_traces: list[str] = []
+                # PR #11 -- carry forward any existing trail from upstream
+                # stages (e.g. fp_verification) and append advocate/critic/
+                # decision entries below.
+                _existing_trail_any: object = finding.get("reasoning_trail")
+                local_trail: list[dict[str, JsonValue]]
+                if isinstance(_existing_trail_any, list):
+                    local_trail = [
+                        cast(dict[str, JsonValue], _e)
+                        for _e in cast(list[object], _existing_trail_any)
+                        if isinstance(_e, dict)
+                    ]
+                else:
+                    local_trail = []
+                _ADVERSARIAL_STAGE_LABEL = "adversarial_triage"
+                _ADVERSARIAL_MODEL_TIER: ModelTier = "sonnet"
 
                 # Advocate
                 advocate_prompt = _build_advocate_prompt(finding, dec_ctx)
@@ -501,9 +517,50 @@ class AdversarialTriageStage:
                     if advocate_parsed is not None:
                         advocate_argument = str(advocate_parsed.get("argument", ""))
                 else:
-                    advocate_failure_kind, advocate_failure_reason = classify_llm_failure(
-                        advocate_result
+                    advocate_failure_kind, advocate_failure_reason = (
+                        classify_llm_failure(advocate_result)
                     )
+
+                # PR #11 -- record advocate step in reasoning trail
+                if advocate_parsed is not None:
+                    _exploitable = advocate_parsed.get("exploitable")
+                    _adv_verdict = (
+                        "exploit_path_plausible"
+                        if _exploitable is True
+                        else (
+                            "exploit_path_rejected"
+                            if _exploitable is False
+                            else "reasoning"
+                        )
+                    )
+                    _adv_rationale = str(advocate_parsed.get("argument", "")) or (
+                        "Advocate produced no argument"
+                    )
+                elif advocate_result.status == "ok":
+                    _adv_verdict = "parse_failure"
+                    _adv_rationale = "Advocate response could not be parsed as JSON"
+                else:
+                    _adv_verdict = "llm_call_failed"
+                    _adv_rationale = (
+                        f"Advocate LLM call failed: "
+                        f"{advocate_failure_kind or 'unknown_failure'}"
+                    )
+                local_trail = append_entry(
+                    local_trail,
+                    ReasoningEntry(
+                        stage=_ADVERSARIAL_STAGE_LABEL,
+                        step="advocate",
+                        verdict=_adv_verdict,
+                        rationale=_adv_rationale,
+                        delta=0.0,
+                        llm_model=_ADVERSARIAL_MODEL_TIER,
+                        raw_response_excerpt=redact_excerpt(
+                            advocate_result.stdout
+                            if advocate_result.status == "ok"
+                            else None
+                        ),
+                    ),
+                )
 
                 # Critic
                 critic_prompt = _build_critic_prompt(
@@ -552,17 +609,80 @@ class AdversarialTriageStage:
                         critic_result
                     )
 
+                # PR #11 -- record critic step in reasoning trail
+                if critic_parsed is not None:
+                    _crit_exploitable = critic_parsed.get("exploitable")
+                    if _crit_exploitable is False:
+                        _crit_verdict = "downgrade"
+                    elif _crit_exploitable is True:
+                        _crit_verdict = "maintain"
+                    else:
+                        _crit_verdict = "reasoning"
+                    _crit_rationale = str(critic_parsed.get("rebuttal", "")) or (
+                        "Critic produced no rebuttal"
+                    )
+                elif critic_result.status == "ok":
+                    _crit_verdict = "parse_failure"
+                    _crit_rationale = "Critic response could not be parsed as JSON"
+                else:
+                    _crit_verdict = "llm_call_failed"
+                    _crit_rationale = (
+                        f"Critic LLM call failed: "
+                        f"{critic_failure_kind or 'unknown_failure'}"
+                    )
+                local_trail = append_entry(
+                    local_trail,
+                    ReasoningEntry(
+                        stage=_ADVERSARIAL_STAGE_LABEL,
+                        step="critic",
+                        verdict=_crit_verdict,
+                        rationale=_crit_rationale,
+                        delta=0.0,
+                        llm_model=_ADVERSARIAL_MODEL_TIER,
+                        raw_response_excerpt=redact_excerpt(
+                            critic_result.stdout
+                            if critic_result.status == "ok"
+                            else None
+                        ),
+                    ),
+                )
+
                 # Compare: strong rebuttal -> reduce confidence
                 _local_downgraded = False
+                _decision_delta = 0.0
+                _decision_rationale = ""
                 if critic_parsed is not None and _has_strong_rebuttal(critic_parsed):
                     orig_conf = float(str(finding.get("confidence", 0.5)))
                     new_conf = _clamp01(orig_conf - _CONFIDENCE_REDUCTION)
+                    _decision_delta = new_conf - orig_conf
                     finding_copy["confidence"] = new_conf
                     finding_copy["original_confidence"] = orig_conf
                     finding_copy["triage_outcome"] = "downgraded"
                     _local_downgraded = True
+                    _decision_rationale = (
+                        "Critic cited a strong mitigation; confidence reduced "
+                        f"from {orig_conf:.3f} to {new_conf:.3f}"
+                    )
                 else:
                     finding_copy["triage_outcome"] = "maintained"
+                    _decision_rationale = (
+                        "Critic did not cite a strong mitigation; "
+                        "confidence maintained"
+                    )
+
+                # PR #11 -- record synthesizing decision entry
+                local_trail = append_entry(
+                    local_trail,
+                    ReasoningEntry(
+                        stage=_ADVERSARIAL_STAGE_LABEL,
+                        step="decision",
+                        verdict="downgrade" if _local_downgraded else "maintain",
+                        rationale=_decision_rationale,
+                        delta=_decision_delta,
+                        llm_model=None,
+                        raw_response_excerpt=None,
+                    ),
+                )
 
                 advocate_payload: dict[str, JsonValue]
                 if advocate_parsed is not None:
@@ -577,7 +697,8 @@ class AdversarialTriageStage:
                         "error": "llm_call_failed",
                         "status": advocate_result.status,
                         "failure_kind": advocate_failure_kind or "unknown_failure",
-                        "failure_reason": advocate_failure_reason or advocate_result.status,
+                        "failure_reason": advocate_failure_reason
+                        or advocate_result.status,
                     }
 
                 critic_payload: dict[str, JsonValue]
@@ -596,16 +717,18 @@ class AdversarialTriageStage:
                         "failure_reason": critic_failure_reason or critic_result.status,
                     }
 
-                finding_copy["advocate_argument"] = (
-                    advocate_payload
-                )
-                finding_copy["critic_rebuttal"] = (
-                    critic_payload
-                )
+                finding_copy["advocate_argument"] = advocate_payload
+                finding_copy["critic_rebuttal"] = critic_payload
                 finding_copy["trace_refs"] = cast(
                     list[JsonValue], cast(list[object], local_traces[-4:])
                 )
-                _local_parsed_ok = advocate_parsed is not None and critic_parsed is not None
+                # PR #11 -- attach the reasoning trail (additive field)
+                finding_copy["reasoning_trail"] = cast(
+                    JsonValue, cast(list[object], local_trail)
+                )
+                _local_parsed_ok = (
+                    advocate_parsed is not None and critic_parsed is not None
+                )
                 _local_llm_call_failure = (
                     advocate_result.status != "ok" or critic_result.status != "ok"
                 )
@@ -672,9 +795,7 @@ class AdversarialTriageStage:
                 "One or more adversarial triage responses could not be parsed"
             )
         if llm_call_failure_count > 0:
-            limitations.append(
-                "One or more adversarial triage LLM calls failed"
-            )
+            limitations.append("One or more adversarial triage LLM calls failed")
 
         payload = {
             "schema_version": _SCHEMA_VERSION,

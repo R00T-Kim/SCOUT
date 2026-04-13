@@ -4103,6 +4103,33 @@ def run_findings(
     except Exception:
         _category_counts = {}  # fail-open: categories are best-effort
 
+    # PR #11 — additive reasoning_trail pass-through. The field is populated
+    # upstream by adversarial_triage / fp_verification when they adjust
+    # confidence; here we only (a) normalise the in-place shape (list[dict]
+    # or drop on malformed input) and (b) count how many findings carry a
+    # non-empty trail so analysts can see the coverage. Mirrors PR #7a's
+    # additive-only philosophy: no schema bump, no downstream consumer
+    # touched. Findings without a trail simply omit the field.
+    _reasoning_trail_count = 0
+    for _f in normalized:
+        _trail_any: object = _f.get("reasoning_trail")
+        if isinstance(_trail_any, list):
+            _clean_trail: list[JsonValue] = []
+            for _entry in cast(list[object], _trail_any):
+                if isinstance(_entry, dict):
+                    _clean_trail.append(
+                        cast(JsonValue, cast(dict[str, JsonValue], _entry))
+                    )
+            if _clean_trail:
+                _f["reasoning_trail"] = cast(JsonValue, _clean_trail)
+                _reasoning_trail_count += 1
+            else:
+                # Empty or malformed trail: drop the field to keep output lean
+                _f.pop("reasoning_trail", None)
+        elif _trail_any is not None:
+            # Malformed (not a list): drop so consumers get consistent typing
+            _f.pop("reasoning_trail", None)
+
     payload: dict[str, JsonValue] = {
         "status": "ok" if normalized else "partial",
         "generated_at": _iso_utc_now(),
@@ -4110,6 +4137,7 @@ def run_findings(
         "evidence": cast(list[JsonValue], cast(list[object], stage_evidence)),
         "extracted_file_count": int(extracted_files),
         "category_counts": cast(JsonValue, dict(_category_counts)),
+        "reasoning_trail_count": _reasoning_trail_count,
     }
 
     out_path = stage_dir / "findings.json"
