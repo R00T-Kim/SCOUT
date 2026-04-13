@@ -240,12 +240,16 @@ _This section records post-release real-firmware validation runs, distinct from 
 
 | Metric | v2.5.0 | v2.6.0 |
 |---|---|---|
-| `adversarial_triage` parse_failures | 0/100 | *run pending, update after post-merge validation* |
-| `fp_verification` unverified | 0/100 | *run pending* |
-| `reasoning_trail_count` (findings with trail) | N/A | *run pending* |
-| findings with `priority_score` | N/A | *run pending* |
-| `cve_scan` EPSS enriched | 23/23 | *run pending* |
-| `--experimental-parallel 4` wall-clock delta | N/A | *run pending* |
+| `adversarial_triage` parse_failures | 0/100 | **0/100** (100 debated, 97 downgraded, 3 maintained) |
+| `fp_verification` unverified | 0/100 | **0/100** (100 verified: 56 TP, 44 FP) |
+| `reasoning_trail_count` (top-level findings) | N/A | **0/3** top-level / **100/100** at `adversarial_triage` + `fp_verification` artifacts ¹ |
+| findings with `priority_score` | N/A | **3/3** (100% additive priority annotation) |
+| `priority_bucket_counts` | N/A | `{critical: 0, high: 0, medium: 3, low: 0}` |
+| category distribution | N/A | `{vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}` |
+| `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — `sbom` partial due to squashfs extraction failure on this firmware build) |
+| `--experimental-parallel 4` wall-clock | N/A | **~170 minutes** end-to-end across the registered pipeline (`fp_verification` dominant at 113 min; no sequential baseline for delta) |
+
+¹ **v2.6.0 → v2.6.1 follow-up (commit `7b36274`)**: the top-level synthesis finding (`web.exec_sink_overlap`) did not inherit the per-alert trails debated under it. A post-v2.6.0 fix adds synthesis-level `synthesis_inherit` entries that mirror the downstream aggregate outcome (`fp_verification` TP/FP counts + `adversarial_triage` downgrade/maintain split) onto the synthesis finding. This R7000 run reflects the v2.6.0 shipped behaviour; after the fix, `reasoning_trail_count` at the top level rises to **1/3** on re-run.
 
 #### Validation target 2 — OpenWrt Archer C7 v5 (TP-Link, `--no-llm`)
 

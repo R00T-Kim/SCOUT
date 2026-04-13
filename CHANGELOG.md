@@ -3,6 +3,12 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Synthesis finding reasoning_trail inheritance** (`findings.py`). Top-level synthesis findings such as `aiedge.findings.web.exec_sink_overlap` are built from inventory overlap signals, not directly from LLM-debated taint paths. As a result, `findings.json` would report `reasoning_trail_count=0` at the top level even when 100+ underlying taint alerts had been debated by `adversarial_triage` and verified by `fp_verification`. New helper `_inherit_synthesis_reasoning_trail()` loads `stages/adversarial_triage/triaged_findings.json` and `stages/fp_verification/verified_alerts.json` summaries, then attaches `synthesis_inherit` `ReasoningEntry` items that mirror the aggregate downstream outcome (TP/FP counts + debate downgraded/maintained split) onto the targeted synthesis finding. Fail-open on missing artifacts; additive-only (PR #11 / PR #7a pattern). Surfaced on Netgear R7000 v2.6.0 post-merge validation run where top-level trail count was 0/3 despite 100/100 trails present at the stage-artifact level. _(5 new tests in `TestSynthesisReasoningTrailInheritance`; 1033 tests green.)_
+
 ## [2.6.0] — 2026-04-13
 
 Phase 2B release. Performance + analyst copilot UX + confidence calibration. 6 atomic commits, single-session parallel execution via worktree isolation. Merged via [PR #6](https://github.com/R00T-Kim/SCOUT/pull/6) (rebase). All downstream consumers untouched (PR #7a additive-first pattern maintained throughout).

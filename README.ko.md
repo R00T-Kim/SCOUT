@@ -240,12 +240,16 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 
 | 지표 | v2.5.0 | v2.6.0 |
 |---|---|---|
-| `adversarial_triage` parse_failures | 0/100 | *post-merge 검증 런 대기, 결과 반영 예정* |
-| `fp_verification` unverified | 0/100 | *런 대기* |
-| `reasoning_trail_count` (trail 보유 finding 수) | N/A | *런 대기* |
-| `priority_score` 보유 finding 수 | N/A | *런 대기* |
-| `cve_scan` EPSS enriched | 23/23 | *런 대기* |
-| `--experimental-parallel 4` wall-clock 차이 | N/A | *런 대기* |
+| `adversarial_triage` parse_failures | 0/100 | **0/100** (100 debated, 97 downgraded, 3 maintained) |
+| `fp_verification` unverified | 0/100 | **0/100** (100 verified: 56 TP, 44 FP) |
+| `reasoning_trail_count` (top-level findings) | N/A | **0/3** top-level / **100/100** `adversarial_triage` + `fp_verification` 아티팩트 ¹ |
+| `priority_score` 보유 finding 수 | N/A | **3/3** (100% additive priority annotation) |
+| `priority_bucket_counts` | N/A | `{critical: 0, high: 0, medium: 3, low: 0}` |
+| category 분포 | N/A | `{vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}` |
+| `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — 이 펌웨어 빌드의 squashfs 추출 실패로 `sbom`이 partial) |
+| `--experimental-parallel 4` wall-clock | N/A | **약 170분** 파이프라인 end-to-end (`fp_verification`이 113분으로 dominant. 순차 실행 baseline 없어서 델타 미산정) |
+
+¹ **v2.6.0 → v2.6.1 후속 수정 (커밋 `7b36274`)**: 기존에는 top-level synthesis finding(`web.exec_sink_overlap`)이 그 아래에서 debate된 per-alert trail을 상속받지 못했습니다. 후속 패치는 `fp_verification`의 TP/FP 카운트 + `adversarial_triage`의 downgrade/maintain 집계를 `synthesis_inherit` 항목으로 synthesis finding에 부착합니다. 위 R7000 런은 v2.6.0 배포본 동작이며, 패치 적용 후 재실행하면 top-level `reasoning_trail_count`는 **1/3**이 됩니다.
 
 #### 검증 대상 2 — OpenWrt Archer C7 v5 (TP-Link, `--no-llm`)
 
