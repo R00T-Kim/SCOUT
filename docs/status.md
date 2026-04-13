@@ -294,6 +294,27 @@ R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 pos
 
 ## 다음 우선순위
 
+> [!important] **Phase 2C/2D/3 실행 계획**은 gnosis wiki에 통합 관리됩니다: [`gnosis/wiki/projects/scout-phase-2c-2d-plan.md`](https://github.com/R00T-Kim/gnosis/blob/main/wiki/projects/scout-phase-2c-2d-plan.md). 세션이 바뀌거나 담당자가 교체돼도 동일 품질의 결과가 나오도록 SSOT 표, dependency DAG, operator checklist, 각 작업 항목의 entry/exit criteria, 검증 명령, 롤백 계획이 전부 거기에 있습니다. 아래 "다음 우선순위" 목록은 **Phase 2C 착수 전의 레거시 백로그**이며, 계획 문서의 Phase 2C 작업이 이들을 흡수/재배치합니다.
+
+**Phase 2C 요약** (6-8주, foundation hardening):
+- 2C.1 SBOM 재측정 파일럿 5 펌웨어 (3일)
+- 2C.2 Synthesis inherit finding-level 재작성 (3일)
+- 2C.3 `finding.evidence_tier` 필드 rollout (1주)
+- 2C.4 Stage contract tests 42 스테이지 (2-3주)
+- 2C.5 병렬 실행 hardening + wall-clock 실측 (1주)
+- 2C.6 1,123 펌웨어 corpus 전체 재측정 (1-2주)
+- 2C.7 Docs/marketing 규율 + v2.6.1 태그 (1주)
+
+**Phase 2D 요약** (8-12주, capability layer — 기존 Phase 2C였던 항목):
+- 2D.1 reasoning_trail + MCP 실전 루프 검증
+- 2D.2 Multi-agent exploit chain (VulnSage)
+- 2D.3 LLM 퍼즈 하네스 자동 생성
+- 2D.4 Vul-RAG / LLM4Decompile / GhidraMCP
+
+---
+
+**레거시 백로그** (Phase 2C 작업에 흡수/재배치됨):
+
 1) 새 benchmark contract로 Tier 2 full fresh rerun 수행 (legacy snapshot과 분리된 공식 analyst-readiness baseline 생성)
 2) report verifier의 remaining dangling `evidence_refs` assembly 경로 정리
 3) Reachability 컴포넌트-노드 ID 매칭 로직 개선 (CPE 이름 → graph 노드 ID 정규화)
