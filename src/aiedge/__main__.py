@@ -87,7 +87,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if command in ("analyze", "analyze-8mb"):
         input_firmware = cast(str, getattr(args, "input_firmware"))
-        case_id = cast(str, getattr(args, "case_id")) if getattr(args, "case_id") else f"auto-{int(time.time())}"
+        case_id = (
+            cast(str, getattr(args, "case_id"))
+            if getattr(args, "case_id")
+            else f"auto-{int(time.time())}"
+        )
         ack_authorization = bool(getattr(args, "ack_authorization", False))
         time_budget_s = cast(int, getattr(args, "time_budget_s"))
         open_egress = bool(getattr(args, "open_egress", False))
@@ -186,9 +190,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 egress_allowlist=egress_allow,
                 ref_md_path=ref_md,
                 require_ref_md=require_ref_md,
-                runs_root=(Path.cwd() / "aiedge-8mb-runs")
-                if enforce_canonical_8mb
-                else None,
+                runs_root=(
+                    (Path.cwd() / "aiedge-8mb-runs") if enforce_canonical_8mb else None
+                ),
             )
 
             if enforce_canonical_8mb:
@@ -227,10 +231,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not getattr(args, "quiet", False):
                 try:
                     from .progress import ProgressTracker
+
                     _progress = ProgressTracker()
                 except Exception:
                     pass
 
+            _is_quiet = bool(getattr(args, "quiet", False))
             stage_status: str | None = None
             if stage_names is not None:
                 if not callable(run_subset):
@@ -243,6 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         time_budget_s=time_budget_s,
                         no_llm=no_llm,
                         on_progress=_progress,
+                        quiet=_is_quiet,
                     ),
                 )
                 stage_status = rep.status
@@ -255,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         no_llm=no_llm,
                         force_retriage=force_retriage,
                         on_progress=_progress,
+                        quiet=_is_quiet,
                     ),
                 )
         except ValueError as e:
@@ -335,6 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not getattr(args, "quiet", False):
                 try:
                     from .progress import ProgressTracker
+
                     _progress_stages = ProgressTracker()
                 except Exception:
                     pass
@@ -347,6 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     time_budget_s=time_budget_s,
                     no_llm=no_llm,
                     on_progress=_progress_stages,
+                    quiet=bool(getattr(args, "quiet", False)),
                 ),
             )
         except ValueError as e:

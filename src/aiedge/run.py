@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import json
 import shutil
+import sys
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +62,41 @@ DEFAULT_EGRESS_ALLOWLIST: tuple[str, ...] = (
 
 STAGE_MANIFEST_CONTRACT_VERSION = "1.0"
 STAGE_ARTIFACT_HASH_CAP_BYTES = 64 * 1024 * 1024
+
+
+def _emit_extraction_guidance(
+    stage_result: StageResult,
+    *,
+    quiet: bool = False,
+    logs_dir: Path | None = None,
+) -> None:
+    """Print analyst guidance to stderr when an extraction stage outcome includes it.
+
+    Called after _apply_stage_result_to_report() for the extraction stage.
+    When quiet=True, guidance is suppressed on stderr but still written to the
+    run-dir log file (logs_dir/extraction_guidance.txt) so analysts can review it.
+
+    The guidance text is purely informational — it does not affect the failure
+    status or downstream stage behaviour.
+    """
+    if stage_result.stage != "extraction":
+        return
+    guidance = stage_result.details.get("extraction_guidance")
+    if not isinstance(guidance, str) or not guidance.strip():
+        return
+
+    header = "[ANALYST GUIDANCE] Extraction failure — next steps:"
+    full_msg = f"\n{header}\n{guidance}\n"
+
+    if not quiet:
+        print(full_msg, file=sys.stderr)
+
+    if logs_dir is not None:
+        try:
+            guide_path = logs_dir / "extraction_guidance.txt"
+            _ = guide_path.write_text(guidance, encoding="utf-8")
+        except OSError:
+            pass
 
 
 def _read_report_stage_status(report: dict[str, JsonValue], stage_name: str) -> str:
@@ -2075,6 +2111,7 @@ def run_subset(
     time_budget_s: int = 3600,
     no_llm: bool = False,
     on_progress: object | None = None,
+    quiet: bool = False,
 ) -> RunReport:
     ctx = StageContext(
         run_dir=info.run_dir,
@@ -2108,6 +2145,7 @@ def run_subset(
 
     for stage_result in rep.stage_results:
         _apply_stage_result_to_report(report, stage_result, budget_s=budget_s)
+        _emit_extraction_guidance(stage_result, quiet=quiet, logs_dir=ctx.logs_dir)
 
     existing_limits = normalize_limitations_list(report.get("limitations"))
     report["limitations"] = cast(
@@ -2162,6 +2200,7 @@ def analyze_run(
     no_llm: bool = False,
     force_retriage: bool = False,
     on_progress: object | None = None,
+    quiet: bool = False,
 ) -> str:
     ctx = StageContext(
         run_dir=info.run_dir,
@@ -3350,6 +3389,9 @@ def analyze_run(
         "reasons": reasons,
         "details": details,
     }
+
+    if extraction_res is not None:
+        _emit_extraction_guidance(extraction_res, quiet=quiet, logs_dir=ctx.logs_dir)
 
     tooling_res2 = next((r for r in rep.stage_results if r.stage == "tooling"), None)
     if tooling_res2 is not None:

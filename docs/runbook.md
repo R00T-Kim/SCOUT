@@ -28,6 +28,38 @@ If extraction quality is low for your target format (few files, wrong OS guess),
 
 `--rootfs` writes `manifest.rootfs_input_path` and forces extraction stage to ingest that directory.
 
+## Extraction failure
+
+When the extraction stage fails, SCOUT prints an `[ANALYST GUIDANCE]` block to stderr (suppressed with `--quiet`, but always written to `<run_dir>/logs/extraction_guidance.txt`).
+
+Common failure signatures and remediation:
+
+| Symptom | Likely cause | Recommended action |
+|---------|-------------|-------------------|
+| entropy ≥ 7.8 in stage.json | Encrypted firmware | Check `vendor_decrypt.py` for a matching handler; add one for this vendor |
+| 0 extracted files, rc=0 | Unknown container format | Try `binwalk --entropy firmware.bin`; use `--rootfs` with a pre-extracted copy |
+| Extraction timed out | Very large/nested firmware | Increase `--time-budget-s`; or bypass with `--rootfs` |
+| binwalk not installed | Missing tool | `pip install binwalk` or `apt install binwalk`; or use `--rootfs` to skip |
+| --rootfs path invalid | Bad path | Verify the path is an existing directory |
+
+Actionable steps in any failure case:
+
+1. **Check `vendor_decrypt.py`** — it contains known vendor format handlers (D-Link SHRS, etc.). If your firmware vendor is there, it may already be supported.
+2. **Provide a pre-extracted rootfs** — bypass extraction entirely:
+   ```bash
+   ./scout analyze firmware.bin --rootfs /path/to/extracted/rootfs
+   ```
+3. **Try binwalk entropy mode** to understand the firmware layout:
+   ```bash
+   binwalk --entropy firmware.bin
+   ```
+4. **File an issue** with the first 4 KB hex dump so the extraction team can add support:
+   ```bash
+   xxd firmware.bin | head -64
+   ```
+
+If SCOUT is run with `--quiet`, guidance is still written to `<run_dir>/logs/extraction_guidance.txt` for post-run review.
+
 ## 1.1) Benchmark fidelity / analyst-readiness workflow
 
 Use this flow when you are validating benchmark quality, not just pipeline completion:

@@ -64,6 +64,129 @@ def _shannon_entropy(path: Path, sample_bytes: int = 65536) -> float:
     return entropy
 
 
+def _build_extraction_guidance(
+    *,
+    reason_code: str,
+    entropy: float | None = None,
+    vendor_tried: str | None = None,
+    binwalk_rc: int | None = None,
+) -> str:
+    """Build a structured analyst guidance message for extraction failures.
+
+    This is purely informational — failure status semantics are unchanged.
+    The message is attached to StageOutcome.details['extraction_guidance'] and
+    printed to stderr by run.py (suppressed when --quiet is set).
+
+    Args:
+        reason_code:  Machine-readable cause key (see below).
+        entropy:      Measured Shannon entropy if available.
+        vendor_tried: Name of the vendor decrypt method that was attempted.
+        binwalk_rc:   binwalk exit code when it ran but produced no files.
+
+    Reason codes:
+        encrypted         -- entropy ≥ 7.8 and no vendor decrypt succeeded
+        unknown_container -- binwalk ran but extracted 0 files
+        timeout           -- binwalk exceeded the time budget
+        no_binwalk        -- binwalk is not installed
+        invalid_rootfs    -- --rootfs path is not a valid directory
+    """
+    lines: list[str] = []
+
+    # ---------- detected reason header ----------
+    if reason_code == "encrypted":
+        ent_str = f"{entropy:.2f}" if entropy is not None else "high"
+        lines.append(
+            f"Detected encryption (entropy {ent_str}/8.0). "
+            "Possible vendor decryption needed."
+        )
+    elif reason_code == "unknown_container":
+        rc_str = f" (rc={binwalk_rc})" if binwalk_rc is not None else ""
+        lines.append(
+            f"binwalk produced 0 extracted files{rc_str}. "
+            "Unknown container format or missing extractor."
+        )
+    elif reason_code == "timeout":
+        lines.append("binwalk timed out before extraction completed.")
+    elif reason_code == "no_binwalk":
+        lines.append("binwalk is not installed; extraction was skipped.")
+    elif reason_code == "invalid_rootfs":
+        lines.append("The --rootfs path does not exist or is not a directory.")
+    else:
+        lines.append(f"Extraction failed (reason: {reason_code}).")
+
+    # ---------- actionable suggestions ----------
+    lines.append("Suggested actions:")
+
+    if reason_code in ("encrypted", "unknown_container"):
+        vendor_note = (
+            f" (tried: {vendor_tried})"
+            if vendor_tried and vendor_tried != "no vendor decryption scheme matched"
+            else ""
+        )
+        lines.append(
+            f"  1. Check vendor_decrypt.py for known vendor formats{vendor_note} "
+            "and add a handler for this firmware."
+        )
+        lines.append(
+            "  2. Provide a pre-extracted rootfs: "
+            "./scout analyze firmware.bin --rootfs /path/to/extracted"
+        )
+        lines.append(
+            "  3. Try binwalk v3 entropy mode / alternative extractor: "
+            "binwalk --entropy firmware.bin"
+        )
+        lines.append(
+            "  4. File an issue with the first 4 KB hex dump: "
+            "xxd firmware.bin | head -64"
+        )
+    elif reason_code == "timeout":
+        lines.append(
+            "  1. Increase the time budget: "
+            "./scout analyze firmware.bin --time-budget-s 7200"
+        )
+        lines.append(
+            "  2. Provide a pre-extracted rootfs to skip extraction entirely: "
+            "./scout analyze firmware.bin --rootfs /path/to/extracted"
+        )
+        lines.append(
+            "  3. Run binwalk manually and check for infinite loops: "
+            "binwalk -e firmware.bin"
+        )
+        lines.append(
+            "  4. File an issue with the first 4 KB hex dump: "
+            "xxd firmware.bin | head -64"
+        )
+    elif reason_code == "no_binwalk":
+        lines.append(
+            "  1. Install binwalk: pip install binwalk  OR  apt install binwalk"
+        )
+        lines.append(
+            "  2. Provide a pre-extracted rootfs to bypass extraction entirely: "
+            "./scout analyze firmware.bin --rootfs /path/to/extracted"
+        )
+        lines.append(
+            "  3. Check vendor_decrypt.py for any format-specific helpers "
+            "that may not require binwalk."
+        )
+    elif reason_code == "invalid_rootfs":
+        lines.append(
+            "  1. Verify the path exists and is a directory: "
+            "ls -la /path/to/extracted"
+        )
+        lines.append(
+            "  2. Run extraction from scratch (omit --rootfs) to attempt binwalk: "
+            "./scout analyze firmware.bin"
+        )
+        lines.append(
+            "  3. If the firmware is encrypted, check vendor_decrypt.py first."
+        )
+
+    # ---------- documentation pointer ----------
+    lines.append("Hint: docs/runbook.md#extraction-failure")
+
+    return "\n".join(lines)
+
+
 def _rel_to_run_dir(run_dir: Path, path: Path) -> str:
     try:
         resolved = path.resolve()
@@ -964,6 +1087,9 @@ class ExtractionStage:
                     "evidence": [
                         _evidence_path(ctx.run_dir, fw, note="missing"),
                     ],
+                    "extraction_guidance": _build_extraction_guidance(
+                        reason_code="invalid_rootfs",
+                    ),
                 },
                 limitations=["Firmware file missing inside run directory."],
             )
@@ -1012,7 +1138,9 @@ class ExtractionStage:
             details["manual_rootfs_source"] = rootfs_ref
 
             if not rootfs_src.is_dir():
-                reasons.append("provided rootfs directory does not exist or is not a directory")
+                reasons.append(
+                    "provided rootfs directory does not exist or is not a directory"
+                )
                 details["confidence"] = 0.0
                 details["reasons"] = cast(list[JsonValue], list(reasons))
                 _ = log_path.write_text(
@@ -1020,8 +1148,15 @@ class ExtractionStage:
                     encoding="utf-8",
                 )
                 evidence.append(_evidence_path(ctx.run_dir, log_path))
-                evidence.append(_evidence_path(ctx.run_dir, extracted_dir, note="missing"))
-                details["evidence"] = cast(list[JsonValue], cast(list[object], evidence))
+                evidence.append(
+                    _evidence_path(ctx.run_dir, extracted_dir, note="missing")
+                )
+                details["evidence"] = cast(
+                    list[JsonValue], cast(list[object], evidence)
+                )
+                details["extraction_guidance"] = _build_extraction_guidance(
+                    reason_code="invalid_rootfs",
+                )
                 return StageOutcome(
                     status="failed",
                     details=details,
@@ -1068,8 +1203,15 @@ class ExtractionStage:
                     "binwalk not installed; extraction skipped\n", encoding="utf-8"
                 )
                 evidence.append(_evidence_path(ctx.run_dir, log_path))
-                evidence.append(_evidence_path(ctx.run_dir, extracted_dir, note="missing"))
-                details["evidence"] = cast(list[JsonValue], cast(list[object], evidence))
+                evidence.append(
+                    _evidence_path(ctx.run_dir, extracted_dir, note="missing")
+                )
+                details["evidence"] = cast(
+                    list[JsonValue], cast(list[object], evidence)
+                )
+                details["extraction_guidance"] = _build_extraction_guidance(
+                    reason_code="no_binwalk",
+                )
                 return StageOutcome(
                     status="partial",
                     details=details,
@@ -1138,6 +1280,9 @@ class ExtractionStage:
                 details["evidence"] = cast(
                     list[JsonValue], cast(list[object], evidence)
                 )
+                details["extraction_guidance"] = _build_extraction_guidance(
+                    reason_code="timeout",
+                )
                 return StageOutcome(
                     status="failed",
                     details=details,
@@ -1180,7 +1325,9 @@ class ExtractionStage:
 
         extracted_files = _count_files(extracted_dir)
         min_expected_files = int(max(0, self.min_extracted_files))
-        limitations: list[str] = list(entropy_limits) + list(recursive_limits) + list(manual_rootfs_limits)
+        limitations: list[str] = (
+            list(entropy_limits) + list(recursive_limits) + list(manual_rootfs_limits)
+        )
 
         if res is not None:
             details["binwalk_returncode"] = int(res.returncode)
@@ -1241,4 +1388,42 @@ class ExtractionStage:
         details["confidence"] = float(confidence)
         details["reasons"] = cast(list[JsonValue], list(reasons))
         details["evidence"] = cast(list[JsonValue], cast(list[object], evidence))
+
+        # Attach analyst guidance on any non-ok outcome.
+        if status != "ok":
+            _entropy_raw = details.get("firmware_entropy")
+            _entropy_val: float | None = (
+                float(_entropy_raw) if isinstance(_entropy_raw, (int, float)) else None
+            )
+            # Use decrypt_log wording stored in reasons if vendor was tried
+            _vendor_tried: str | None = None
+            for _r in reasons:
+                if "Vendor decryption attempted:" in _r:
+                    _vendor_tried = _r.split("Vendor decryption attempted:", 1)[
+                        -1
+                    ].strip()
+                    break
+
+            if (
+                _entropy_val is not None
+                and _entropy_val > 7.8
+                and not details.get("vendor_decrypted")
+            ):
+                _guidance_code = "encrypted"
+            elif extracted_files <= 0:
+                _guidance_code = "unknown_container"
+            else:
+                _guidance_code = "unknown_container"
+
+            _bw_rc_raw = details.get("binwalk_returncode")
+            _bw_rc: int | None = (
+                int(_bw_rc_raw) if isinstance(_bw_rc_raw, int) else None
+            )
+            details["extraction_guidance"] = _build_extraction_guidance(
+                reason_code=_guidance_code,
+                entropy=_entropy_val,
+                vendor_tried=_vendor_tried,
+                binwalk_rc=_bw_rc,
+            )
+
         return StageOutcome(status=status, details=details, limitations=limitations)
