@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.4.1-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.5.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -154,6 +154,44 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | `poc_refinement` | `poc_refinement.py` | Iterative PoC generation from fuzzing seeds (5 attempts) | Yes | Medium |
 | `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
 | `csource_identification` | `csource_identification.py` | HTTP input source identification via static sentinel + QEMU | No | $0 |
+
+</details>
+
+<details>
+<summary><strong>v2.5.0 New Features (2026-04-13)</strong></summary>
+
+| Feature | Module | Description |
+|---------|--------|-------------|
+| Centralized System Prompts | `llm_prompts.py` (new) | 7 role-based system prompts (ADVOCATE/CRITIC/TAINT/CLASSIFIER/REPAIR/SYNTHESIS) + temperature constants |
+| LLMDriver Protocol Extension | `llm_driver.py` | `system_prompt` + `temperature` parameters wired into all 4 drivers (Codex/Claude API/Claude Code/Ollama) |
+| 5-Stage JSON Parser | `llm_driver.py` | preamble strip → fence → raw → brace-counting → common error fix; optional `required_keys` schema validation |
+| Sink Symbol Expansion 28x | `taint_propagation.py` | `_SINK_SYMBOLS` 11→28 (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf family, scanf family, dlopen, realpath) |
+| Format String Detection | `taint_propagation.py` | `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` for variable-controlled format strings |
+| EPSS Scoring | `cve_scan.py` | FIRST.org API integration, batched queries, per-run + cross-run cache, confidence adjustment by EPSS percentile |
+| LLM Failure Observability | `llm_driver.py` + stages | Separate `parse_failures` vs `llm_call_failures` counters, quota_exhausted detection |
+| GitHub Action | `.github/actions/scout-scan/` | Composite action for CI/CD with SARIF upload to GitHub Security tab |
+| CRA Compliance Mapping | `docs/cra_compliance_mapping.md` | EU Cyber Resilience Act Annex I 12 essential requirements mapped to SCOUT outputs |
+| Strategic Roadmap | `docs/strategic_roadmap_2026.md` | 3-Phase plan based on 30+ academic papers and competitive analysis (Theori Xint, FirmAgent, EU CRA) |
+
+**v2.5.0 Verification (Netgear R7000, codex driver, 2026-04-13):**
+
+| Metric | Pre-v2.5 (1211 run) | v2.5.0 (1320 run) |
+|---|---|---|
+| `adversarial_triage` parse_failures | **100/100** | **0/100** |
+| `adversarial_triage` parsed_ok | 0/100 | 100/100 |
+| `fp_verification` unverified | 97/100 | 0/100 |
+| `fp_verification` true_positives | 1 | 57 |
+| `fp_verification` false_positives | 2 | 43 |
+| `cve_scan` EPSS enriched | 0/23 | 23/23 |
+
+- adversarial debate: 100 debated → 99 downgraded (FP) + 1 maintained (TP)
+- run: `aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c`
+- pre-v2.5 baseline failure was caused by Claude CLI quota; v2.5.0 added explicit `quota_exhausted` classification to distinguish from genuine parse failures
+
+**Key Bug Fixes:**
+- CVE scan signature-only path no longer skips enrichment / finding-candidate generation (early `return` removed)
+- CVE scan backport confidence adjustment now uses per-match component metadata (was incorrectly leaking last loop variable)
+- Semantic classifier batch size reduced 50→15 to prevent JSON schema loss in long contexts
 
 </details>
 

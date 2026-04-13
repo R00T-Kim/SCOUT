@@ -3,6 +3,7 @@
 Consolidates the repeated codex-exec subprocess pattern from
 llm_synthesis, exploit_autopoc, and llm_codex into a single module.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,6 +37,43 @@ class LLMDriverResult:
     attempts: list[dict[str, object]]
     returncode: int
     usage: dict[str, int] | None = None
+
+
+def classify_llm_failure(result: LLMDriverResult) -> tuple[str, str]:
+    """Normalize non-OK LLM driver outcomes into stable failure buckets."""
+    if result.status == "ok":
+        return ("ok", "")
+
+    combined = "\n".join(
+        part.strip()
+        for part in (result.stdout, result.stderr)
+        if isinstance(part, str) and part.strip()
+    )
+    combined_lc = combined.lower()
+
+    if any(
+        token in combined_lc
+        for token in (
+            "you've hit your limit",
+            "you have hit your limit",
+            "hit your limit",
+            "usage limit",
+            "quota",
+        )
+    ):
+        return ("quota_exhausted", combined or result.status)
+
+    if result.status == "timeout":
+        return ("timeout", combined or "llm request timed out")
+    if result.status == "missing_cli":
+        return ("driver_unavailable", combined or "llm driver unavailable")
+    if result.status == "nonzero_exit":
+        return ("driver_nonzero_exit", combined or "llm command exited non-zero")
+    if result.status == "error":
+        return ("driver_error", combined or "llm driver error")
+    if result.status == "skipped":
+        return ("skipped", combined or "llm call skipped")
+    return ("unknown_failure", combined or result.status)
 
 
 def write_llm_trace(
@@ -86,32 +124,125 @@ def write_llm_trace(
     return trace_path.relative_to(run_dir).as_posix()
 
 
-def parse_json_from_llm_output(text: str) -> dict[str, object] | None:
-    """3-stage LLM JSON response parser: fence → raw → regex extraction."""
+def _extract_outermost_json_object(text: str) -> str | None:
+    """Extract outermost ``{...}`` with proper brace/string tracking."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _fix_common_json_errors(text: str) -> str:
+    """Fix trailing commas and single-quoted strings in JSON-like text."""
+    # Trailing commas before } or ]
+    fixed = re.sub(r",\s*([}\]])", r"\1", text)
+    # Single-quoted strings → double-quoted (only outside existing double quotes)
+    # This is a best-effort heuristic for simple cases.
+    if '"' not in fixed and "'" in fixed:
+        fixed = fixed.replace("'", '"')
+    return fixed
+
+
+_PREAMBLE_RE = re.compile(
+    r"^(?:here\s+is\s+the\s+json|response|output|result)\s*:\s*",
+    re.IGNORECASE,
+)
+
+
+def parse_json_from_llm_output(
+    text: str,
+    *,
+    required_keys: frozenset[str] | None = None,
+) -> dict[str, object] | None:
+    """5-stage LLM JSON response parser.
+
+    Stages:
+        0. Strip LLM preamble (e.g. "Here is the JSON:")
+        1. Fence extraction (```json ... ```)
+        2. Raw text as-is
+        3. Outermost brace-counted object extraction (handles nested/escaped)
+        4. Common error fixes (trailing commas, single quotes) then retry 1-3
+
+    Parameters
+    ----------
+    text:
+        Raw LLM output.
+    required_keys:
+        If provided, reject parsed dicts missing any of these keys.
+    """
     stripped = text.strip()
     if not stripped:
         return None
-    candidates: list[str] = []
-    # Stage 1: fence extraction (lenient regex — no mandatory newline)
-    fence_matches = re.findall(
-        r"```(?:json)?\s*(.*?)```", stripped, flags=re.IGNORECASE | re.DOTALL
-    )
-    candidates.extend([m.strip() for m in fence_matches if m.strip()])
-    # Stage 2: raw text as-is
-    candidates.append(stripped)
-    # Stage 3: extract outermost JSON object via regex
-    obj_match = re.search(r"\{[\s\S]*\}", stripped)
-    if obj_match is not None:
-        obj_candidate = obj_match.group(0).strip()
-        if obj_candidate:
-            candidates.append(obj_candidate)
-    for candidate in candidates:
-        try:
-            obj = json.loads(candidate)
-        except Exception:
-            continue
-        if isinstance(obj, dict):
-            return cast(dict[str, object], obj)
+
+    # --- Stage 0: strip preamble ------------------------------------------
+    cleaned = _PREAMBLE_RE.sub("", stripped).strip()
+
+    def _accept(obj: object) -> dict[str, object] | None:
+        if not isinstance(obj, dict):
+            return None
+        d = cast(dict[str, object], obj)
+        if required_keys and not required_keys.issubset(d.keys()):
+            return None
+        return d
+
+    def _try_candidates(src: str) -> dict[str, object] | None:
+        candidates: list[str] = []
+        # Stage 1: fence extraction (lenient regex — no mandatory newline)
+        fence_matches = re.findall(
+            r"```(?:json)?\s*(.*?)```", src, flags=re.IGNORECASE | re.DOTALL
+        )
+        candidates.extend([m.strip() for m in fence_matches if m.strip()])
+        # Stage 2: raw text as-is
+        candidates.append(src)
+        # Stage 3: outermost JSON object via brace-counting
+        extracted = _extract_outermost_json_object(src)
+        if extracted is not None:
+            candidates.append(extracted)
+        for candidate in candidates:
+            try:
+                obj = json.loads(candidate)
+            except Exception:
+                continue
+            result = _accept(obj)
+            if result is not None:
+                return result
+        return None
+
+    # First pass on cleaned text
+    result = _try_candidates(cleaned)
+    if result is not None:
+        return result
+
+    # --- Stage 4: common error fixes then retry ---------------------------
+    fixed = _fix_common_json_errors(cleaned)
+    if fixed != cleaned:
+        result = _try_candidates(fixed)
+        if result is not None:
+            return result
+
     return None
 
 
@@ -132,6 +263,8 @@ class LLMDriver(Protocol):
         max_attempts: int = 3,
         retryable_tokens: tuple[str, ...] = (),
         model_tier: ModelTier = "sonnet",
+        system_prompt: str = "",
+        temperature: float | None = None,
     ) -> LLMDriverResult: ...
 
 
@@ -154,6 +287,8 @@ class CodexCLIDriver:
         max_attempts: int = 3,
         retryable_tokens: tuple[str, ...] = (),
         model_tier: ModelTier = "sonnet",
+        system_prompt: str = "",
+        temperature: float | None = None,
     ) -> LLMDriverResult:
         if not self.available():
             return LLMDriverResult(
@@ -164,6 +299,13 @@ class CodexCLIDriver:
                 attempts=[],
                 returncode=-1,
             )
+
+        # CLI doesn't support system prompts natively; prepend as context.
+        effective_prompt = (
+            f"[System instructions]\n{system_prompt}\n\n[User prompt]\n{prompt}"
+            if system_prompt
+            else prompt
+        )
 
         codex_model = os.environ.get("AIEDGE_CODEX_MODEL", "gpt-5.3-codex")
         base_argv = [
@@ -177,7 +319,7 @@ class CodexCLIDriver:
             "-C",
             str(run_dir),
         ]
-        argv = base_argv + [prompt]
+        argv = base_argv + [effective_prompt]
         attempts: list[dict[str, object]] = []
 
         def _exec_once(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -215,8 +357,10 @@ class CodexCLIDriver:
                     {
                         "argv": list(cmd),
                         "returncode": -1,
-                        "stdout": (exc.stdout if isinstance(exc.stdout, str) else "") or "",
-                        "stderr": (exc.stderr if isinstance(exc.stderr, str) else "") or "",
+                        "stdout": (exc.stdout if isinstance(exc.stdout, str) else "")
+                        or "",
+                        "stderr": (exc.stderr if isinstance(exc.stderr, str) else "")
+                        or "",
                         "exception": "TimeoutExpired",
                     }
                 )
@@ -312,6 +456,8 @@ class ClaudeAPIDriver:
         max_attempts: int = 3,
         retryable_tokens: tuple[str, ...] = (),
         model_tier: ModelTier = "sonnet",
+        system_prompt: str = "",
+        temperature: float | None = None,
     ) -> LLMDriverResult:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
@@ -326,11 +472,16 @@ class ClaudeAPIDriver:
 
         model = self._MODEL_MAP.get(model_tier, self._MODEL_MAP["sonnet"])
         url = "https://api.anthropic.com/v1/messages"
-        payload = json.dumps({
+        body: dict[str, object] = {
             "model": model,
             "max_tokens": 4096,
             "messages": [{"role": "user", "content": prompt}],
-        }).encode("utf-8")
+        }
+        if system_prompt:
+            body["system"] = system_prompt
+        if temperature is not None:
+            body["temperature"] = temperature
+        payload = json.dumps(body).encode("utf-8")
         headers = {
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
@@ -341,11 +492,18 @@ class ClaudeAPIDriver:
         argv = [f"POST {url}", f"model={model}"]
 
         for attempt_idx in range(max(1, max_attempts)):
-            attempt_record: dict[str, object] = {"attempt": attempt_idx + 1, "model": model}
+            attempt_record: dict[str, object] = {
+                "attempt": attempt_idx + 1,
+                "model": model,
+            }
             try:
-                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                req = urllib.request.Request(
+                    url, data=payload, headers=headers, method="POST"
+                )
                 ctx = ssl.create_default_context()
-                with urllib.request.urlopen(req, timeout=timeout_s, context=ctx) as resp:
+                with urllib.request.urlopen(
+                    req, timeout=timeout_s, context=ctx
+                ) as resp:
                     raw = resp.read().decode("utf-8")
                     attempt_record["returncode"] = 0
                     attempt_record["raw_response_len"] = len(raw)
@@ -381,8 +539,11 @@ class ClaudeAPIDriver:
                     err_body = ""
                 attempt_record["stderr"] = err_body
                 attempts.append(attempt_record)
-                if status_code in self._RETRYABLE_STATUS and attempt_idx + 1 < max_attempts:
-                    backoff = 2 ** attempt_idx
+                if (
+                    status_code in self._RETRYABLE_STATUS
+                    and attempt_idx + 1 < max_attempts
+                ):
+                    backoff = 2**attempt_idx
                     time.sleep(backoff)
                     continue
                 return LLMDriverResult(
@@ -413,7 +574,7 @@ class ClaudeAPIDriver:
                 attempt_record["stderr"] = str(exc)
                 attempts.append(attempt_record)
                 if attempt_idx + 1 < max_attempts:
-                    time.sleep(2 ** attempt_idx)
+                    time.sleep(2**attempt_idx)
                     continue
                 return LLMDriverResult(
                     status="error",
@@ -486,22 +647,34 @@ class OllamaDriver:
         max_attempts: int = 3,
         retryable_tokens: tuple[str, ...] = (),
         model_tier: ModelTier = "sonnet",
+        system_prompt: str = "",
+        temperature: float | None = None,
     ) -> LLMDriverResult:
         model = self._model_for_tier(model_tier)
         url = f"{self._base_url()}/api/generate"
-        payload = json.dumps({
+        body: dict[str, object] = {
             "model": model,
             "prompt": prompt,
             "stream": False,
-        }).encode("utf-8")
+        }
+        if system_prompt:
+            body["system"] = system_prompt
+        if temperature is not None:
+            body["options"] = {"temperature": temperature}
+        payload = json.dumps(body).encode("utf-8")
         headers = {"content-type": "application/json"}
         argv = [f"POST {url}", f"model={model}"]
         attempts: list[dict[str, object]] = []
 
         for attempt_idx in range(max(1, max_attempts)):
-            attempt_record: dict[str, object] = {"attempt": attempt_idx + 1, "model": model}
+            attempt_record: dict[str, object] = {
+                "attempt": attempt_idx + 1,
+                "model": model,
+            }
             try:
-                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                req = urllib.request.Request(
+                    url, data=payload, headers=headers, method="POST"
+                )
                 with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                     raw = resp.read().decode("utf-8")
                     attempt_record["returncode"] = 0
@@ -526,7 +699,7 @@ class OllamaDriver:
                 attempt_record["stderr"] = err_body
                 attempts.append(attempt_record)
                 if attempt_idx + 1 < max_attempts:
-                    time.sleep(2 ** attempt_idx)
+                    time.sleep(2**attempt_idx)
                     continue
                 return LLMDriverResult(
                     status="error",
@@ -556,7 +729,7 @@ class OllamaDriver:
                 attempt_record["stderr"] = str(exc)
                 attempts.append(attempt_record)
                 if attempt_idx + 1 < max_attempts:
-                    time.sleep(2 ** attempt_idx)
+                    time.sleep(2**attempt_idx)
                     continue
                 return LLMDriverResult(
                     status="error",
@@ -615,6 +788,8 @@ class ClaudeCodeCLIDriver:
         max_attempts: int = 3,
         retryable_tokens: tuple[str, ...] = (),
         model_tier: ModelTier = "sonnet",
+        system_prompt: str = "",
+        temperature: float | None = None,
     ) -> LLMDriverResult:
         if not self.available():
             return LLMDriverResult(
@@ -626,19 +801,29 @@ class ClaudeCodeCLIDriver:
                 returncode=-1,
             )
 
+        # CLI doesn't support system prompts natively; prepend as context.
+        effective_prompt = (
+            f"[System instructions]\n{system_prompt}\n\n[User prompt]\n{prompt}"
+            if system_prompt
+            else prompt
+        )
+
         model_alias = self._TIER_MAP.get(model_tier, "sonnet")
         base_argv = [
             "claude",
             "-p",
-            "--model", model_alias,
-            "--output-format", "text",
+            "--model",
+            model_alias,
+            "--output-format",
+            "text",
             "--no-session-persistence",
             "--dangerously-skip-permissions",
             "--strict-mcp-config",
-            "--mcp-config", '{"mcpServers":{}}',
+            "--mcp-config",
+            '{"mcpServers":{}}',
             "--disable-slash-commands",
         ]
-        argv = base_argv + [prompt]
+        argv = base_argv + [effective_prompt]
         attempts: list[dict[str, object]] = []
 
         for attempt_idx in range(max(1, max_attempts)):
@@ -651,20 +836,26 @@ class ClaudeCodeCLIDriver:
                     timeout=timeout_s,
                     stdin=subprocess.DEVNULL,
                 )
-                attempts.append({
-                    "argv": list(argv),
-                    "returncode": int(cp.returncode),
-                    "stdout": cp.stdout or "",
-                    "stderr": cp.stderr or "",
-                })
+                attempts.append(
+                    {
+                        "argv": list(argv),
+                        "returncode": int(cp.returncode),
+                        "stdout": cp.stdout or "",
+                        "stderr": cp.stderr or "",
+                    }
+                )
             except subprocess.TimeoutExpired as exc:
-                attempts.append({
-                    "argv": list(argv),
-                    "returncode": -1,
-                    "stdout": (exc.stdout if isinstance(exc.stdout, str) else "") or "",
-                    "stderr": (exc.stderr if isinstance(exc.stderr, str) else "") or "",
-                    "exception": "TimeoutExpired",
-                })
+                attempts.append(
+                    {
+                        "argv": list(argv),
+                        "returncode": -1,
+                        "stdout": (exc.stdout if isinstance(exc.stdout, str) else "")
+                        or "",
+                        "stderr": (exc.stderr if isinstance(exc.stderr, str) else "")
+                        or "",
+                        "exception": "TimeoutExpired",
+                    }
+                )
                 if attempt_idx + 1 < max_attempts:
                     continue
                 return LLMDriverResult(
@@ -708,14 +899,23 @@ class ClaudeCodeCLIDriver:
             if retryable_tokens and any(
                 token in stderr_lc for token in retryable_tokens
             ):
-                time.sleep(2 ** attempt_idx)
+                time.sleep(2**attempt_idx)
                 continue
 
-            if any(tok in stderr_lc for tok in (
-                "overloaded", "rate", "429", "503", "502",
-                "timeout", "econnreset", "connection reset",
-            )):
-                time.sleep(2 ** attempt_idx)
+            if any(
+                tok in stderr_lc
+                for tok in (
+                    "overloaded",
+                    "rate",
+                    "429",
+                    "503",
+                    "502",
+                    "timeout",
+                    "econnreset",
+                    "connection reset",
+                )
+            ):
+                time.sleep(2**attempt_idx)
                 continue
 
             return LLMDriverResult(

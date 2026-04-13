@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 
 from .llm_driver import ModelTier, resolve_driver, write_llm_trace
+from .llm_prompts import CLASSIFIER_SYSTEM, TEMPERATURE_DETERMINISTIC
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -33,22 +34,24 @@ _RETRYABLE_TOKENS: tuple[str, ...] = (
     "429",
 )
 
-_DANGEROUS_APIS: frozenset[str] = frozenset({
-    "system",
-    "strcpy",
-    "sprintf",
-    "execve",
-    "execvp",
-    "execvpe",
-    "execl",
-    "execlp",
-    "execle",
-    "execv",
-    "popen",
-    "gets",
-    "recv",
-    "read",
-})
+_DANGEROUS_APIS: frozenset[str] = frozenset(
+    {
+        "system",
+        "strcpy",
+        "sprintf",
+        "execve",
+        "execvp",
+        "execvpe",
+        "execl",
+        "execlp",
+        "execle",
+        "execv",
+        "popen",
+        "gets",
+        "recv",
+        "read",
+    }
+)
 
 _SEMANTIC_CATEGORIES: tuple[str, ...] = (
     "auth_check",
@@ -62,10 +65,12 @@ _SEMANTIC_CATEGORIES: tuple[str, ...] = (
     "benign",
 )
 
-_HIGH_RISK_CATEGORIES: frozenset[str] = frozenset({
-    "command_handler",
-    "auth_check",
-})
+_HIGH_RISK_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "command_handler",
+        "auth_check",
+    }
+)
 
 
 def _load_json_file(path: Path) -> object | None:
@@ -145,6 +150,7 @@ def _build_deep_analysis_prompt(func_name: str, body: str) -> str:
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
+
     return parse_json_from_llm_output(stdout)
 
 
@@ -214,9 +220,7 @@ class SemanticClassifierStage:
                         if not isinstance(hit_any, dict):
                             continue
                         hit = cast(dict[str, object], hit_any)
-                        bin_path = str(
-                            hit.get("path", "") or hit.get("name", "")
-                        )
+                        bin_path = str(hit.get("path", "") or hit.get("name", ""))
                         if not bin_path:
                             continue
                         # Collect all symbols
@@ -240,17 +244,17 @@ class SemanticClassifierStage:
                         # Classify by symbol profile
                         syms_lower = {s.lower() for s in syms}
                         has_exec = bool(
-                            syms_lower & {"system", "popen", "execve", "execv", "execvp"}
+                            syms_lower
+                            & {"system", "popen", "execve", "execv", "execvp"}
                         )
                         has_net_input = bool(
                             syms_lower & {"recv", "recvfrom", "recvmsg", "read"}
                         )
                         has_mem_unsafe = bool(
-                            syms_lower & {"strcpy", "sprintf", "strcat", "vsprintf", "gets"}
+                            syms_lower
+                            & {"strcpy", "sprintf", "strcat", "vsprintf", "gets"}
                         )
-                        has_auth = bool(
-                            syms_lower & {"strcmp", "strncmp"}
-                        )
+                        has_auth = bool(syms_lower & {"strcmp", "strncmp"})
 
                         if has_net_input and has_exec:
                             category = "command_handler"
@@ -279,19 +283,21 @@ class SemanticClassifierStage:
                         )
                         arch = str(hit.get("arch", "unknown"))
 
-                        classifications.append({
-                            "function_name": bin_path,
-                            "category": category,
-                            "risk_level": risk,
-                            "rationale": "binary_symbol_profile",
-                            "matched_apis": cast(
-                                list[JsonValue],
-                                cast(list[object], sorted(syms)),
-                            ),
-                            "hardening": cast(dict[str, JsonValue], hardening),
-                            "arch": arch,
-                            "method": "static_binary_profile",
-                        })
+                        classifications.append(
+                            {
+                                "function_name": bin_path,
+                                "category": category,
+                                "risk_level": risk,
+                                "rationale": "binary_symbol_profile",
+                                "matched_apis": cast(
+                                    list[JsonValue],
+                                    cast(list[object], sorted(syms)),
+                                ),
+                                "hardening": cast(dict[str, JsonValue], hardening),
+                                "arch": arch,
+                                "method": "static_binary_profile",
+                            }
+                        )
 
             if not classifications:
                 payload_empty: dict[str, JsonValue] = {
@@ -304,7 +310,9 @@ class SemanticClassifierStage:
                     ),
                 }
                 out_json.write_text(
-                    json.dumps(payload_empty, indent=2, sort_keys=True, ensure_ascii=True)
+                    json.dumps(
+                        payload_empty, indent=2, sort_keys=True, ensure_ascii=True
+                    )
                     + "\n",
                     encoding="utf-8",
                 )
@@ -350,9 +358,7 @@ class SemanticClassifierStage:
         # --- Pass 1: Static filter ---
         filtered = _static_filter(functions)
         if not filtered:
-            limitations.append(
-                "No functions matched dangerous API filter"
-            )
+            limitations.append("No functions matched dangerous API filter")
 
         # --- Pass 2: LLM classification (haiku) ---
         classifications: list[dict[str, JsonValue]] = []
@@ -366,16 +372,18 @@ class SemanticClassifierStage:
                     key=lambda f: len(f.get("matched_dangerous_apis", [])),
                     reverse=True,
                 )
-                for func in filtered[:50]:  # Cap at 50 for LLM context
+                for func in filtered[:15]:  # Cap at 15 for reliable JSON parsing
                     fname = str(func.get("name", "unknown"))
                     body = str(func.get("body", ""))
-                    func_summaries.append({
-                        "function_name": fname,
-                        "body_snippet": _truncate_text(body, max_chars=2000),
-                        "dangerous_apis": ", ".join(
-                            cast(list[str], func.get("matched_dangerous_apis", []))
-                        ),
-                    })
+                    func_summaries.append(
+                        {
+                            "function_name": fname,
+                            "body_snippet": _truncate_text(body, max_chars=2000),
+                            "dangerous_apis": ", ".join(
+                                cast(list[str], func.get("matched_dangerous_apis", []))
+                            ),
+                        }
+                    )
 
                 prompt = _build_classify_prompt(
                     json.dumps(func_summaries, indent=2, ensure_ascii=True)
@@ -388,6 +396,8 @@ class SemanticClassifierStage:
                     max_attempts=_LLM_MAX_ATTEMPTS,
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier=model_tier,
+                    system_prompt=CLASSIFIER_SYSTEM,
+                    temperature=TEMPERATURE_DETERMINISTIC,
                 )
                 _ = write_llm_trace(
                     run_dir=run_dir,
@@ -423,46 +433,55 @@ class SemanticClassifierStage:
 
         # Build static-only classifications for functions without LLM results
         classified_names = {
-            cast(str, c.get("function_name", ""))
-            for c in classifications
+            cast(str, c.get("function_name", "")) for c in classifications
         }
         for func in filtered:
             fname = str(func.get("name", "unknown"))
             if fname not in classified_names:
-                classifications.append({
-                    "function_name": fname,
-                    "category": "command_handler"
-                    if any(
-                        api in ("system", "popen", "execve", "execvp")
-                        for api in cast(
-                            list[str], func.get("matched_dangerous_apis", [])
-                        )
-                    )
-                    else "memory_management"
-                    if any(
-                        api in ("strcpy", "sprintf", "gets")
-                        for api in cast(
-                            list[str], func.get("matched_dangerous_apis", [])
-                        )
-                    )
-                    else "network_io"
-                    if any(
-                        api in ("recv", "read")
-                        for api in cast(
-                            list[str], func.get("matched_dangerous_apis", [])
-                        )
-                    )
-                    else "benign",
-                    "rationale": "static_api_filter",
-                    "matched_apis": cast(
-                        list[JsonValue],
-                        cast(
-                            list[object],
-                            func.get("matched_dangerous_apis", []),
+                classifications.append(
+                    {
+                        "function_name": fname,
+                        "category": (
+                            "command_handler"
+                            if any(
+                                api in ("system", "popen", "execve", "execvp")
+                                for api in cast(
+                                    list[str], func.get("matched_dangerous_apis", [])
+                                )
+                            )
+                            else (
+                                "memory_management"
+                                if any(
+                                    api in ("strcpy", "sprintf", "gets")
+                                    for api in cast(
+                                        list[str],
+                                        func.get("matched_dangerous_apis", []),
+                                    )
+                                )
+                                else (
+                                    "network_io"
+                                    if any(
+                                        api in ("recv", "read")
+                                        for api in cast(
+                                            list[str],
+                                            func.get("matched_dangerous_apis", []),
+                                        )
+                                    )
+                                    else "benign"
+                                )
+                            )
                         ),
-                    ),
-                    "method": "static",
-                })
+                        "rationale": "static_api_filter",
+                        "matched_apis": cast(
+                            list[JsonValue],
+                            cast(
+                                list[object],
+                                func.get("matched_dangerous_apis", []),
+                            ),
+                        ),
+                        "method": "static",
+                    }
+                )
 
         # --- Pass 3: Deep analysis for high-risk (sonnet) ---
         deep_analyses: list[dict[str, JsonValue]] = []
@@ -493,6 +512,8 @@ class SemanticClassifierStage:
                             max_attempts=_LLM_MAX_ATTEMPTS,
                             retryable_tokens=_RETRYABLE_TOKENS,
                             model_tier="sonnet",
+                            system_prompt=CLASSIFIER_SYSTEM,
+                            temperature=TEMPERATURE_DETERMINISTIC,
                         )
                         _ = write_llm_trace(
                             run_dir=run_dir,
@@ -504,9 +525,7 @@ class SemanticClassifierStage:
                             metadata={"function_name": fname},
                         )
                         if deep_result.status == "ok":
-                            parsed_deep = _parse_json_response(
-                                deep_result.stdout
-                            )
+                            parsed_deep = _parse_json_response(deep_result.stdout)
                             if parsed_deep is not None:
                                 deep_analyses.append(
                                     cast(dict[str, JsonValue], parsed_deep)
@@ -524,16 +543,13 @@ class SemanticClassifierStage:
             "classifications": cast(
                 list[JsonValue], cast(list[object], classifications)
             ),
-            "deep_analyses": cast(
-                list[JsonValue], cast(list[object], deep_analyses)
-            ),
+            "deep_analyses": cast(list[JsonValue], cast(list[object], deep_analyses)),
             "limitations": cast(
                 list[JsonValue], cast(list[object], sorted(set(limitations)))
             ),
         }
         out_json.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             encoding="utf-8",
         )
 

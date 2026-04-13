@@ -15,7 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .llm_driver import LLMDriver, ModelTier, resolve_driver, write_llm_trace
+from .llm_driver import (
+    LLMDriver,
+    ModelTier,
+    classify_llm_failure,
+    resolve_driver,
+    write_llm_trace,
+)
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -462,6 +468,8 @@ class FPVerificationStage:
         tp_count = 0
         static_fp_count = 0  # pre-filter FPs (no LLM call)
         unverified_count = 0
+        parse_failure_count = 0
+        llm_call_failure_count = 0
         trace_refs: list[str] = []
 
         if not driver.available():
@@ -636,14 +644,23 @@ class FPVerificationStage:
                         else:
                             alert_copy["fp_verdict"] = "unverified"
                             alert_copy["fp_rationale"] = "LLM response parse failure"
+                            alert_copy["fp_failure_kind"] = "parse_failure"
+                            alert_copy["fp_failure_reason"] = (
+                                "LLM response parse failure"
+                            )
                             unverified_count += 1
+                            parse_failure_count += 1
                             limitations.append(
                                 "One or more FP verification responses could not be parsed"
                             )
                     else:
+                        failure_kind, failure_reason = classify_llm_failure(result)
                         alert_copy["fp_verdict"] = "unverified"
                         alert_copy["fp_rationale"] = f"LLM call failed: {result.status}"
+                        alert_copy["fp_failure_kind"] = failure_kind
+                        alert_copy["fp_failure_reason"] = failure_reason
                         unverified_count += 1
+                        llm_call_failure_count += 1
 
                 if trace_refs:
                     alert_copy["trace_refs"] = cast(
@@ -659,8 +676,17 @@ class FPVerificationStage:
                 verified.append(cast(dict[str, JsonValue], a_copy))
 
         status: StageStatus = "ok"
-        if not verified or unverified_count > max(1, int(len(eligible) * 0.10)):
+        if (
+            not verified
+            or parse_failure_count > 0
+            or llm_call_failure_count > 0
+            or unverified_count > max(1, int(len(eligible) * 0.10))
+        ):
             status = "partial"
+        if parse_failure_count > 0:
+            limitations.append("One or more FP verification responses could not be parsed")
+        if llm_call_failure_count > 0:
+            limitations.append("One or more FP verification LLM calls failed")
         if unverified_count > 0:
             limitations.append("FP verification left one or more alerts unverified")
 
@@ -677,6 +703,8 @@ class FPVerificationStage:
                 "true_positives": tp_count,
                 "static_prefilter_fps": static_fp_count,
                 "unverified": unverified_count,
+                "parse_failures": parse_failure_count,
+                "llm_call_failures": llm_call_failure_count,
                 "ghidra_functions_loaded": len(func_map),
                 "xref_edges_loaded": sum(len(v) for v in xref_map.values()),
                 "ipc_edges_loaded": len(ipc_edges),
@@ -698,6 +726,8 @@ class FPVerificationStage:
             "true_positives": tp_count,
             "static_prefilter_fps": static_fp_count,
             "unverified": unverified_count,
+            "parse_failures": parse_failure_count,
+            "llm_call_failures": llm_call_failure_count,
         }
         return StageOutcome(
             status=status,

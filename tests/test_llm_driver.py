@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from aiedge.llm_driver import CodexCLIDriver, LLMDriverResult, resolve_driver
+from aiedge.llm_driver import (
+    CodexCLIDriver,
+    LLMDriverResult,
+    classify_llm_failure,
+    resolve_driver,
+)
 
 
 class TestCodexCLIDriverAvailable:
@@ -212,3 +217,27 @@ class TestLLMDriverResult:
         )
         with pytest.raises(AttributeError):
             result.status = "error"  # type: ignore[misc]
+
+
+class TestClassifyLlmFailure:
+    def test_detects_quota_exhaustion_from_stdout(self) -> None:
+        result = LLMDriverResult(
+            status="nonzero_exit",
+            stdout="You've hit your limit · resets 12am (Asia/Seoul)\n",
+            stderr="",
+            argv=["claude"],
+            attempts=[],
+            returncode=1,
+        )
+        assert classify_llm_failure(result)[0] == "quota_exhausted"
+
+    def test_detects_driver_unavailable(self) -> None:
+        result = LLMDriverResult(
+            status="missing_cli",
+            stdout="",
+            stderr="claude executable not found",
+            argv=["claude"],
+            attempts=[],
+            returncode=-1,
+        )
+        assert classify_llm_failure(result)[0] == "driver_unavailable"

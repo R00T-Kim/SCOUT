@@ -38,7 +38,7 @@ _NVD_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 _USER_AGENT = "SCOUT-AIEdge/1.0"
 _CACHE_TTL_S = 86_400  # 24 hours
 
-_RATE_NO_KEY = 6.0   # seconds between requests without API key
+_RATE_NO_KEY = 6.0  # seconds between requests without API key
 _RATE_WITH_KEY = 1.2  # seconds between requests with API key
 
 _DEFAULT_MAX_COMPONENTS = 50
@@ -52,20 +52,29 @@ _STATIC_CONFIDENCE_CAP = 0.60  # findings stage governance cap
 
 # Reachability-based confidence multipliers (applied after _STATIC_CONFIDENCE_CAP)
 _REACHABILITY_MULTIPLIERS: dict[str, float] = {
-    "directly_reachable": 1.0,    # No change — component is network-reachable
-    "potentially_reachable": 0.8, # Slight reduction — reachability unconfirmed
-    "unreachable": 0.5,           # Significant reduction — component not reachable
-    "unknown": 0.9,               # Small penalty — no reachability data for component
+    "directly_reachable": 1.0,  # No change — component is network-reachable
+    "potentially_reachable": 0.8,  # Slight reduction — reachability unconfirmed
+    "unreachable": 0.5,  # Significant reduction — component not reachable
+    "unknown": 0.9,  # Small penalty — no reachability data for component
 }
 
 _CVSS_HIGH_THRESHOLD = 7.0
 _CVSS_CRITICAL_THRESHOLD = 9.0
 _CVSS_MEDIUM_THRESHOLD = 4.0
 
+# EPSS (Exploit Prediction Scoring System) -- best-effort enrichment
+_EPSS_API_URL = "https://api.first.org/data/v1/epss"
+_EPSS_BATCH_SIZE = 30
+_EPSS_TIMEOUT_S = 15
+_EPSS_BOOST_HIGH = 0.10  # boost for EPSS >= 0.10
+_EPSS_BOOST_MEDIUM = 0.05  # boost for EPSS >= 0.01
+_EPSS_PENALTY_LOW = -0.05  # penalty for EPSS < 0.001
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -98,6 +107,7 @@ def _finding_confidence(match_confidence: float, cvss_score: float) -> float:
 # ---------------------------------------------------------------------------
 # Reachability loader
 # ---------------------------------------------------------------------------
+
 
 def _load_reachability_map(run_dir: Path) -> dict[str, str]:
     """Load component reachability classifications from the reachability stage.
@@ -135,13 +145,26 @@ def _load_reachability_map(run_dir: Path) -> dict[str, str]:
 # CPE / version matching
 # ---------------------------------------------------------------------------
 
+
 def _parse_cpe23(cpe: str) -> dict[str, str]:
     """Parse a CPE 2.3 URI into its component parts."""
     # cpe:2.3:part:vendor:product:version:update:edition:language:sw_edition:target_sw:target_hw:other
     parts = cpe.split(":")
-    keys = ["prefix", "version_id", "part", "vendor", "product",
-            "version", "update", "edition", "language",
-            "sw_edition", "target_sw", "target_hw", "other"]
+    keys = [
+        "prefix",
+        "version_id",
+        "part",
+        "vendor",
+        "product",
+        "version",
+        "update",
+        "edition",
+        "language",
+        "sw_edition",
+        "target_sw",
+        "target_hw",
+        "other",
+    ]
     result: dict[str, str] = {}
     for i, key in enumerate(keys):
         result[key] = parts[i] if i < len(parts) else "*"
@@ -259,6 +282,7 @@ def _determine_match_type(
 # NVD API cache
 # ---------------------------------------------------------------------------
 
+
 def _cache_key(cpe_query: str) -> str:
     return sha256_text(cpe_query)
 
@@ -297,9 +321,51 @@ def _save_cached_response(cache_path: Path, data: dict[str, object]) -> None:
     )
 
 
+def _normalize_component_metadata(
+    component: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if not isinstance(component, dict):
+        return None
+    return {
+        "name": str(component.get("name") or component.get("component") or component.get("product") or ""),
+        "version": str(component.get("version") or ""),
+        "patch_revision": (
+            str(component.get("patch_revision"))
+            if component.get("patch_revision") not in (None, "")
+            else None
+        ),
+        "detection_method": (
+            str(component.get("detection_method"))
+            if component.get("detection_method") not in (None, "")
+            else None
+        ),
+        "source": (
+            str(component.get("source"))
+            if component.get("source") not in (None, "")
+            else None
+        ),
+    }
+
+
+def _epss_cache_key(cve_id: str) -> str:
+    return sha256_text(cve_id.upper())
+
+
+def _parse_optional_float(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
 # ---------------------------------------------------------------------------
 # NVD HTTP client
 # ---------------------------------------------------------------------------
+
 
 def _build_ssl_context(*, verify: bool = True) -> ssl.SSLContext:
     if verify:
@@ -361,7 +427,9 @@ def _query_nvd_with_cache(
     """Query NVD for *cpe_name*, using caches. Updates *stats* in-place."""
     key = _cache_key(cpe_name)
     per_run_path = per_run_cache_dir / f"{key}.json"
-    cross_run_path = (cross_run_cache_dir / f"{key}.json") if cross_run_cache_dir else None
+    cross_run_path = (
+        (cross_run_cache_dir / f"{key}.json") if cross_run_cache_dir else None
+    )
 
     # 1. Per-run cache (always valid within a run, no TTL check needed for age)
     hit = _load_cached_response(per_run_path, max_age_s=float("inf"))
@@ -429,9 +497,144 @@ def _query_nvd_with_cache(
     return data
 
 
+def _fetch_epss_batch(
+    cve_ids: list[str],
+    *,
+    timeout_s: int,
+    verify_ssl: bool = True,
+) -> dict[str, dict[str, object]]:
+    params = urllib.parse.urlencode({"cve": ",".join(cve_ids)})  # type: ignore[attr-defined]
+    url = f"{_EPSS_API_URL}?{params}"
+    ctx = _build_ssl_context(verify=verify_ssl)
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout_s, context=ctx) as resp:  # type: ignore[call-arg]
+        body = resp.read()
+    parsed = cast(object, json.loads(body))
+    if not isinstance(parsed, dict):
+        return {}
+    data_any = cast(dict[str, object], parsed).get("data")
+    if not isinstance(data_any, list):
+        return {}
+
+    results: dict[str, dict[str, object]] = {}
+    for item_any in cast(list[object], data_any):
+        if not isinstance(item_any, dict):
+            continue
+        item = cast(dict[str, object], item_any)
+        cve_any = item.get("cve")
+        if not isinstance(cve_any, str) or not cve_any:
+            continue
+        cve_id = cve_any.upper()
+        results[cve_id] = {
+            "cve": cve_id,
+            "epss": _parse_optional_float(item.get("epss")),
+            "percentile": _parse_optional_float(item.get("percentile")),
+            "source": "first_epss_api",
+        }
+    return results
+
+
+def _query_epss_with_cache(
+    cve_ids: list[str],
+    *,
+    per_run_cache_dir: Path,
+    cross_run_cache_dir: Path | None,
+    run_dir: Path,
+    stats: dict[str, int],
+) -> tuple[dict[str, dict[str, object]], bool]:
+    results: dict[str, dict[str, object]] = {}
+    pending: list[str] = []
+
+    for raw_cve in cve_ids:
+        cve_id = raw_cve.upper()
+        key = _epss_cache_key(cve_id)
+        per_run_path = per_run_cache_dir / f"{key}.json"
+        cross_run_path = (
+            (cross_run_cache_dir / f"{key}.json") if cross_run_cache_dir else None
+        )
+        hit = _load_cached_response(per_run_path, max_age_s=float("inf"))
+        if hit is not None:
+            stats["epss_cache_hits"] += 1
+            results[cve_id] = hit
+            continue
+        if cross_run_path is not None:
+            hit = _load_cached_response(cross_run_path, max_age_s=_CACHE_TTL_S)
+            if hit is not None:
+                stats["epss_cache_hits"] += 1
+                assert_under_dir(run_dir, per_run_path)
+                _save_cached_response(per_run_path, hit)
+                results[cve_id] = hit
+                continue
+        pending.append(cve_id)
+
+    api_failed = False
+    for idx in range(0, len(pending), _EPSS_BATCH_SIZE):
+        batch = pending[idx : idx + _EPSS_BATCH_SIZE]
+        batch_data: dict[str, dict[str, object]] | None = None
+        for verify in (True, False):
+            try:
+                batch_data = _fetch_epss_batch(
+                    batch,
+                    timeout_s=_EPSS_TIMEOUT_S,
+                    verify_ssl=verify,
+                )
+                stats["epss_api_calls"] += 1
+                break
+            except ssl.SSLError:
+                if not verify:
+                    stats["epss_api_errors"] += 1
+                    api_failed = True
+                continue
+            except (urllib.error.HTTPError, urllib.error.URLError, OSError, TimeoutError):
+                stats["epss_api_errors"] += 1
+                api_failed = True
+                batch_data = None
+                break
+
+        if batch_data is None:
+            for cve_id in batch:
+                if cross_run_cache_dir is None:
+                    continue
+                stale_path = cross_run_cache_dir / f"{_epss_cache_key(cve_id)}.json"
+                stale = _load_cached_response(stale_path, max_age_s=float("inf"))
+                if stale is None:
+                    continue
+                per_run_path = per_run_cache_dir / f"{_epss_cache_key(cve_id)}.json"
+                assert_under_dir(run_dir, per_run_path)
+                _save_cached_response(per_run_path, stale)
+                results[cve_id] = stale
+            continue
+
+        for cve_id, item in batch_data.items():
+            per_run_path = per_run_cache_dir / f"{_epss_cache_key(cve_id)}.json"
+            assert_under_dir(run_dir, per_run_path)
+            _save_cached_response(per_run_path, item)
+            if cross_run_cache_dir is not None:
+                _save_cached_response(
+                    cross_run_cache_dir / f"{_epss_cache_key(cve_id)}.json",
+                    item,
+                )
+            results[cve_id] = item
+
+    return results, api_failed
+
+
+def _epss_confidence_adjustment(epss_score: float | None) -> float:
+    if epss_score is None:
+        return 0.0
+    if epss_score >= 0.10:
+        return _EPSS_BOOST_HIGH
+    if epss_score >= 0.01:
+        return _EPSS_BOOST_MEDIUM
+    if epss_score < 0.001:
+        return _EPSS_PENALTY_LOW
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # CVE extraction from NVD response
 # ---------------------------------------------------------------------------
+
 
 def _extract_cve_entry(
     cve_item: object,
@@ -439,6 +642,7 @@ def _extract_cve_entry(
     component_name: str,
     component_version: str,
     cpe_name: str,
+    component_metadata: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     """Extract CVE match records from a single NVD CVE item."""
     if not isinstance(cve_item, dict):
@@ -541,6 +745,9 @@ def _extract_cve_entry(
             "match_confidence": best_confidence,
             "match_type": best_match_type,
             "evidence_ref": f"nvd_api:{cve_id}",
+            "component_metadata": component_metadata,
+            "epss": None,
+            "epss_percentile": None,
         }
     ]
 
@@ -548,6 +755,7 @@ def _extract_cve_entry(
 # ---------------------------------------------------------------------------
 # SBOM loader
 # ---------------------------------------------------------------------------
+
 
 def _build_fallback_cpe_index(
     run_dir: Path,
@@ -563,12 +771,14 @@ def _build_fallback_cpe_index(
         try:
             attr = json.loads(attr_path.read_text(encoding="utf-8"))
             if isinstance(attr, dict):
-                vendor = str(
-                    attr.get("vendor", attr.get("manufacturer", ""))
-                ).lower().strip()
-                product = str(
-                    attr.get("product", attr.get("model", ""))
-                ).lower().strip()
+                vendor = (
+                    str(attr.get("vendor", attr.get("manufacturer", "")))
+                    .lower()
+                    .strip()
+                )
+                product = (
+                    str(attr.get("product", attr.get("model", ""))).lower().strip()
+                )
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -578,26 +788,21 @@ def _build_fallback_cpe_index(
         try:
             fp = json.loads(fp_path.read_text(encoding="utf-8"))
             if isinstance(fp, dict):
-                version = str(
-                    fp.get("firmware_version", fp.get("version", ""))
-                ).strip()
+                version = str(fp.get("firmware_version", fp.get("version", ""))).strip()
         except (json.JSONDecodeError, OSError):
             pass
 
     if vendor and product:
-        cpe = (
-            f"cpe:2.3:o:{vendor}:{product}:"
-            f"{version or '*'}:*:*:*:*:*:*:*"
+        cpe = f"cpe:2.3:o:{vendor}:{product}:" f"{version or '*'}:*:*:*:*:*:*:*"
+        components.append(
+            {
+                "name": product,
+                "version": version or "unknown",
+                "cpe": cpe,
+                "source": "inventory_fallback",
+            }
         )
-        components.append({
-            "name": product,
-            "version": version or "unknown",
-            "cpe": cpe,
-            "source": "inventory_fallback",
-        })
-        limitations.append(
-            "Using inventory-derived CPE entries (SBOM unavailable)"
-        )
+        limitations.append("Using inventory-derived CPE entries (SBOM unavailable)")
 
     return components, limitations
 
@@ -607,9 +812,7 @@ def _load_cpe_index(run_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
     limitations: list[str] = []
     cpe_path = run_dir / "stages" / "sbom" / "cpe_index.json"
     if not cpe_path.is_file():
-        limitations.append(
-            "SBOM CPE index not found at stages/sbom/cpe_index.json"
-        )
+        limitations.append("SBOM CPE index not found at stages/sbom/cpe_index.json")
         fallback, fb_lim = _build_fallback_cpe_index(run_dir)
         limitations.extend(fb_lim)
         return fallback, limitations
@@ -635,7 +838,9 @@ def _load_cpe_index(run_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
         if isinstance(raw, list):
             components_any = raw
         else:
-            limitations.append("SBOM CPE index: 'components' field missing or not a list")
+            limitations.append(
+                "SBOM CPE index: 'components' field missing or not a list"
+            )
             fallback, fb_lim = _build_fallback_cpe_index(run_dir)
             limitations.extend(fb_lim)
             return fallback, limitations
@@ -657,6 +862,7 @@ def _load_cpe_index(run_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
 # Stage
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CveScanStage:
     run_dir: Path
@@ -677,7 +883,17 @@ class CveScanStage:
         # ------------------------------------------------------------------ #
         api_key: str | None = os.environ.get("AIEDGE_NVD_API_KEY") or None
         cross_run_cache_str = os.environ.get("AIEDGE_NVD_CACHE_DIR")
-        cross_run_cache_dir: Path | None = Path(cross_run_cache_str) if cross_run_cache_str else None
+        cross_run_cache_dir: Path | None = (
+            Path(cross_run_cache_str) if cross_run_cache_str else None
+        )
+        cross_run_epss_cache_str = os.environ.get("AIEDGE_EPSS_CACHE_DIR")
+        cross_run_epss_cache_dir: Path | None
+        if cross_run_epss_cache_str:
+            cross_run_epss_cache_dir = Path(cross_run_epss_cache_str)
+        elif cross_run_cache_dir is not None:
+            cross_run_epss_cache_dir = cross_run_cache_dir / "epss"
+        else:
+            cross_run_epss_cache_dir = None
 
         max_components = env_int(
             "AIEDGE_CVE_SCAN_MAX_COMPONENTS",
@@ -704,64 +920,15 @@ class CveScanStage:
         per_run_cache_dir = stage_dir / "nvd_cache"
         per_run_cache_dir.mkdir(parents=True, exist_ok=True)
         assert_under_dir(run_dir, per_run_cache_dir)
+        per_run_epss_cache_dir = stage_dir / "epss_cache"
+        per_run_epss_cache_dir.mkdir(parents=True, exist_ok=True)
+        assert_under_dir(run_dir, per_run_epss_cache_dir)
 
         # ------------------------------------------------------------------ #
         # Load SBOM / CPE index
         # ------------------------------------------------------------------ #
         components, limitations = _load_cpe_index(run_dir)
-
-        if not components:
-            # Even without SBOM, try known CVE signature matching
-            sig_matches = self._match_known_cve_signatures(run_dir)
-            if sig_matches:
-                # We have signature-based matches — proceed with those
-                matches_path = stage_dir / "cve_matches.json"
-                matches_path.write_text(
-                    json.dumps(
-                        {
-                            "schema_version": "cve-scan-v1",
-                            "matches": sig_matches,
-                            "source": "known_signature_only",
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    encoding="utf-8",
-                )
-                assert_under_dir(run_dir, matches_path)
-                limitations.append("No SBOM; results from known CVE signature matching only")
-                outcome = StageOutcome(
-                    status="partial",
-                    details={
-                        "matches": len(sig_matches),
-                        "source": "known_signature_only",
-                    },
-                    limitations=limitations,
-                )
-                self._write_stage_json(
-                    stage_dir=stage_dir,
-                    run_dir=run_dir,
-                    outcome=outcome,
-                    started_at=_iso_utc_now(),
-                    duration_s=time.monotonic() - t_start,
-                    artifacts=[str(matches_path)],
-                )
-                return outcome
-
-            outcome = StageOutcome(
-                status="skipped",
-                details={"reason": "no_sbom_components"},
-                limitations=limitations,
-            )
-            self._write_stage_json(
-                stage_dir=stage_dir,
-                run_dir=run_dir,
-                outcome=outcome,
-                started_at=_iso_utc_now(),
-                duration_s=time.monotonic() - t_start,
-                artifacts=[],
-            )
-            return outcome
+        sbom_components_available = bool(components)
 
         # Truncate to max_components
         if len(components) > max_components:
@@ -788,19 +955,22 @@ class CveScanStage:
             "api_calls": 0,
             "api_errors": 0,
             "components_skipped": 0,
+            "epss_cache_hits": 0,
+            "epss_api_calls": 0,
+            "epss_api_errors": 0,
+            "epss_enriched": 0,
         }
 
         scan_timestamp = _iso_utc_now()
         matches: list[dict[str, object]] = []
+        signature_match_count = 0
         last_request_t = 0.0
         network_unavailable = False
 
         for comp in components:
             # Budget check
             if self.remaining_budget_s() < 30.0:
-                limitations.append(
-                    "cve_scan halted early: time budget exhausted"
-                )
+                limitations.append("cve_scan halted early: time budget exhausted")
                 break
 
             cpe_any = comp.get("cpe") or comp.get("cpe23") or comp.get("cpe_name")
@@ -809,7 +979,9 @@ class CveScanStage:
                 continue
 
             cpe_name: str = cpe_any
-            comp_name_any = comp.get("name") or comp.get("component") or comp.get("product")
+            comp_name_any = (
+                comp.get("name") or comp.get("component") or comp.get("product")
+            )
             comp_name = str(comp_name_any) if comp_name_any else cpe_name
             comp_version_any = comp.get("version")
             comp_version = str(comp_version_any) if comp_version_any else ""
@@ -858,84 +1030,89 @@ class CveScanStage:
                     component_name=comp_name,
                     component_version=comp_version,
                     cpe_name=cpe_name,
+                    component_metadata=_normalize_component_metadata(comp),
                 )
                 matches.extend(extracted)
 
-        if network_unavailable and not matches:
+        if network_unavailable and not matches and sbom_components_available:
             limitations.append("nvd_api_unavailable")
 
         # ------------------------------------------------------------------ #
         # Known CVE signature matching
         # ------------------------------------------------------------------ #
-        try:
-            from .known_cve_signatures import match_known_signatures
-
-            vendor_claims: list[str] = []
-            model_claims: list[str] = []
-            attr_path = run_dir / "stages" / "attribution" / "attribution.json"
-            if attr_path.is_file():
-                try:
-                    _attr = json.loads(attr_path.read_text(encoding="utf-8"))
-                    if isinstance(_attr, dict):
-                        _v = _attr.get("vendor", _attr.get("manufacturer", ""))
-                        _m = _attr.get("product", _attr.get("model", ""))
-                        if _v:
-                            vendor_claims.append(str(_v).lower())
-                        if _m:
-                            model_claims.append(str(_m).lower())
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-            # Also extract from case_id
-            if self.case_id:
-                for tok in self.case_id.lower().replace("-", " ").replace("_", " ").split():
-                    if len(tok) >= 3:
-                        model_claims.append(tok)
-
-            binary_names: set[str] = set()
-            binary_symbols: dict[str, set[str]] = {}
-            ba_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
-            if ba_path.is_file():
-                try:
-                    _ba = json.loads(ba_path.read_text(encoding="utf-8"))
-                    if isinstance(_ba, dict):
-                        for _hit in _ba.get("hits", []):
-                            if not isinstance(_hit, dict):
-                                continue
-                            _p = str(_hit.get("path", ""))
-                            _bn = _p.rsplit("/", 1)[-1].lower() if "/" in _p else _p.lower()
-                            if _bn:
-                                binary_names.add(_bn)
-                                _ms = _hit.get("matched_symbols", [])
-                                if isinstance(_ms, list):
-                                    binary_symbols[_bn] = {
-                                        str(s) for s in _ms if isinstance(s, str)
-                                    }
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-            if vendor_claims or model_claims:
-                sig_matches = match_known_signatures(
-                    vendor_claims=vendor_claims,
-                    model_claims=model_claims,
-                    binary_names=binary_names,
-                    binary_symbols=binary_symbols,
-                )
-                existing_cves = {str(m.get("cve_id", "")) for m in matches}
-                for sm in sig_matches:
-                    if str(sm["cve_id"]) in existing_cves:
-                        continue
-                    matches.append({
-                        "component": str(sm.get("entry_point", "")),
+        sig_matches = self._match_known_cve_signatures(run_dir)
+        existing_cves = {str(m.get("cve_id", "")) for m in matches}
+        for sm in sig_matches:
+            if str(sm["cve_id"]) in existing_cves:
+                continue
+            signature_match_count += 1
+            matches.append(
+                {
+                    "component": str(sm.get("entry_point", "")),
+                    "version": "",
+                    "cve_id": str(sm["cve_id"]),
+                    "cvss_v3_score": float(sm.get("cvss_v3_score", 0)),
+                    "match_type": "known_signature",
+                    "match_confidence": float(sm.get("confidence", 0)),
+                    "description": str(sm.get("description", "")),
+                    "evidence_ref": f"known_signature:{sm['cve_id']}",
+                    "component_metadata": {
+                        "name": str(sm.get("entry_point", "")),
                         "version": "",
-                        "cve_id": str(sm["cve_id"]),
-                        "cvss_v3_score": float(sm.get("cvss_v3_score", 0)),
-                        "match_type": "known_signature",
-                        "match_confidence": float(sm.get("confidence", 0)),
-                        "description": str(sm.get("description", "")),
-                    })
-        except ImportError:
-            pass  # known_cve_signatures module not available
+                        "patch_revision": None,
+                        "detection_method": "known_signature",
+                        "source": "known_signature",
+                    },
+                    "epss": None,
+                    "epss_percentile": None,
+                }
+            )
+
+        if not sbom_components_available:
+            if not matches:
+                outcome = StageOutcome(
+                    status="skipped",
+                    details={"reason": "no_sbom_components"},
+                    limitations=limitations,
+                )
+                self._write_stage_json(
+                    stage_dir=stage_dir,
+                    run_dir=run_dir,
+                    outcome=outcome,
+                    started_at=scan_timestamp,
+                    duration_s=time.monotonic() - t_start,
+                    artifacts=[],
+                )
+                return outcome
+            limitations.append("No SBOM; results from known CVE signature matching only")
+
+        epss_unavailable = False
+        if matches:
+            cve_ids = sorted(
+                {
+                    str(m.get("cve_id", "")).upper()
+                    for m in matches
+                    if isinstance(m.get("cve_id"), str) and str(m.get("cve_id", "")).strip()
+                }
+            )
+            epss_map, epss_unavailable = _query_epss_with_cache(
+                cve_ids,
+                per_run_cache_dir=per_run_epss_cache_dir,
+                cross_run_cache_dir=cross_run_epss_cache_dir,
+                run_dir=run_dir,
+                stats=stats,
+            )
+            for match in matches:
+                cve_id = str(match.get("cve_id", "")).upper()
+                epss_entry = epss_map.get(cve_id)
+                if not epss_entry:
+                    continue
+                match["epss"] = epss_entry.get("epss")
+                match["epss_percentile"] = epss_entry.get("percentile")
+                if match.get("epss") is not None or match.get("epss_percentile") is not None:
+                    stats["epss_enriched"] += 1
+        if epss_unavailable:
+            limitations.append("epss_unavailable")
 
         # ------------------------------------------------------------------ #
         # Build finding candidates (CVSS >= 7.0)
@@ -948,7 +1125,11 @@ class CveScanStage:
                 continue
 
             match_conf_any = m.get("match_confidence")
-            match_conf = float(match_conf_any) if isinstance(match_conf_any, (int, float)) else _CONFIDENCE_PRODUCT
+            match_conf = (
+                float(match_conf_any)
+                if isinstance(match_conf_any, (int, float))
+                else _CONFIDENCE_PRODUCT
+            )
 
             confidence = _finding_confidence(match_conf, score)
             severity = _severity_label(score)
@@ -957,17 +1138,36 @@ class CveScanStage:
             comp_ver_f = str(m.get("version", ""))
 
             # Apply reachability multiplier when data is available
-            reach_status = reachability_map.get(comp_name_f, "unknown") if reachability_map else "unknown"
+            reach_status = (
+                reachability_map.get(comp_name_f, "unknown")
+                if reachability_map
+                else "unknown"
+            )
             if reachability_map:
-                multiplier = _REACHABILITY_MULTIPLIERS.get(reach_status, _REACHABILITY_MULTIPLIERS["unknown"])
+                multiplier = _REACHABILITY_MULTIPLIERS.get(
+                    reach_status, _REACHABILITY_MULTIPLIERS["unknown"]
+                )
                 confidence = min(_STATIC_CONFIDENCE_CAP, confidence * multiplier)
 
             # Backport detection: if component has a distro patch revision,
             # the vulnerability may already be patched despite old version number.
-            _patch_rev = str(comp.get("patch_revision", ""))
-            _det_method = str(comp.get("detection_method", ""))
+            component_metadata_any = m.get("component_metadata")
+            component_metadata = (
+                cast(dict[str, object], component_metadata_any)
+                if isinstance(component_metadata_any, dict)
+                else {}
+            )
+            _patch_rev = str(component_metadata.get("patch_revision", ""))
+            _det_method = str(component_metadata.get("detection_method", ""))
             if _patch_rev and _det_method == "opkg":
                 confidence = max(0.0, confidence - 0.30)
+
+            epss_score = _parse_optional_float(m.get("epss"))
+            epss_percentile = _parse_optional_float(m.get("epss_percentile"))
+            confidence = min(
+                _STATIC_CONFIDENCE_CAP,
+                max(0.0, confidence + _epss_confidence_adjustment(epss_score)),
+            )
 
             # Stable SBOM reference key
             sbom_ref_part = f"sbom:comp-{comp_name_f}"
@@ -986,6 +1186,8 @@ class CveScanStage:
                     "version": comp_ver_f,
                     "cve_id": cve_id,
                     "cvss_v3_score": score,
+                    "epss": epss_score,
+                    "epss_percentile": epss_percentile,
                     "reachability": reach_status if reachability_map else "unknown",
                     "evidence_refs": [f"nvd_api:{cve_id}", sbom_ref_part],
                 }
@@ -994,7 +1196,12 @@ class CveScanStage:
         # ------------------------------------------------------------------ #
         # Summary counts
         # ------------------------------------------------------------------ #
-        severity_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        severity_counts: dict[str, int] = {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+        }
         for m in matches:
             score_any = m.get("cvss_v3_score")
             score = float(score_any) if isinstance(score_any, (int, float)) else 0.0
@@ -1015,6 +1222,10 @@ class CveScanStage:
             "cache_hits": stats["cache_hits"],
             "api_calls": stats["api_calls"],
             "api_errors": stats["api_errors"],
+            "epss_cache_hits": stats["epss_cache_hits"],
+            "epss_api_calls": stats["epss_api_calls"],
+            "epss_api_errors": stats["epss_api_errors"],
+            "epss_enriched": stats["epss_enriched"],
         }
 
         # ------------------------------------------------------------------ #
@@ -1027,6 +1238,15 @@ class CveScanStage:
             "components_scanned": len(components),
             "components_with_cves": len(components_with_cves),
             "total_cve_matches": len(matches),
+            "source": (
+                "known_signature_only"
+                if not sbom_components_available
+                else (
+                    "nvd_plus_known_signatures"
+                    if signature_match_count > 0
+                    else "nvd_api"
+                )
+            ),
             "matches": matches,
             "finding_candidates": finding_candidates,
             "limitations": limitations,
@@ -1043,7 +1263,9 @@ class CveScanStage:
         # ------------------------------------------------------------------ #
         # Determine status
         # ------------------------------------------------------------------ #
-        if network_unavailable and not matches:
+        if not sbom_components_available:
+            status = "partial"
+        elif network_unavailable and not matches:
             status: str = "partial"
         elif stats["api_errors"] > 0 and matches:
             status = "partial"
@@ -1062,10 +1284,15 @@ class CveScanStage:
                 "components_with_cves": len(components_with_cves),
                 "total_cve_matches": len(matches),
                 "finding_candidates_count": len(finding_candidates),
+                "source": output_data["source"],
                 "api_key_used": api_key is not None,
                 "cache_hits": stats["cache_hits"],
                 "api_calls": stats["api_calls"],
                 "api_errors": stats["api_errors"],
+                "epss_cache_hits": stats["epss_cache_hits"],
+                "epss_api_calls": stats["epss_api_calls"],
+                "epss_api_errors": stats["epss_api_errors"],
+                "epss_enriched": stats["epss_enriched"],
             },
             limitations=limitations,
         )
@@ -1086,7 +1313,8 @@ class CveScanStage:
     # ---------------------------------------------------------------------- #
 
     def _match_known_cve_signatures(
-        self, run_dir: Path,
+        self,
+        run_dir: Path,
     ) -> list[dict[str, object]]:
         """Match known CVE signatures using attribution + inventory + case_id."""
         try:
@@ -1131,9 +1359,15 @@ class CveScanStage:
 
         # Known vendor keywords
         _VENDOR_KEYWORDS = {
-            "netgear": "netgear", "dlink": "d-link", "d-link": "d-link",
-            "linksys": "linksys", "asus": "asus", "tplink": "tp-link",
-            "tp-link": "tp-link", "trendnet": "trendnet", "zyxel": "zyxel",
+            "netgear": "netgear",
+            "dlink": "d-link",
+            "d-link": "d-link",
+            "linksys": "linksys",
+            "asus": "asus",
+            "tplink": "tp-link",
+            "tp-link": "tp-link",
+            "trendnet": "trendnet",
+            "zyxel": "zyxel",
             "belkin": "belkin",
         }
         for kw, vendor in _VENDOR_KEYWORDS.items():
@@ -1141,7 +1375,9 @@ class CveScanStage:
                 vendor_claims.append(vendor)
 
         # Extract model tokens from case_id
-        for tok in case_str.replace("-", " ").replace("_", " ").replace("/", " ").split():
+        for tok in (
+            case_str.replace("-", " ").replace("_", " ").replace("/", " ").split()
+        ):
             if len(tok) >= 2 and any(c.isdigit() for c in tok):
                 model_claims.append(tok.replace(" ", "-"))
 
@@ -1182,16 +1418,25 @@ class CveScanStage:
         try:
             from .nvd_local import load_nvd_db, match_nvd_local
 
-            nvd_db_dir = Path(os.environ.get(
-                "AIEDGE_NVD_LOCAL_DB_DIR",
-                str(Path(__file__).resolve().parent.parent.parent / "data" / "nvd-cache"),
-            ))
+            nvd_db_dir = Path(
+                os.environ.get(
+                    "AIEDGE_NVD_LOCAL_DB_DIR",
+                    str(
+                        Path(__file__).resolve().parent.parent.parent
+                        / "data"
+                        / "nvd-cache"
+                    ),
+                )
+            )
             if nvd_db_dir.is_dir():
                 nvd_cves = load_nvd_db(nvd_db_dir)
                 existing_ids = {str(r.get("cve_id", "")) for r in results}
                 for vc in set(vendor_claims):
                     nvd_matches = match_nvd_local(
-                        nvd_cves, vc, list(set(model_claims)), binary_names,
+                        nvd_cves,
+                        vc,
+                        list(set(model_claims)),
+                        binary_names,
                     )
                     for nm in nvd_matches:
                         if str(nm["cve_id"]) not in existing_ids:
@@ -1230,4 +1475,3 @@ class CveScanStage:
             json.dumps(record, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-

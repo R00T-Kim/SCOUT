@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.4.1-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.5.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -154,6 +154,44 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | `poc_refinement` | `poc_refinement.py` | 퍼징 시드 기반 반복 PoC 생성 (최대 5회) | 예 | 중간 |
 | `chain_construction` | `chain_constructor.py` | 동일 바이너리 + 크로스 바이너리 IPC 익스플로잇 체인 | 아니오 | $0 |
 | `csource_identification` | `csource_identification.py` | 정적 센티널 + QEMU 기반 HTTP 입력 소스 식별 | 아니오 | $0 |
+
+</details>
+
+<details>
+<summary><strong>v2.5.0 신규 기능 (2026-04-13)</strong></summary>
+
+| 기능 | 모듈 | 설명 |
+|------|------|------|
+| 중앙 시스템 프롬프트 | `llm_prompts.py` (신규) | 7개 역할별 시스템 프롬프트(ADVOCATE/CRITIC/TAINT/CLASSIFIER/REPAIR/SYNTHESIS) + temperature 상수 |
+| LLMDriver Protocol 확장 | `llm_driver.py` | 4개 드라이버(Codex/Claude API/Claude Code/Ollama)에 `system_prompt` + `temperature` 파라미터 추가 |
+| 5-stage JSON 파서 | `llm_driver.py` | preamble 제거 → fence → raw → brace-counting → common error fix; `required_keys` 스키마 검증 |
+| Sink 심볼 28개로 확장 | `taint_propagation.py` | `_SINK_SYMBOLS` 11→28 (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf 계열, scanf 계열, dlopen, realpath) |
+| Format string 탐지 | `taint_propagation.py` | `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` — 변수 기반 format string 탐지 |
+| EPSS 스코어 통합 | `cve_scan.py` | FIRST.org API 배치 조회, per-run + cross-run 캐시, EPSS 백분위 기반 신뢰도 조정 |
+| LLM 실패 관찰성 분리 | `llm_driver.py` + 스테이지 | `parse_failures` vs `llm_call_failures` 분리 집계, quota_exhausted 명시적 탐지 |
+| GitHub Action | `.github/actions/scout-scan/` | CI/CD 통합용 composite action, GitHub Security 탭 SARIF 업로드 |
+| CRA 준수 매핑 | `docs/cra_compliance_mapping.md` | EU Cyber Resilience Act Annex I 12개 필수 요구사항을 SCOUT 출력에 매핑 |
+| 전략 로드맵 | `docs/strategic_roadmap_2026.md` | 30+ 학술 논문, 경쟁 도구 분석(Theori Xint, FirmAgent, EU CRA) 기반 3-Phase 계획 |
+
+**v2.5.0 검증 (Netgear R7000, codex 드라이버, 2026-04-13):**
+
+| 지표 | v2.5 이전 (1211 런) | v2.5.0 (1320 런) |
+|---|---|---|
+| `adversarial_triage` parse_failures | **100/100** | **0/100** |
+| `adversarial_triage` parsed_ok | 0/100 | 100/100 |
+| `fp_verification` unverified | 97/100 | 0/100 |
+| `fp_verification` true_positives | 1 | 57 |
+| `fp_verification` false_positives | 2 | 43 |
+| `cve_scan` EPSS enriched | 0/23 | 23/23 |
+
+- adversarial debate: 100건 검토 → 99건 downgraded (FP) + 1건 maintained (TP)
+- 런: `aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c`
+- v2.5 이전 실패는 Claude CLI 쿼터 초과가 원인. v2.5.0에서 `quota_exhausted` 명시 분류로 실제 parse failure와 구분 가능
+
+**핵심 버그 수정:**
+- CVE scan signature-only 경로의 조기 `return` 제거 — enrichment / finding candidate 생성 누락 해결
+- CVE scan backport 신뢰도 보정이 match별 component metadata 사용 (이전: 마지막 루프 변수 leak)
+- semantic classifier 배치 50→15 축소로 긴 컨텍스트의 JSON 스키마 손실 방지
 
 </details>
 

@@ -15,7 +15,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .llm_driver import LLMDriver, ModelTier, resolve_driver, write_llm_trace
+from .llm_driver import (
+    LLMDriver,
+    ModelTier,
+    classify_llm_failure,
+    resolve_driver,
+    write_llm_trace,
+)
+from .llm_prompts import (
+    ADVOCATE_SYSTEM,
+    CRITIC_SYSTEM,
+    REPAIR_SYSTEM,
+    TEMPERATURE_ANALYTICAL,
+    TEMPERATURE_DETERMINISTIC,
+)
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -39,25 +52,27 @@ _RETRYABLE_TOKENS: tuple[str, ...] = (
 _CONFIDENCE_REDUCTION = 0.2
 
 # Mitigations the critic may cite as strong rebuttals
-_STRONG_MITIGATIONS: frozenset[str] = frozenset({
-    "chroot",
-    "acl",
-    "input filter",
-    "input validation",
-    "seccomp",
-    "apparmor",
-    "selinux",
-    "sandboxing",
-    "sandbox",
-    "rate limit",
-    "authentication required",
-    "authorization check",
-    "canary",
-    "stack protector",
-    "aslr",
-    "nx bit",
-    "pie",
-})
+_STRONG_MITIGATIONS: frozenset[str] = frozenset(
+    {
+        "chroot",
+        "acl",
+        "input filter",
+        "input validation",
+        "seccomp",
+        "apparmor",
+        "selinux",
+        "sandboxing",
+        "sandbox",
+        "rate limit",
+        "authentication required",
+        "authorization check",
+        "canary",
+        "stack protector",
+        "aslr",
+        "nx bit",
+        "pie",
+    }
+)
 
 
 def _load_json_file(path: Path) -> object | None:
@@ -96,9 +111,6 @@ def _build_advocate_prompt(
     finding_json = json.dumps(finding, indent=2, ensure_ascii=True)
     code_section = _build_code_section(decompiled_context)
     return (
-        "You are an offensive security researcher acting as an ADVOCATE.\n"
-        "Your job is to argue why the following firmware finding IS\n"
-        "exploitable. Cite specific evidence from the finding data.\n\n"
         "## Finding\n"
         f"{finding_json}\n\n"
         f"{code_section}"
@@ -114,7 +126,9 @@ def _build_advocate_prompt(
         '  "argument": "<detailed argument>",\n'
         '  "evidence_cited": ["<specific evidence points>"],\n'
         '  "attack_scenario": "<brief attack scenario>"\n'
-        "}\n"
+        "}\n\n"
+        "## Example Output\n"
+        '{"exploitable": true, "argument": "The recv() call at 0x4012A0 reads user input into a stack buffer passed directly to system() at 0x4012F0 with no length check or sanitization.", "evidence_cited": ["recv() in handler_main", "system() call with user-controlled buffer", "no stack canary"], "attack_scenario": "Attacker sends crafted HTTP request to inject shell command via unsanitized CGI parameter."}\n'
     )
 
 
@@ -126,10 +140,6 @@ def _build_critic_prompt(
     finding_json = json.dumps(finding, indent=2, ensure_ascii=True)
     code_section = _build_code_section(decompiled_context)
     return (
-        "You are a defensive security engineer acting as a CRITIC.\n"
-        "Your job is to argue why the following firmware finding is NOT\n"
-        "exploitable. Consider mitigations, hardening, and practical\n"
-        "barriers to exploitation.\n\n"
         "## Finding\n"
         f"{finding_json}\n\n"
         f"{code_section}"
@@ -148,12 +158,15 @@ def _build_critic_prompt(
         '  "rebuttal": "<detailed rebuttal>",\n'
         '  "mitigations_cited": ["<specific mitigations>"],\n'
         '  "exploitation_barriers": ["<practical barriers>"]\n'
-        "}\n"
+        "}\n\n"
+        "## Example Output\n"
+        '{"exploitable": false, "rebuttal": "The sprintf call uses a format string from .rodata (constant) with integer arguments only. No user-controlled data reaches the format string or buffer size.", "evidence_cited": ["format string is constant literal", "arguments are integer return values from atoi()"], "missing_evidence": ["no network input path to this function"]}\n'
     )
 
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
+
     return parse_json_from_llm_output(stdout)
 
 
@@ -179,6 +192,8 @@ def _repair_debate_response(
         max_attempts=1,
         retryable_tokens=_RETRYABLE_TOKENS,
         model_tier="haiku" if model_tier != "opus" else "sonnet",
+        system_prompt=REPAIR_SYSTEM,
+        temperature=TEMPERATURE_DETERMINISTIC,
     )
     trace_refs.append(
         write_llm_trace(
@@ -249,8 +264,7 @@ class AdversarialTriageStage:
                 "triaged_findings": [],
             }
             out_json.write_text(
-                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-                + "\n",
+                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             return StageOutcome(
@@ -263,9 +277,7 @@ class AdversarialTriageStage:
         findings: list[dict[str, object]] = []
 
         # Try fp_verification first
-        fp_path = (
-            run_dir / "stages" / "fp_verification" / "verified_alerts.json"
-        )
+        fp_path = run_dir / "stages" / "fp_verification" / "verified_alerts.json"
         fp_data = _load_json_file(fp_path)
         if isinstance(fp_data, dict):
             v_any = cast(dict[str, object], fp_data).get("verified_alerts")
@@ -276,9 +288,7 @@ class AdversarialTriageStage:
 
         # Fallback 1: taint_propagation alerts
         if not findings:
-            taint_path = (
-                run_dir / "stages" / "taint_propagation" / "alerts.json"
-            )
+            taint_path = run_dir / "stages" / "taint_propagation" / "alerts.json"
             t_data = _load_json_file(taint_path)
             if isinstance(t_data, dict):
                 t_any = cast(dict[str, object], t_data).get("alerts")
@@ -294,9 +304,7 @@ class AdversarialTriageStage:
 
         # Fallback 2: findings stage
         if not findings:
-            findings_path = (
-                run_dir / "stages" / "findings" / "findings.json"
-            )
+            findings_path = run_dir / "stages" / "findings" / "findings.json"
             f_data = _load_json_file(findings_path)
             if isinstance(f_data, dict):
                 f_any = cast(dict[str, object], f_data).get("findings")
@@ -307,9 +315,7 @@ class AdversarialTriageStage:
 
         # Fallback 3: attack_surface entries
         if not findings:
-            as_path = (
-                run_dir / "stages" / "attack_surface" / "attack_surface.json"
-            )
+            as_path = run_dir / "stages" / "attack_surface" / "attack_surface.json"
             as_data = _load_json_file(as_path)
             if isinstance(as_data, dict):
                 as_entries = cast(dict[str, object], as_data).get("attack_surface")
@@ -318,19 +324,14 @@ class AdversarialTriageStage:
                         if not isinstance(entry_any, dict):
                             continue
                         entry = cast(dict[str, object], entry_any)
-                        conf_any = (
-                            entry.get("confidence")
-                            or entry.get("confidence_calibrated")
+                        conf_any = entry.get("confidence") or entry.get(
+                            "confidence_calibrated"
                         )
                         if isinstance(conf_any, (int, float)) and float(conf_any) > 0.3:
                             finding_entry: dict[str, object] = {
                                 "source_api": str(entry.get("surface", "")),
-                                "source_binary": str(
-                                    entry.get("observation", "")
-                                ),
-                                "sink_symbol": str(
-                                    entry.get("classification", "")
-                                ),
+                                "source_binary": str(entry.get("observation", "")),
+                                "sink_symbol": str(entry.get("classification", "")),
                                 "confidence": float(conf_any),
                                 "path_description": str(
                                     entry.get("edge_semantics", "")
@@ -359,13 +360,10 @@ class AdversarialTriageStage:
                     "debated": 0,
                     "downgraded": 0,
                 },
-                "limitations": cast(
-                    list[JsonValue], cast(list[object], limitations)
-                ),
+                "limitations": cast(list[JsonValue], cast(list[object], limitations)),
             }
             out_json.write_text(
-                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-                + "\n",
+                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             return StageOutcome(
@@ -380,12 +378,15 @@ class AdversarialTriageStage:
         # FP-adjusted alerts still reach the advocate/critic debate.
         _AT_THRESHOLD = 0.40
         eligible = [
-            f for f in findings
+            f
+            for f in findings
             if isinstance(f.get("confidence"), (int, float))
-            and float(str(f.get("original_confidence", f["confidence"]))) >= _AT_THRESHOLD
+            and float(str(f.get("original_confidence", f["confidence"])))
+            >= _AT_THRESHOLD
         ]
         below_threshold = [
-            f for f in findings
+            f
+            for f in findings
             if not isinstance(f.get("confidence"), (int, float))
             or float(str(f.get("original_confidence", f["confidence"]))) < _AT_THRESHOLD
         ]
@@ -404,23 +405,31 @@ class AdversarialTriageStage:
                         body = str(f.get("body", ""))
                         binary = str(f.get("binary", ""))
                         if fname and body:
-                            _all_funcs.append({"name": fname, "body": body, "binary": binary})
+                            _all_funcs.append(
+                                {"name": fname, "body": body, "binary": binary}
+                            )
 
-        def _find_decompiled_for(finding: dict[str, object]) -> list[dict[str, str]] | None:
+        def _find_decompiled_for(
+            finding: dict[str, object],
+        ) -> list[dict[str, str]] | None:
             """Find decompiled functions relevant to a finding."""
             src_binary = str(finding.get("source_binary", ""))
             src_api = str(finding.get("source_api", ""))
             sink_sym = str(finding.get("sink_symbol", ""))
             if not _all_funcs or (not src_api and not sink_sym):
                 return None
-            basename = src_binary.rsplit("/", 1)[-1] if "/" in src_binary else src_binary
+            basename = (
+                src_binary.rsplit("/", 1)[-1] if "/" in src_binary else src_binary
+            )
             matched: list[dict[str, str]] = []
             for fi in _all_funcs:
                 fb = fi.get("binary", "")
                 if basename and fb and basename not in fb:
                     continue
                 bl = fi["body"].lower()
-                if (src_api and src_api.lower() in bl) or (sink_sym and sink_sym.lower() in bl):
+                if (src_api and src_api.lower() in bl) or (
+                    sink_sym and sink_sym.lower() in bl
+                ):
                     matched.append(fi)
                     if len(matched) >= 3:
                         break
@@ -432,6 +441,8 @@ class AdversarialTriageStage:
         debated_count = 0
         downgraded_count = 0
         parsed_ok_count = 0
+        parse_failure_count = 0
+        llm_call_failure_count = 0
         trace_refs: list[str] = []
 
         if not driver.available():
@@ -457,6 +468,8 @@ class AdversarialTriageStage:
                     max_attempts=_LLM_MAX_ATTEMPTS,
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier="sonnet",
+                    system_prompt=ADVOCATE_SYSTEM,
+                    temperature=TEMPERATURE_ANALYTICAL,
                 )
                 local_traces.append(
                     write_llm_trace(
@@ -471,6 +484,8 @@ class AdversarialTriageStage:
 
                 advocate_argument = ""
                 advocate_parsed: dict[str, object] | None = None
+                advocate_failure_kind: str | None = None
+                advocate_failure_reason: str | None = None
                 if advocate_result.status == "ok":
                     advocate_parsed = _parse_json_response(advocate_result.stdout)
                     if advocate_parsed is None:
@@ -485,10 +500,15 @@ class AdversarialTriageStage:
                         )
                     if advocate_parsed is not None:
                         advocate_argument = str(advocate_parsed.get("argument", ""))
+                else:
+                    advocate_failure_kind, advocate_failure_reason = classify_llm_failure(
+                        advocate_result
+                    )
 
                 # Critic
                 critic_prompt = _build_critic_prompt(
-                    finding, advocate_argument or "(advocate failed to respond)",
+                    finding,
+                    advocate_argument or "(advocate failed to respond)",
                     dec_ctx,
                 )
                 critic_result = driver.execute(
@@ -498,6 +518,8 @@ class AdversarialTriageStage:
                     max_attempts=_LLM_MAX_ATTEMPTS,
                     retryable_tokens=_RETRYABLE_TOKENS,
                     model_tier="sonnet",
+                    system_prompt=CRITIC_SYSTEM,
+                    temperature=TEMPERATURE_ANALYTICAL,
                 )
                 local_traces.append(
                     write_llm_trace(
@@ -511,6 +533,8 @@ class AdversarialTriageStage:
                 )
 
                 critic_parsed: dict[str, object] | None = None
+                critic_failure_kind: str | None = None
+                critic_failure_reason: str | None = None
                 if critic_result.status == "ok":
                     critic_parsed = _parse_json_response(critic_result.stdout)
                     if critic_parsed is None:
@@ -523,12 +547,14 @@ class AdversarialTriageStage:
                             model_tier="sonnet",
                             trace_refs=local_traces,
                         )
+                else:
+                    critic_failure_kind, critic_failure_reason = classify_llm_failure(
+                        critic_result
+                    )
 
                 # Compare: strong rebuttal -> reduce confidence
                 _local_downgraded = False
-                if critic_parsed is not None and _has_strong_rebuttal(
-                    critic_parsed
-                ):
+                if critic_parsed is not None and _has_strong_rebuttal(critic_parsed):
                     orig_conf = float(str(finding.get("confidence", 0.5)))
                     new_conf = _clamp01(orig_conf - _CONFIDENCE_REDUCTION)
                     finding_copy["confidence"] = new_conf
@@ -538,23 +564,76 @@ class AdversarialTriageStage:
                 else:
                     finding_copy["triage_outcome"] = "maintained"
 
+                advocate_payload: dict[str, JsonValue]
+                if advocate_parsed is not None:
+                    advocate_payload = cast(dict[str, JsonValue], advocate_parsed)
+                elif advocate_result.status == "ok":
+                    advocate_payload = {
+                        "error": "parse_failure",
+                        "status": advocate_result.status,
+                    }
+                else:
+                    advocate_payload = {
+                        "error": "llm_call_failed",
+                        "status": advocate_result.status,
+                        "failure_kind": advocate_failure_kind or "unknown_failure",
+                        "failure_reason": advocate_failure_reason or advocate_result.status,
+                    }
+
+                critic_payload: dict[str, JsonValue]
+                if critic_parsed is not None:
+                    critic_payload = cast(dict[str, JsonValue], critic_parsed)
+                elif critic_result.status == "ok":
+                    critic_payload = {
+                        "error": "parse_failure",
+                        "status": critic_result.status,
+                    }
+                else:
+                    critic_payload = {
+                        "error": "llm_call_failed",
+                        "status": critic_result.status,
+                        "failure_kind": critic_failure_kind or "unknown_failure",
+                        "failure_reason": critic_failure_reason or critic_result.status,
+                    }
+
                 finding_copy["advocate_argument"] = (
-                    cast(dict[str, JsonValue], advocate_parsed)
-                    if advocate_parsed is not None
-                    else {"error": "parse_failure"}
+                    advocate_payload
                 )
                 finding_copy["critic_rebuttal"] = (
-                    cast(dict[str, JsonValue], critic_parsed)
-                    if critic_parsed is not None
-                    else {"error": "parse_failure"}
+                    critic_payload
                 )
                 finding_copy["trace_refs"] = cast(
                     list[JsonValue], cast(list[object], local_traces[-4:])
                 )
-                finding_copy["_parsed_ok"] = (
-                    advocate_parsed is not None and critic_parsed is not None
+                _local_parsed_ok = advocate_parsed is not None and critic_parsed is not None
+                _local_llm_call_failure = (
+                    advocate_result.status != "ok" or critic_result.status != "ok"
                 )
+                _local_parse_failure = (
+                    not _local_parsed_ok and not _local_llm_call_failure
+                )
+                finding_copy["_parsed_ok"] = _local_parsed_ok
                 finding_copy["_downgraded"] = _local_downgraded
+                finding_copy["_parse_failure"] = _local_parse_failure
+                finding_copy["_llm_call_failure"] = _local_llm_call_failure
+                if _local_llm_call_failure:
+                    failure_parts = []
+                    if advocate_failure_kind is not None:
+                        failure_parts.append(f"advocate:{advocate_failure_kind}")
+                    if critic_failure_kind is not None:
+                        failure_parts.append(f"critic:{critic_failure_kind}")
+                    reason_parts = []
+                    if advocate_failure_reason:
+                        reason_parts.append(f"advocate:{advocate_failure_reason}")
+                    if critic_failure_reason:
+                        reason_parts.append(f"critic:{critic_failure_reason}")
+                    finding_copy["triage_failure_kind"] = ", ".join(failure_parts)
+                    finding_copy["triage_failure_reason"] = " | ".join(reason_parts)
+                elif _local_parse_failure:
+                    finding_copy["triage_failure_kind"] = "parse_failure"
+                    finding_copy["triage_failure_reason"] = (
+                        "One or more adversarial triage responses were unparseable"
+                    )
 
                 with _trace_lock:
                     trace_refs.extend(local_traces)
@@ -565,8 +644,15 @@ class AdversarialTriageStage:
                 futures = {pool.submit(_debate_one, f): f for f in eligible}
                 for future in as_completed(futures):
                     result = future.result()
-                    if result.pop("_parsed_ok", False):
+                    parsed_ok = bool(result.pop("_parsed_ok", False))
+                    llm_call_failed = bool(result.pop("_llm_call_failure", False))
+                    parse_failed = bool(result.pop("_parse_failure", False))
+                    if parsed_ok:
                         parsed_ok_count += 1
+                    elif llm_call_failed:
+                        llm_call_failure_count += 1
+                    elif parse_failed:
+                        parse_failure_count += 1
                     if result.pop("_downgraded", False):
                         downgraded_count += 1
                     triaged.append(cast(dict[str, JsonValue], result))
@@ -581,15 +667,19 @@ class AdversarialTriageStage:
         status: StageStatus = "ok"
         if not triaged or (debated_count > 0 and parsed_ok_count < debated_count):
             status = "partial"
-        if debated_count > 0 and parsed_ok_count < debated_count:
-            limitations.append("One or more adversarial triage responses could not be parsed")
+        if parse_failure_count > 0:
+            limitations.append(
+                "One or more adversarial triage responses could not be parsed"
+            )
+        if llm_call_failure_count > 0:
+            limitations.append(
+                "One or more adversarial triage LLM calls failed"
+            )
 
         payload = {
             "schema_version": _SCHEMA_VERSION,
             "status": status,
-            "triaged_findings": cast(
-                list[JsonValue], cast(list[object], triaged)
-            ),
+            "triaged_findings": cast(list[JsonValue], cast(list[object], triaged)),
             "summary": {
                 "total_input": len(findings),
                 "eligible": len(eligible),
@@ -597,7 +687,8 @@ class AdversarialTriageStage:
                 "downgraded": downgraded_count,
                 "maintained": debated_count - downgraded_count,
                 "parsed_ok": parsed_ok_count,
-                "parse_failures": max(0, debated_count - parsed_ok_count),
+                "parse_failures": parse_failure_count,
+                "llm_call_failures": llm_call_failure_count,
             },
             "trace_refs": cast(list[JsonValue], cast(list[object], trace_refs)),
             "limitations": cast(
@@ -605,8 +696,7 @@ class AdversarialTriageStage:
             ),
         }
         out_json.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             encoding="utf-8",
         )
 
@@ -615,6 +705,8 @@ class AdversarialTriageStage:
             "debated": debated_count,
             "downgraded": downgraded_count,
             "parsed_ok": parsed_ok_count,
+            "parse_failures": parse_failure_count,
+            "llm_call_failures": llm_call_failure_count,
         }
         return StageOutcome(
             status=status,

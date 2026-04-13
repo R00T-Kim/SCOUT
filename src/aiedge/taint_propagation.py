@@ -15,8 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .confidence_caps import PCODE_VERIFIED_CAP, STATIC_CODE_VERIFIED_CAP, SYMBOL_COOCCURRENCE_CAP
+from .confidence_caps import (
+    PCODE_VERIFIED_CAP,
+    STATIC_CODE_VERIFIED_CAP,
+    SYMBOL_COOCCURRENCE_CAP,
+)
 from .llm_driver import resolve_driver
+from .llm_prompts import TAINT_SYSTEM, TEMPERATURE_DETERMINISTIC
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -37,34 +42,94 @@ _RETRYABLE_TOKENS: tuple[str, ...] = (
     "429",
 )
 
-_SINK_SYMBOLS: frozenset[str] = frozenset({
-    "system",
-    "strcpy",
-    "sprintf",
-    "execve",
-    "execvp",
-    "execvpe",
-    "execl",
-    "execlp",
-    "execle",
-    "execv",
-    "popen",
-})
+_SINK_SYMBOLS: frozenset[str] = frozenset(
+    {
+        # -- Command injection --
+        "system",
+        "popen",
+        "execve",
+        "execvp",
+        "execvpe",
+        "execl",
+        "execlp",
+        "execle",
+        "execv",
+        # -- Buffer overflow (string) --
+        "strcpy",
+        "sprintf",
+        "strcat",
+        "strncpy",
+        "strncat",
+        "gets",
+        "vsprintf",
+        # -- Buffer overflow (memory) --
+        "memcpy",
+        "memmove",
+        # -- Format string --
+        "printf",
+        "fprintf",
+        "syslog",
+        "vprintf",
+        "vfprintf",
+        "snprintf",
+        # -- Dangerous input parsing --
+        "scanf",
+        "sscanf",
+        "fscanf",
+        # -- Dynamic loading / path traversal --
+        "dlopen",
+        "realpath",
+    }
+)
+
+_FORMAT_STRING_SINKS: frozenset[str] = frozenset(
+    {
+        "printf",
+        "fprintf",
+        "syslog",
+        "vprintf",
+        "vfprintf",
+        "snprintf",
+    }
+)
 
 _MAX_PATHS = 200
 _MAX_ALERTS = 100
 
 # FP Rule 2: symbols that indicate network/external input reachability
-_NETWORK_INPUT_SYMBOLS: frozenset[str] = frozenset({
-    "listen", "accept", "bind", "socket", "getenv", "nvram_get",
-    "recv", "recvfrom", "recvmsg", "fgets", "gets", "scanf",
-})
+_NETWORK_INPUT_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "listen",
+        "accept",
+        "bind",
+        "socket",
+        "getenv",
+        "nvram_get",
+        "recv",
+        "recvfrom",
+        "recvmsg",
+        "fgets",
+        "gets",
+        "scanf",
+        "read",
+        "fread",
+    }
+)
 
 # FP Rule 3: sanitizer symbols that convert strings to integers (injection-safe)
-_SANITIZER_SYMBOLS: frozenset[str] = frozenset({
-    "atoi", "atol", "atoll", "strtol", "strtoul", "strtoll", "strtoull",
-    "inet_aton", "inet_addr",
-})
+_SANITIZER_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "atoi",
+        "atol",
+        "atoll",
+        "strtol",
+        "strtoul",
+        "strtoll",
+        "strtoull",
+        "inet_aton",
+        "inet_addr",
+    }
+)
 
 
 def _trace_call_chain(
@@ -122,6 +187,20 @@ def _check_constant_sink(
         if literal_pat.search(body):
             found_literal = True
     return found_literal
+
+
+def _is_format_string_variable(
+    sink_sym: str,
+    decompiled_body: str,
+) -> bool:
+    """Return True if sink_sym is called with a variable (non-literal) format string."""
+    if sink_sym not in _FORMAT_STRING_SINKS:
+        return False
+    # Pattern: printf(variable...) vs printf("literal"...)
+    variable_fmt_pat = re.compile(
+        r"\b" + re.escape(sink_sym) + r"\s*\(\s*[a-zA-Z_]",
+    )
+    return bool(variable_fmt_pat.search(decompiled_body))
 
 
 def _has_network_input_symbol(import_symbols: set[str]) -> bool:
@@ -190,12 +269,21 @@ def _build_taint_prompt(
         '  "path_description": "<trace description>",\n'
         '  "sanitizers_found": ["<sanitizer_name>", ...],\n'
         '  "rationale": "<explanation>"\n'
-        "}\n"
+        "}\n\n"
+        "## Example Output\n"
+        '{"taint_reaches_sink": true, "confidence": 0.75, '
+        '"path_description": "recv() -> buffer -> sprintf() -> system()", '
+        '"sanitizers_found": [], '
+        '"rationale": "User-controlled data from recv() is copied into buffer '
+        'via sprintf() without validation, then passed directly to system()."}\n'
     )
 
 
 def _build_http_taint_path(
-    binary: str, input_api: str, sink: str, hardening: str,
+    binary: str,
+    input_api: str,
+    sink: str,
+    hardening: str,
 ) -> str:
     """Build a structured taint path description for web server binaries."""
     basename = binary.rsplit("/", 1)[-1] if "/" in binary else binary
@@ -209,6 +297,7 @@ def _build_http_taint_path(
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
+
     return parse_json_from_llm_output(stdout)
 
 
@@ -293,28 +382,49 @@ class TaintPropagationStage:
                                 if isinstance(sn, str):
                                     syms.add(sn)
                     input_syms = {
-                        s for s in syms
-                        if s.lower() in {
-                            "recv", "recvfrom", "recvmsg", "read", "fread",
-                            "fgets", "gets", "getenv", "scanf", "sscanf",
+                        s
+                        for s in syms
+                        if s.lower()
+                        in {
+                            "recv",
+                            "recvfrom",
+                            "recvmsg",
+                            "read",
+                            "fread",
+                            "fgets",
+                            "gets",
+                            "getenv",
+                            "scanf",
+                            "sscanf",
                             "fscanf",
                         }
                     }
                     sink_syms = {
-                        s for s in syms
-                        if s.lower() in {
-                            "system", "popen", "execve", "execv", "strcpy",
-                            "sprintf", "strcat", "vsprintf", "gets",
+                        s
+                        for s in syms
+                        if s.lower()
+                        in {
+                            "system",
+                            "popen",
+                            "execve",
+                            "execv",
+                            "strcpy",
+                            "sprintf",
+                            "strcat",
+                            "vsprintf",
+                            "gets",
                         }
                     }
                     if sink_syms:  # At minimum need sinks
-                        ba_pairs.append({
-                            "binary": str(hit.get("path", "")),
-                            "input_syms": sorted(input_syms),
-                            "sink_syms": sorted(sink_syms),
-                            "arch": str(hit.get("arch", "unknown")),
-                            "hardening": hit.get("hardening", {}),
-                        })
+                        ba_pairs.append(
+                            {
+                                "binary": str(hit.get("path", "")),
+                                "input_syms": sorted(input_syms),
+                                "sink_syms": sorted(sink_syms),
+                                "arch": str(hit.get("arch", "unknown")),
+                                "hardening": hit.get("hardening", {}),
+                            }
+                        )
 
         # --- Load decompiled functions from ghidra_analysis ---
         ghidra_dir = run_dir / "stages" / "ghidra_analysis"
@@ -342,7 +452,11 @@ class TaintPropagationStage:
                         binary = str(fd.get("binary", ""))
                         if fname and body:
                             key = f"{binary}:{fname}" if binary else fname
-                            func_map[key] = {"name": fname, "body": body, "binary": binary}
+                            func_map[key] = {
+                                "name": fname,
+                                "body": body,
+                                "binary": binary,
+                            }
         if not func_map:
             limitations.append("No decompiled function bodies available")
 
@@ -380,7 +494,9 @@ class TaintPropagationStage:
                 src_addr = str(pt_d.get("source_address", "0x0"))
                 sink_addr = str(pt_d.get("sink_address", "0x0"))
                 sanitized = bool(pt_d.get("sanitized", False))
-                depth = int(pt_d.get("depth", 0)) if pt_d.get("depth") is not None else 0
+                depth = (
+                    int(pt_d.get("depth", 0)) if pt_d.get("depth") is not None else 0
+                )
 
                 # Resolve binary from parent dir name (hash-keyed cache)
                 pcode_binary = pcode_file.parent.name
@@ -395,9 +511,13 @@ class TaintPropagationStage:
                 elif trace_method == "pcode_colocated":
                     conf = min(conf, 0.65)  # P-code verified colocated
                 elif trace_method == "decompiled_colocated":
-                    conf = min(conf, 0.50)  # body text heuristic, slightly above co-occurrence(0.40)
+                    conf = min(
+                        conf, 0.50
+                    )  # body text heuristic, slightly above co-occurrence(0.40)
                 elif trace_method == "decompiled_interprocedural":
-                    conf = min(conf, 0.60)  # cross-function body text, higher than colocated
+                    conf = min(
+                        conf, 0.60
+                    )  # cross-function body text, higher than colocated
                 else:
                     conf = min(conf, PCODE_VERIFIED_CAP)
 
@@ -420,27 +540,48 @@ class TaintPropagationStage:
                     "taint_reaches_sink": not sanitized,
                     "confidence": _clamp01(conf),
                     "path_description": path_desc,
-                    "method": trace_method if trace_method != "pcode_dataflow" else "pcode_verified",
+                    "method": (
+                        trace_method
+                        if trace_method != "pcode_dataflow"
+                        else "pcode_verified"
+                    ),
                     "source_type": trace_method,
                     "web_server": False,
-                    "call_chain": cast(list[JsonValue], [
-                        {"step": "source", "function": f"{func_name}:{src_api}", "address": src_addr},
-                        {"step": "sink", "function": f"{func_name}:{sink_sym}", "address": sink_addr},
-                    ]),
+                    "call_chain": cast(
+                        list[JsonValue],
+                        [
+                            {
+                                "step": "source",
+                                "function": f"{func_name}:{src_api}",
+                                "address": src_addr,
+                            },
+                            {
+                                "step": "sink",
+                                "function": f"{func_name}:{sink_sym}",
+                                "address": sink_addr,
+                            },
+                        ],
+                    ),
                 }
                 taint_results.append(taint_entry)
                 if not sanitized:
-                    alerts.append({
-                        "source_api": src_api,
-                        "source_binary": pcode_binary,
-                        "source_address": src_addr,
-                        "sink_symbol": sink_sym,
-                        "confidence": _clamp01(conf),
-                        "path_description": path_desc,
-                        "method": trace_method if trace_method != "pcode_dataflow" else "pcode_verified",
-                        "source_type": trace_method,
-                        "web_server": False,
-                    })
+                    alerts.append(
+                        {
+                            "source_api": src_api,
+                            "source_binary": pcode_binary,
+                            "source_address": src_addr,
+                            "sink_symbol": sink_sym,
+                            "confidence": _clamp01(conf),
+                            "path_description": path_desc,
+                            "method": (
+                                trace_method
+                                if trace_method != "pcode_dataflow"
+                                else "pcode_verified"
+                            ),
+                            "source_type": trace_method,
+                            "web_server": False,
+                        }
+                    )
                 pcode_verified_binaries.add(pcode_binary)
                 trace_count += 1
                 if trace_count >= _MAX_PATHS:
@@ -456,7 +597,10 @@ class TaintPropagationStage:
         # Prioritize web server binaries so they don't get crowded out by _MAX_PATHS
         sorted_sources = sorted(
             source_list,
-            key=lambda s: (not bool(s.get("web_server")), -float(s.get("confidence", 0))),
+            key=lambda s: (
+                not bool(s.get("web_server")),
+                -float(s.get("confidence", 0)),
+            ),
         )
         seen_static: set[tuple[str, str, str]] = set()
         for source in sorted_sources:
@@ -524,7 +668,10 @@ class TaintPropagationStage:
                 if is_web:
                     conf = 0.60
                     path_desc = _build_http_taint_path(
-                        src_binary, src_api, sink_sym, hardening_str,
+                        src_binary,
+                        src_api,
+                        sink_sym,
+                        hardening_str,
                     )
                 else:
                     path_desc = (
@@ -535,9 +682,7 @@ class TaintPropagationStage:
 
                 # Compute binary basename early for FP rules
                 src_basename = (
-                    src_binary.rsplit("/", 1)[-1]
-                    if "/" in src_binary
-                    else src_binary
+                    src_binary.rsplit("/", 1)[-1] if "/" in src_binary else src_binary
                 )
 
                 # --- FP Rule 1: constant-sink gate (Ghidra data required) ---
@@ -568,9 +713,21 @@ class TaintPropagationStage:
                 call_chain: list[dict[str, str]] = []
                 if is_web:
                     call_chain = [
-                        {"step": "entry", "function": f"{src_basename}:main", "type": "http_handler"},
-                        {"step": "input", "function": f"{src_basename}:{src_api}", "type": "http_param_read"},
-                        {"step": "sink", "function": f"{src_basename}:{sink_sym}", "type": "command_execution"},
+                        {
+                            "step": "entry",
+                            "function": f"{src_basename}:main",
+                            "type": "http_handler",
+                        },
+                        {
+                            "step": "input",
+                            "function": f"{src_basename}:{src_api}",
+                            "type": "http_param_read",
+                        },
+                        {
+                            "step": "sink",
+                            "function": f"{src_basename}:{sink_sym}",
+                            "type": "command_execution",
+                        },
                     ]
 
                 taint_entry: dict[str, JsonValue] = {
@@ -586,17 +743,19 @@ class TaintPropagationStage:
                     "call_chain": cast(list[JsonValue], cast(list[object], call_chain)),
                 }
                 taint_results.append(taint_entry)
-                alerts.append({
-                    "source_api": src_api,
-                    "source_binary": src_binary,
-                    "source_address": str(source.get("address", "0x0")),
-                    "sink_symbol": sink_sym,
-                    "confidence": _clamp01(conf),
-                    "path_description": path_desc,
-                    "method": "static_inference",
-                    "source_type": source_type or "generic",
-                    "web_server": is_web,
-                })
+                alerts.append(
+                    {
+                        "source_api": src_api,
+                        "source_binary": src_binary,
+                        "source_address": str(source.get("address", "0x0")),
+                        "sink_symbol": sink_sym,
+                        "confidence": _clamp01(conf),
+                        "path_description": path_desc,
+                        "method": "static_inference",
+                        "source_type": source_type or "generic",
+                        "web_server": is_web,
+                    }
+                )
                 trace_count += 1
 
         # From binary_analysis pairs (fallback if enhanced_source was sparse)
@@ -670,15 +829,19 @@ class TaintPropagationStage:
                         "method": "static_inference_ba",
                     }
                     taint_results.append(taint_entry_bp)
-                    alerts.append({
-                        "source_api": src_api_str,
-                        "source_binary": bp_binary,
-                        "source_address": "0x0",
-                        "sink_symbol": sink_str,
-                        "confidence": _clamp01(bp_conf),
-                        "path_description": cast(str, taint_entry_bp["path_description"]),
-                        "method": "static_inference_ba",
-                    })
+                    alerts.append(
+                        {
+                            "source_api": src_api_str,
+                            "source_binary": bp_binary,
+                            "source_address": "0x0",
+                            "sink_symbol": sink_str,
+                            "confidence": _clamp01(bp_conf),
+                            "path_description": cast(
+                                str, taint_entry_bp["path_description"]
+                            ),
+                            "method": "static_inference_ba",
+                        }
+                    )
                     trace_count += 1
 
         # From source_sink_graph paths
@@ -727,15 +890,19 @@ class TaintPropagationStage:
                     "method": "source_sink_graph",
                 }
                 taint_results.append(taint_entry_ss)
-                alerts.append({
-                    "source_api": src_type or "network_input",
-                    "source_binary": sink_bin,
-                    "source_address": "0x0",
-                    "sink_symbol": ss_sym,
-                    "confidence": _clamp01(min(ssp_conf, 0.50)),
-                    "path_description": cast(str, taint_entry_ss["path_description"]),
-                    "method": "source_sink_graph",
-                })
+                alerts.append(
+                    {
+                        "source_api": src_type or "network_input",
+                        "source_binary": sink_bin,
+                        "source_address": "0x0",
+                        "sink_symbol": ss_sym,
+                        "confidence": _clamp01(min(ssp_conf, 0.50)),
+                        "path_description": cast(
+                            str, taint_entry_ss["path_description"]
+                        ),
+                        "method": "source_sink_graph",
+                    }
+                )
                 trace_count += 1
 
         # === LLM TAINT TRACE (when available and not --no-llm) ===
@@ -800,9 +967,16 @@ class TaintPropagationStage:
                                 seen_names = set()
                                 for cfname in chain:
                                     for _k, fi in func_map.items():
-                                        if fi["name"] == cfname and fi["name"] not in seen_names:
+                                        if (
+                                            fi["name"] == cfname
+                                            and fi["name"] not in seen_names
+                                        ):
                                             fb = fi.get("binary", "")
-                                            if not llm_src_basename or not fb or llm_src_basename in fb:
+                                            if (
+                                                not llm_src_basename
+                                                or not fb
+                                                or llm_src_basename in fb
+                                            ):
                                                 chain_funcs.append(fi)
                                                 seen_names.add(fi["name"])
                                                 break
@@ -828,26 +1002,26 @@ class TaintPropagationStage:
                                 cast(dict[str, JsonValue], dict(cached))
                             )
                             if cached.get("taint_reaches_sink"):
-                                alerts.append({
-                                    "source_api": src_api,
-                                    "source_binary": src_binary,
-                                    "source_address": src_addr,
-                                    "sink_symbol": sink_sym,
-                                    "confidence": _clamp01(
-                                        float(cached.get("confidence", 0.5))
-                                    ),
-                                    "path_description": str(
-                                        cached.get("path_description", "")
-                                    ),
-                                    "method": "llm_taint_trace",
-                                    "cached": True,
-                                })
+                                alerts.append(
+                                    {
+                                        "source_api": src_api,
+                                        "source_binary": src_binary,
+                                        "source_address": src_addr,
+                                        "sink_symbol": sink_sym,
+                                        "confidence": _clamp01(
+                                            float(cached.get("confidence", 0.5))
+                                        ),
+                                        "path_description": str(
+                                            cached.get("path_description", "")
+                                        ),
+                                        "method": "llm_taint_trace",
+                                        "cached": True,
+                                    }
+                                )
                             trace_count += 1
                             continue
 
-                        prompt = _build_taint_prompt(
-                            src_api, sink_sym, relevant_funcs
-                        )
+                        prompt = _build_taint_prompt(src_api, sink_sym, relevant_funcs)
                         result = driver.execute(
                             prompt=prompt,
                             run_dir=run_dir,
@@ -855,6 +1029,8 @@ class TaintPropagationStage:
                             max_attempts=_LLM_MAX_ATTEMPTS,
                             retryable_tokens=_RETRYABLE_TOKENS,
                             model_tier="sonnet",
+                            system_prompt=TAINT_SYSTEM,
+                            temperature=TEMPERATURE_DETERMINISTIC,
                         )
 
                         trace_entry_llm: dict[str, object] = {
@@ -888,22 +1064,26 @@ class TaintPropagationStage:
                                 trace_entry_llm["sanitizers_found"] = sanitizers
 
                                 if reaches:
-                                    alerts.append({
-                                        "source_api": src_api,
-                                        "source_binary": src_binary,
-                                        "source_address": src_addr,
-                                        "sink_symbol": sink_sym,
-                                        "confidence": conf_val,
-                                        "path_description": path_desc,
-                                        "sanitizers_found": cast(
-                                            list[JsonValue],
-                                            cast(list[object], sanitizers)
-                                            if isinstance(sanitizers, list)
-                                            else [],
-                                        ),
-                                        "method": "llm_taint_trace",
-                                        "cached": False,
-                                    })
+                                    alerts.append(
+                                        {
+                                            "source_api": src_api,
+                                            "source_binary": src_binary,
+                                            "source_address": src_addr,
+                                            "sink_symbol": sink_sym,
+                                            "confidence": conf_val,
+                                            "path_description": path_desc,
+                                            "sanitizers_found": cast(
+                                                list[JsonValue],
+                                                (
+                                                    cast(list[object], sanitizers)
+                                                    if isinstance(sanitizers, list)
+                                                    else []
+                                                ),
+                                            ),
+                                            "method": "llm_taint_trace",
+                                            "cached": False,
+                                        }
+                                    )
 
                         body_cache[combined_hash] = trace_entry_llm
                         taint_results.append(
@@ -918,14 +1098,16 @@ class TaintPropagationStage:
 
         # Cap alerts
         if len(alerts) > _MAX_ALERTS:
-            limitations.append(
-                f"Alerts capped at {_MAX_ALERTS}"
-            )
+            limitations.append(f"Alerts capped at {_MAX_ALERTS}")
             alerts = alerts[:_MAX_ALERTS]
 
         _write_results(
-            stage_dir, results_json, alerts_json,
-            taint_results, alerts, limitations,
+            stage_dir,
+            results_json,
+            alerts_json,
+            taint_results,
+            alerts,
+            limitations,
         )
 
         status: StageStatus = "ok" if alerts else "partial"
@@ -961,8 +1143,7 @@ def _write_skipped(
             key: [],
         }
         path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             encoding="utf-8",
         )
 
@@ -979,16 +1160,13 @@ def _write_results(
         "schema_version": _SCHEMA_VERSION,
         "status": "ok" if taint_results else "partial",
         "total_traces": len(taint_results),
-        "results": cast(
-            list[JsonValue], cast(list[object], taint_results)
-        ),
+        "results": cast(list[JsonValue], cast(list[object], taint_results)),
         "limitations": cast(
             list[JsonValue], cast(list[object], sorted(set(limitations)))
         ),
     }
     results_json.write_text(
-        json.dumps(results_payload, indent=2, sort_keys=True, ensure_ascii=True)
-        + "\n",
+        json.dumps(results_payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
 
@@ -996,15 +1174,12 @@ def _write_results(
         "schema_version": _SCHEMA_VERSION,
         "status": "ok" if alerts else "partial",
         "total_alerts": len(alerts),
-        "alerts": cast(
-            list[JsonValue], cast(list[object], alerts)
-        ),
+        "alerts": cast(list[JsonValue], cast(list[object], alerts)),
         "limitations": cast(
             list[JsonValue], cast(list[object], sorted(set(limitations)))
         ),
     }
     alerts_json.write_text(
-        json.dumps(alerts_payload, indent=2, sort_keys=True, ensure_ascii=True)
-        + "\n",
+        json.dumps(alerts_payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )

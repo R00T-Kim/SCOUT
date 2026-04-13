@@ -61,6 +61,47 @@
 - 파이프라인 29 → 34 stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
 - 파이프라인 34 → 41 stages (v2.0): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
 
+## v2.5.0 업그레이드 (2026-04-13)
+
+전략 로드맵 Phase 1 구현. 학술 논문 30+편, 경쟁 도구 12개(Theori Xint, FirmAgent, FIRMHIVE 등), Theori Xint 심층 분석 기반.
+
+### LLM 구조 개선
+- **`llm_prompts.py`** (신규): `STRUCTURED_JSON_SYSTEM` 등 7개 system prompt + temperature 상수 중앙 관리
+- **LLMDriver Protocol 확장**: `system_prompt`, `temperature` 파라미터 추가. 4개 드라이버(Codex/Claude API/Claude Code/Ollama) 모두 지원
+- **5-stage JSON 파서**: preamble 제거 → fence 추출 → raw → brace-counting → common error fix. `required_keys` 스키마 검증
+- **adversarial_triage / taint_propagation / semantic_classifier**: 모든 LLM 호출에 system_prompt + temperature 적용
+- **semantic_classifier 배치 축소**: 50 → 15개 함수/배치
+
+### Sink 커버리지 확대
+- **`_SINK_SYMBOLS`**: 11 → 28개 (memcpy, strcat, printf, syslog, scanf, dlopen 등)
+- **`_FORMAT_STRING_SINKS`** + `_is_format_string_variable()`: variable-controlled format string 탐지
+
+### EPSS 통합
+- **cve_scan.py**: FIRST.org EPSS API 배치 조회, per-run + cross-run 캐시
+- 신뢰도 조정: EPSS ≥ 0.10 → +0.10, ≥ 0.01 → +0.05, < 0.001 → -0.05
+
+### 버그 수정
+- **CVE scan signature-only 경로**: 조기 return 제거, 공통 후처리 파이프라인 사용
+- **CVE scan `comp` 변수 버그**: match별 component_metadata 보존, leaked 루프 변수 참조 제거
+- **LLM 실패 분류**: parse_failures vs llm_call_failures 분리 집계 (adversarial_triage, fp_verification)
+
+### CI/CD & 문서
+- **GitHub Action**: `.github/actions/scout-scan/` (composite, SARIF + Security 탭 업로드)
+- **CRA 매핑**: `docs/cra_compliance_mapping.md` (EU CRA Annex I 12개 요구사항)
+- **전략 로드맵**: `docs/strategic_roadmap_2026.md` (3-Phase plan)
+
+### R7000 검증 (2026-04-13)
+
+| 지표 | v2.4.1 (이전) | v2.5.0 (현재) |
+|------|---------------|---------------|
+| adversarial_triage parse_failures | 100/100 | **0/100** |
+| fp_verification unverified | 97/100 | **0/100** |
+| fp_verification true_positives | 1 | **57** |
+| cve_scan EPSS enriched | 0/23 | **23/23** |
+
+- 런: `aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c` (codex 드라이버, R7000 31MB)
+- adversarial debate: 100 debated → 99 downgraded(FP) + 1 maintained(TP)
+
 ## v2.4.1 패치 (2026-04-11)
 
 - **Confidence 보정**: `decompiled_colocated` 0.60→0.45 (high-risk 0.50). Terminator 피드백: symbol co-occurrence와 증거 수준 동일.

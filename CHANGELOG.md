@@ -3,6 +3,40 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.0] — 2026-04-13
+
+### Added
+- **`llm_prompts.py`** — Centralized system prompt module: `STRUCTURED_JSON_SYSTEM`, `ADVOCATE_SYSTEM`, `CRITIC_SYSTEM`, `TAINT_SYSTEM`, `CLASSIFIER_SYSTEM`, `REPAIR_SYSTEM`, `SYNTHESIS_SYSTEM` + temperature constants
+- **LLMDriver Protocol**: `system_prompt: str = ""` and `temperature: float | None = None` parameters wired into all 4 drivers (CodexCLI, ClaudeAPI, ClaudeCodeCLI, Ollama)
+- **EPSS scoring** in `cve_scan.py`: FIRST.org API integration with batched queries, per-run + cross-run cache, confidence adjustment based on EPSS percentile
+- **Sink expansion** (`taint_propagation.py`): `_SINK_SYMBOLS` 11 → 28 entries (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf, fprintf, syslog, vprintf, vfprintf, snprintf, scanf, sscanf, fscanf, dlopen, realpath)
+- **Format string sink set**: `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` helper for variable-controlled format string detection
+- **GitHub Action**: `.github/actions/scout-scan/` composite action for CI/CD with SARIF upload to GitHub Security tab
+- **CRA compliance documentation**: `docs/cra_compliance_mapping.md` mapping all 12 EU Cyber Resilience Act Annex I requirements to SCOUT outputs
+- **Strategic roadmap**: `docs/strategic_roadmap_2026.md` 3-Phase plan based on 30+ academic papers and competitive analysis (Theori Xint, FirmAgent, EU CRA)
+- LLM failure observability: `parse_failures` vs `llm_call_failures` separation in `adversarial_triage.py` and `fp_verification.py`
+- Common LLM failure classification helpers in `llm_driver.py` (`quota_exhausted`, `driver_unavailable`, `driver_nonzero_exit`)
+
+### Fixed
+- **`parse_json_from_llm_output()`** rewritten as 5-stage parser: preamble strip → fence extract → raw text → brace-counting object extraction → common error fix (trailing commas, single quotes). Optional `required_keys` schema validation
+- **CVE scan signature-only path**: removed early `return` so signature-only matches go through the same enrichment/finding-candidate pipeline as NVD matches
+- **CVE scan `comp` variable bug**: backport confidence adjustment now uses per-match component metadata instead of leaked outer loop variable (was incorrectly applying last component's metadata to all matches)
+- **Semantic classifier batch size**: reduced from 50 → 15 functions per LLM call to prevent JSON schema loss in long contexts
+
+### Changed
+- All LLM-using stages now pass appropriate `system_prompt` and `temperature` (deterministic 0.0 for JSON tasks, analytical 0.3 for advocate/critic debate)
+- `adversarial_triage.py`: advocate/critic prompts cleaned (persona moved to system prompt), few-shot examples added
+- `fp_verification.py`: unverified outcomes now distinguish parse failures from driver call failures
+- `taint_propagation.py`: `_NETWORK_INPUT_SYMBOLS` expanded with `read`, `fread`
+
+### Verified
+- **R7000 (Netgear, 31MB) end-to-end run** (codex driver, 2026-04-13):
+  - `adversarial_triage`: debated=100, parsed_ok=100, **parse_failures=0**, llm_call_failures=0, downgraded=99, maintained=1
+  - `fp_verification`: eligible=100, true_positives=57, false_positives=43, **unverified=0**, parse_failures=0, llm_call_failures=0
+  - `cve_scan`: matches=23, **epss_enriched=23/23**
+  - Run: `aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c`
+- Pre-v2.5 baseline (same firmware, 2026-04-12 1211 run): adversarial parse_failures=100/100, fp unverified=97/100, EPSS 0/23
+
 ## [2.4.1] — 2026-04-11
 
 ### Fixed

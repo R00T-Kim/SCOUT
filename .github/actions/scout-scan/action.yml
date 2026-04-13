@@ -1,0 +1,74 @@
+name: 'SCOUT Firmware Scan'
+description: 'Run SCOUT firmware security analysis and upload SARIF results to GitHub Security tab'
+inputs:
+  firmware-path:
+    description: 'Path to firmware binary relative to workspace'
+    required: true
+  no-llm:
+    description: 'Disable LLM-based stages (recommended for CI)'
+    required: false
+    default: 'true'
+  time-budget-s:
+    description: 'Analysis time budget in seconds'
+    required: false
+    default: '1800'
+  stages:
+    description: 'Comma-separated stages to run (empty = all)'
+    required: false
+    default: ''
+  quiet:
+    description: 'Suppress real-time progress output'
+    required: false
+    default: 'true'
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install SCOUT
+      shell: bash
+      run: |
+        pip install -e ${{ github.action_path }}/../../..
+        # Install optional extraction tools if available
+        sudo apt-get update -qq && sudo apt-get install -y -qq binwalk squashfs-tools mtd-utils lzop 2>/dev/null || true
+    - name: Run SCOUT analysis
+      shell: bash
+      run: |
+        ARGS="--ack-authorization --time-budget-s ${{ inputs.time-budget-s }}"
+        if [ "${{ inputs.no-llm }}" = "true" ]; then
+          ARGS="$ARGS --no-llm"
+        fi
+        if [ "${{ inputs.quiet }}" = "true" ]; then
+          ARGS="$ARGS --quiet"
+        fi
+        if [ -n "${{ inputs.stages }}" ]; then
+          ARGS="$ARGS --stages ${{ inputs.stages }}"
+        fi
+        scout analyze "${{ inputs.firmware-path }}" $ARGS || true
+    - name: Export SARIF
+      shell: bash
+      run: |
+        # Find latest run directory
+        RUN_DIR=$(ls -td aiedge-runs/*/ 2>/dev/null | head -1)
+        if [ -n "$RUN_DIR" ]; then
+          SARIF_FILE="${RUN_DIR}stages/findings/sarif.json"
+          if [ -f "$SARIF_FILE" ]; then
+            cp "$SARIF_FILE" "${{ github.workspace }}/scout-results.sarif"
+            echo "sarif-file=${{ github.workspace }}/scout-results.sarif" >> "$GITHUB_OUTPUT"
+            echo "run-dir=$RUN_DIR" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No SARIF output found at $SARIF_FILE"
+          fi
+        else
+          echo "::warning::No SCOUT run directory found"
+        fi
+      id: export
+outputs:
+  sarif-file:
+    description: 'Path to SARIF results file'
+    value: ${{ steps.export.outputs.sarif-file }}
+  run-dir:
+    description: 'Path to SCOUT run directory'
+    value: ${{ steps.export.outputs.run-dir }}
