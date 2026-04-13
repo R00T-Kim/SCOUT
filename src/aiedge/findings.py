@@ -382,6 +382,113 @@ def _safe_load_json(path: Path) -> object | None:
         return None
 
 
+_SYNTH_TRIAGE_FINDING_IDS = frozenset({"aiedge.findings.web.exec_sink_overlap"})
+
+
+def _inherit_synthesis_reasoning_trail(
+    normalized: list[dict[str, JsonValue]], run_dir: Path
+) -> None:
+    """Attach synthesis-level reasoning_trail entries to aggregate findings.
+
+    Top-level synthesis findings (e.g. ``web.exec_sink_overlap``) are built
+    from inventory-level overlap signals, but the underlying taint paths
+    they represent are actually debated by ``adversarial_triage`` and
+    verified by ``fp_verification`` -- each of which persists per-alert
+    trails into its own stage artifact. Without this pass, the synthesis
+    finding in ``findings.json`` would look unreasoned even when 100+
+    downstream taint alerts were debated under it. We mirror the
+    stage-level aggregate outcome as synthesis-level ``ReasoningEntry``
+    items so ``reasoning_trail_count`` reflects that LLM reasoning ran for
+    the finding.
+
+    Best-effort and fail-open: missing artifacts, malformed summaries, or
+    import errors leave findings untouched.
+    """
+    try:
+        from dataclasses import asdict as _asdict
+
+        from .reasoning_trail import ReasoningEntry
+    except Exception:
+        return
+
+    def _summary(stage: str, artifact: str) -> dict[str, object]:
+        path = run_dir / "stages" / stage / f"{artifact}.json"
+        if not path.exists():
+            return {}
+        raw = _safe_load_json(path)
+        if not isinstance(raw, dict):
+            return {}
+        summary_any = raw.get("summary")
+        if isinstance(summary_any, dict):
+            return cast(dict[str, object], summary_any)
+        return {}
+
+    def _int(value: object, default: int = 0) -> int:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return default
+        return int(value)
+
+    fp_summary = _summary("fp_verification", "verified_alerts")
+    triage_summary = _summary("adversarial_triage", "triaged_findings")
+    if not fp_summary and not triage_summary:
+        return
+
+    inherited_entries: list[dict[str, object]] = []
+    if fp_summary:
+        inherited_entries.append(
+            _asdict(
+                ReasoningEntry(
+                    stage="fp_verification",
+                    step="synthesis_inherit",
+                    verdict="summary",
+                    rationale=(
+                        f"{_int(fp_summary.get('total_input'))} underlying "
+                        "taint alerts verified: "
+                        f"{_int(fp_summary.get('true_positives'))} TP, "
+                        f"{_int(fp_summary.get('false_positives'))} FP, "
+                        f"{_int(fp_summary.get('unverified'))} unverified, "
+                        f"{_int(fp_summary.get('parse_failures'))} parse failures"
+                    ),
+                    delta=0.0,
+                )
+            )
+        )
+    if triage_summary:
+        inherited_entries.append(
+            _asdict(
+                ReasoningEntry(
+                    stage="adversarial_triage",
+                    step="synthesis_inherit",
+                    verdict="summary",
+                    rationale=(
+                        f"{_int(triage_summary.get('debated'))} underlying "
+                        "taint alerts debated: "
+                        f"{_int(triage_summary.get('downgraded'))} downgraded, "
+                        f"{_int(triage_summary.get('maintained'))} maintained, "
+                        f"{_int(triage_summary.get('parse_failures'))} parse failures, "
+                        f"{_int(triage_summary.get('llm_call_failures'))} llm call failures"
+                    ),
+                    delta=0.0,
+                )
+            )
+        )
+
+    if not inherited_entries:
+        return
+
+    for finding in normalized:
+        if str(finding.get("id", "")) not in _SYNTH_TRIAGE_FINDING_IDS:
+            continue
+        existing_any = finding.get("reasoning_trail")
+        merged: list[dict[str, object]] = []
+        if isinstance(existing_any, list):
+            for entry in cast(list[object], existing_any):
+                if isinstance(entry, dict):
+                    merged.append(cast(dict[str, object], entry))
+        merged.extend(inherited_entries)
+        finding["reasoning_trail"] = cast(JsonValue, merged)
+
+
 def _load_inventory_roots(
     run_dir: Path, inv_json_path: Path, fallback_root: Path
 ) -> list[Path]:
@@ -4102,6 +4209,16 @@ def run_findings(
         )
     except Exception:
         _category_counts = {}  # fail-open: categories are best-effort
+
+    # PR #11 follow-up (v2.6.1) — synthesis-level reasoning_trail inheritance.
+    # Aggregate synthesis findings (e.g. web.exec_sink_overlap) do not carry
+    # per-alert trails because they are built from inventory overlap signals,
+    # not directly from LLM-debated taint paths. This pass mirrors the
+    # downstream adversarial_triage / fp_verification aggregate outcome onto
+    # the synthesis finding so reasoning_trail_count reflects that reasoning
+    # ran. Must run BEFORE the pass-through block below so inherited entries
+    # get counted.
+    _inherit_synthesis_reasoning_trail(normalized, ctx.run_dir)
 
     # PR #11 — additive reasoning_trail pass-through. The field is populated
     # upstream by adversarial_triage / fp_verification when they adjust

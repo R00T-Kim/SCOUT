@@ -617,3 +617,186 @@ def test_sarif_omits_reasoning_trail_when_absent(tmp_path: Path) -> None:
     results = sarif["runs"][0]["results"]
     props = results[0].get("properties", {})
     assert "scout_reasoning_trail" not in props
+
+
+# ---------------------------------------------------------------------------
+# v2.6.1 — synthesis-level reasoning_trail inheritance
+# ---------------------------------------------------------------------------
+
+
+class TestSynthesisReasoningTrailInheritance:
+    """Verify `_inherit_synthesis_reasoning_trail` pulls downstream stage
+    aggregate outcomes onto top-level synthesis findings.
+    """
+
+    def _write_stage_summaries(
+        self,
+        ctx: StageContext,
+        *,
+        write_fp: bool = True,
+        write_triage: bool = True,
+    ) -> None:
+        if write_fp:
+            fp_dir = ctx.run_dir / "stages" / "fp_verification"
+            fp_dir.mkdir(parents=True, exist_ok=True)
+            (fp_dir / "verified_alerts.json").write_text(
+                json.dumps(
+                    {
+                        "verified_alerts": [],
+                        "summary": {
+                            "total_input": 100,
+                            "true_positives": 56,
+                            "false_positives": 44,
+                            "unverified": 0,
+                            "parse_failures": 0,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+        if write_triage:
+            triage_dir = ctx.run_dir / "stages" / "adversarial_triage"
+            triage_dir.mkdir(parents=True, exist_ok=True)
+            (triage_dir / "triaged_findings.json").write_text(
+                json.dumps(
+                    {
+                        "triaged_findings": [],
+                        "summary": {
+                            "debated": 100,
+                            "downgraded": 97,
+                            "maintained": 3,
+                            "parse_failures": 0,
+                            "llm_call_failures": 0,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    def test_inherits_both_summaries_on_target_finding(
+        self, scout_stage_ctx: StageContext
+    ) -> None:
+        from aiedge.findings import _inherit_synthesis_reasoning_trail
+
+        ctx = scout_stage_ctx
+        self._write_stage_summaries(ctx)
+        normalized: list[dict[str, Any]] = [
+            {
+                "id": "aiedge.findings.web.exec_sink_overlap",
+                "title": "Web-exposed component with command-exec sink overlap",
+                "severity": "high",
+                "confidence": 0.78,
+                "disposition": "suspected",
+            }
+        ]
+        _inherit_synthesis_reasoning_trail(normalized, ctx.run_dir)
+        trail = normalized[0].get("reasoning_trail")
+        assert isinstance(trail, list)
+        assert len(trail) == 2
+        stages = {cast(dict[str, Any], e).get("stage") for e in trail}
+        assert stages == {"fp_verification", "adversarial_triage"}
+        for entry in trail:
+            entry_d = cast(dict[str, Any], entry)
+            assert entry_d.get("step") == "synthesis_inherit"
+            assert entry_d.get("verdict") == "summary"
+            assert entry_d.get("delta") == 0.0
+
+    def test_skips_non_target_findings(self, scout_stage_ctx: StageContext) -> None:
+        from aiedge.findings import _inherit_synthesis_reasoning_trail
+
+        ctx = scout_stage_ctx
+        self._write_stage_summaries(ctx)
+        normalized: list[dict[str, Any]] = [
+            {
+                "id": "aiedge.findings.inventory.string_hits_present",
+                "title": "Inventory string-hit signals present",
+                "severity": "info",
+                "confidence": 0.95,
+                "disposition": "confirmed",
+            }
+        ]
+        _inherit_synthesis_reasoning_trail(normalized, ctx.run_dir)
+        assert "reasoning_trail" not in normalized[0]
+
+    def test_fail_open_when_artifacts_missing(
+        self, scout_stage_ctx: StageContext
+    ) -> None:
+        from aiedge.findings import _inherit_synthesis_reasoning_trail
+
+        ctx = scout_stage_ctx
+        # Neither fp_verification nor adversarial_triage artifacts exist.
+        normalized: list[dict[str, Any]] = [
+            {
+                "id": "aiedge.findings.web.exec_sink_overlap",
+                "title": "Web-exposed command-exec sink overlap",
+                "severity": "high",
+                "confidence": 0.78,
+                "disposition": "suspected",
+            }
+        ]
+        _inherit_synthesis_reasoning_trail(normalized, ctx.run_dir)
+        assert "reasoning_trail" not in normalized[0]
+
+    def test_preserves_existing_trail_entries(
+        self, scout_stage_ctx: StageContext
+    ) -> None:
+        from aiedge.findings import _inherit_synthesis_reasoning_trail
+
+        ctx = scout_stage_ctx
+        self._write_stage_summaries(ctx, write_fp=False, write_triage=True)
+        normalized: list[dict[str, Any]] = [
+            {
+                "id": "aiedge.findings.web.exec_sink_overlap",
+                "title": "Web-exposed command-exec sink overlap",
+                "severity": "high",
+                "confidence": 0.78,
+                "disposition": "suspected",
+                "reasoning_trail": [
+                    {
+                        "stage": "custom_stage",
+                        "step": "pre_existing",
+                        "verdict": "note",
+                        "rationale": "must not be dropped",
+                        "delta": 0.0,
+                        "timestamp": "2026-04-13T00:00:00+00:00",
+                        "llm_model": None,
+                        "raw_response_excerpt": None,
+                    }
+                ],
+            }
+        ]
+        _inherit_synthesis_reasoning_trail(normalized, ctx.run_dir)
+        trail = normalized[0].get("reasoning_trail")
+        assert isinstance(trail, list)
+        assert len(trail) == 2
+        first = cast(dict[str, Any], trail[0])
+        second = cast(dict[str, Any], trail[1])
+        assert first.get("step") == "pre_existing"
+        assert second.get("stage") == "adversarial_triage"
+
+    def test_rationale_encodes_stage_summary_counts(
+        self, scout_stage_ctx: StageContext
+    ) -> None:
+        from aiedge.findings import _inherit_synthesis_reasoning_trail
+
+        ctx = scout_stage_ctx
+        self._write_stage_summaries(ctx)
+        normalized: list[dict[str, Any]] = [
+            {
+                "id": "aiedge.findings.web.exec_sink_overlap",
+                "title": "Web-exposed command-exec sink overlap",
+                "severity": "high",
+                "confidence": 0.78,
+                "disposition": "suspected",
+            }
+        ]
+        _inherit_synthesis_reasoning_trail(normalized, ctx.run_dir)
+        trail = cast(list[dict[str, Any]], normalized[0]["reasoning_trail"])
+        fp_entry = next(e for e in trail if e["stage"] == "fp_verification")
+        triage_entry = next(e for e in trail if e["stage"] == "adversarial_triage")
+        assert "100" in fp_entry["rationale"]
+        assert "56 TP" in fp_entry["rationale"]
+        assert "44 FP" in fp_entry["rationale"]
+        assert "100" in triage_entry["rationale"]
+        assert "97 downgraded" in triage_entry["rationale"]
+        assert "3 maintained" in triage_entry["rationale"]
