@@ -105,13 +105,53 @@ def _build_code_section(decompiled_context: list[dict[str, str]] | None) -> str:
     return "\n## Decompiled Code Evidence\n" + "\n".join(parts) + "\n"
 
 
+def _build_analyst_hint_prefix(finding: dict[str, object]) -> str:
+    """Return a prompt prefix for any analyst hints stored for this finding.
+
+    PR #12 -- opt-in via ``AIEDGE_FEEDBACK_DIR``. When the env var is unset
+    *or* no hints have been registered for this finding, returns an empty
+    string so the advocate prompt is byte-identical to the pre-PR version
+    (preserving the deterministic prompt path).
+    """
+    if not os.environ.get("AIEDGE_FEEDBACK_DIR"):
+        return ""
+    finding_id_any = finding.get("id") or finding.get("finding_id")
+    if not isinstance(finding_id_any, str) or not finding_id_any:
+        return ""
+    try:
+        from .terminator_feedback import get_analyst_hints
+
+        hints = get_analyst_hints(finding_id_any)
+    except Exception:
+        return ""
+    if not hints:
+        return ""
+
+    lines: list[str] = ["[Analyst hints from prior runs:"]
+    _priority_order = {"high": 0, "medium": 1, "low": 2}
+    sorted_hints = sorted(
+        hints,
+        key=lambda h: _priority_order.get(str(h.get("priority", "medium")).lower(), 1),
+    )
+    for hint in sorted_hints:
+        priority = str(hint.get("priority", "medium"))
+        text = str(hint.get("text", "")).strip()
+        if not text:
+            continue
+        lines.append(f" - {priority}: {text}")
+    lines.append("]\n\n")
+    return "\n".join(lines)
+
+
 def _build_advocate_prompt(
     finding: dict[str, object],
     decompiled_context: list[dict[str, str]] | None = None,
 ) -> str:
     finding_json = json.dumps(finding, indent=2, ensure_ascii=True)
     code_section = _build_code_section(decompiled_context)
+    hint_prefix = _build_analyst_hint_prefix(finding)
     return (
+        f"{hint_prefix}"
         "## Finding\n"
         f"{finding_json}\n\n"
         f"{code_section}"
