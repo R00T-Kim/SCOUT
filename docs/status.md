@@ -122,6 +122,38 @@ Phase 2A run.py decomposition: 4,476 → 4,140 lines (normalize/stage_executor/r
 - v2.5.0의 LLM driver contract (system_prompt / temperature / 5-stage parser) 그대로
 - 200-char `raw_response_excerpt` cap은 `__post_init__`에서 강제
 
+### v2.6.0 릴리즈 후속 수정 (2026-04-13, `[Unreleased]`)
+
+R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 post-release로 수정. 둘 다 additive-only, schema bump 없음, 기존 consumer 무수정.
+
+**버그 #1 — synthesis 레벨 reasoning_trail 상속 누락** (commit `7b36274`):
+- top-level synthesis finding `web.exec_sink_overlap`이 자기 밑에서 debate된 per-alert trail을 상속받지 못했음
+- `findings.json`에서 `reasoning_trail_count: 0/3` (top-level), 그러나 `stages/adversarial_triage/triaged_findings.json`에는 100/100 trail 존재
+- 수정: `_inherit_synthesis_reasoning_trail()` 헬퍼 — `fp_verification` 및 `adversarial_triage` summary를 읽어 `synthesis_inherit` `ReasoningEntry` 2개 (fp TP/FP/unverified + triage downgrade/maintain/parse_fail) 부착
+- 테스트: `TestSynthesisReasoningTrailInheritance` 5 cases
+
+**버그 #2 — SBOM inventory 스키마 불일치** (commit `8e0bb82`):
+- `_collect_so_files_from_inventory`가 pre-v2.x `inventory.file_list` 키를 읽음 (현재 스키마는 `roots` + `entries` int만 노출)
+- `_detect_from_binary_analysis`가 엔트리당 `string_hits` 리스트를 기대 (현재 스키마는 `matched_symbols`만 노출)
+- 결과: vendor 스톡 펌웨어에서 sbom 0 components. OpenWrt는 opkg status 한 군데로 100+ components가 나와서 버그가 가려져 있었음
+- 수정:
+  - `_collect_so_files_from_inventory(inventory, run_dir)` → `inventory.roots`를 직접 walk해서 `.so*` glob
+  - `_detect_from_binary_analysis(..., run_dir=)` → 엔트리에 `string_hits`가 없으면 `_extract_ascii_runs` (zero-dep `strings` 대체)로 바이너리 앞 256KB 읽어 printable run 추출 후 기존 `_BINARY_PATTERNS` 정규식 적용
+  - `binary_analysis.json` 리더가 현재 `hits` 키 + legacy `binaries`/`entries` 모두 인식
+  - pre-v2.x `file_list` / `string_hits` 경로는 legacy fallback으로 유지
+- 검증: R7000 run에 `SbomStage`만 재실행 → **0 → 4 components** (`curl 7.36.0` 바이너리 직접 읽기, `openssl 1.0.0` / `libz 1` / `libpthread 0` so_filename walking)
+- 테스트: `tests/test_sbom_schema_fix.py` 14 cases (`_extract_ascii_runs` 4 / so_files 5 / binary_analysis 4 / SbomStage integration 1)
+
+**전체 회귀 (두 수정 누적)**:
+| 지표 | v2.6.0 shipped | post-release |
+|------|----------------|-------------|
+| pytest | 1027 | **1047** (+20: synthesis 5 + sbom 14 + 기타 1) |
+| pyright | 0 errors | **0** |
+| ruff | clean | **clean** |
+| check_doc_consistency | 0 violations | **0** |
+
+**태그**: 두 수정 모두 `[Unreleased]` CHANGELOG에 누적. 다음 point release(v2.6.1) 때 roll up 예정.
+
 ## v2.5.0 업그레이드 (2026-04-13)
 
 전략 로드맵 Phase 1 구현. 학술 논문 30+편, 경쟁 도구 12개(Theori Xint, FirmAgent, FIRMHIVE 등), Theori Xint 심층 분석 기반.
