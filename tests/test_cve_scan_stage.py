@@ -85,7 +85,9 @@ def test_cve_scan_uses_per_match_component_metadata_for_backport_adjustment(
             "cpe": "cpe:2.3:a:dropbear:dropbear:2.0:*:*:*:*:*:*:*",
         },
     ]
-    monkeypatch.setattr("aiedge.cve_scan._load_cpe_index", lambda _run_dir: (components, []))
+    monkeypatch.setattr(
+        "aiedge.cve_scan._load_cpe_index", lambda _run_dir: (components, [])
+    )
     monkeypatch.setattr(
         "aiedge.cve_scan._query_nvd_with_cache",
         lambda *args, **kwargs: {"vulnerabilities": [{"dummy": True}]},
@@ -142,9 +144,21 @@ def test_cve_scan_uses_per_match_component_metadata_for_backport_adjustment(
         for item in cast(list[object], payload["finding_candidates"])
         if isinstance(item, dict)
     }
-    assert float(candidates["busybox"]["confidence"]) < float(
-        candidates["dropbear"]["confidence"]
+    # PR #15: backport detection no longer modifies the strict-static
+    # detection_confidence -- it now feeds priority_score instead.
+    # Detection confidence must be IDENTICAL for the two findings (same
+    # match_confidence, same CVSS, same static cap).
+    assert float(candidates["busybox"]["confidence"]) == pytest.approx(
+        float(candidates["dropbear"]["confidence"]), abs=1e-9
     )
+    # Backport effect must show up on priority_score (-0.20 penalty).
+    assert float(candidates["busybox"]["priority_score"]) < float(
+        candidates["dropbear"]["priority_score"]
+    )
+    busybox_inputs = cast(dict[str, object], candidates["busybox"]["priority_inputs"])
+    dropbear_inputs = cast(dict[str, object], candidates["dropbear"]["priority_inputs"])
+    assert busybox_inputs["backport_present"] is True
+    assert dropbear_inputs["backport_present"] is False
 
 
 def test_cve_scan_applies_epss_enrichment_and_summary(
@@ -158,7 +172,9 @@ def test_cve_scan_applies_epss_enrichment_and_summary(
             "cpe": "cpe:2.3:a:dnsmasq:dnsmasq:2.0:*:*:*:*:*:*:*",
         }
     ]
-    monkeypatch.setattr("aiedge.cve_scan._load_cpe_index", lambda _run_dir: (components, []))
+    monkeypatch.setattr(
+        "aiedge.cve_scan._load_cpe_index", lambda _run_dir: (components, [])
+    )
     monkeypatch.setattr(
         "aiedge.cve_scan._query_nvd_with_cache",
         lambda *args, **kwargs: {"vulnerabilities": [{"dummy": True}]},
@@ -226,6 +242,8 @@ def test_cve_scan_applies_epss_enrichment_and_summary(
     assert summary["epss_enriched"] == 1
     match = cast(dict[str, object], cast(list[object], payload["matches"])[0])
     assert match["epss"] == 0.2
-    candidate = cast(dict[str, object], cast(list[object], payload["finding_candidates"])[0])
+    candidate = cast(
+        dict[str, object], cast(list[object], payload["finding_candidates"])[0]
+    )
     assert float(candidate["epss"]) == 0.2
     assert float(candidate["confidence"]) > 0.4

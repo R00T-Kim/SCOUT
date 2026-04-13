@@ -223,10 +223,6 @@ def _finding_to_result(finding: dict[str, Any]) -> dict[str, Any]:
         properties["scout_category"] = category
 
     # PR #11: reasoning_trail field is optional; expose when present.
-    # SARIF properties bag accepts arbitrary JSON-serialisable values, so
-    # the list[dict] shape produced by adversarial_triage / fp_verification
-    # passes through unchanged. Keeps analyst debate visible to SARIF
-    # consumers (GitHub code scanning, Azure DevOps, etc.).
     reasoning_trail = finding.get("reasoning_trail")
     if isinstance(reasoning_trail, list) and reasoning_trail:
         _clean_entries: list[dict[str, Any]] = []
@@ -235,6 +231,17 @@ def _finding_to_result(finding: dict[str, Any]) -> dict[str, Any]:
                 _clean_entries.append(dict(_entry))
         if _clean_entries:
             properties["scout_reasoning_trail"] = _clean_entries
+
+    # PR #15: priority_score / priority_inputs are optional additive fields.
+    priority_score = finding.get("priority_score")
+    if isinstance(priority_score, (int, float)) and not isinstance(
+        priority_score, bool
+    ):
+        properties["scout_priority_score"] = float(priority_score)
+
+    priority_inputs = finding.get("priority_inputs")
+    if isinstance(priority_inputs, dict):
+        properties["scout_priority_inputs"] = priority_inputs
 
     if properties:
         result["properties"] = properties

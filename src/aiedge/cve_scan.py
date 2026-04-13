@@ -28,7 +28,9 @@ from pathlib import Path
 from typing import cast
 
 from ._typing_helpers import safe_float
+from .confidence_caps import STATIC_CODE_VERIFIED_CAP
 from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_text
+from .scoring import PriorityInputs, compute_priority_score, priority_inputs_to_dict
 from .stage import StageContext, StageOutcome
 
 # ---------------------------------------------------------------------------
@@ -49,27 +51,24 @@ _CONFIDENCE_EXACT = 0.90
 _CONFIDENCE_RANGE = 0.75
 _CONFIDENCE_PRODUCT = 0.40
 
-_STATIC_CONFIDENCE_CAP = 0.60  # findings stage governance cap
+_STATIC_CONFIDENCE_CAP = (
+    0.60  # findings stage governance cap (still used by _finding_confidence)
+)
 
-# Reachability-based confidence multipliers (applied after _STATIC_CONFIDENCE_CAP)
-_REACHABILITY_MULTIPLIERS: dict[str, float] = {
-    "directly_reachable": 1.0,  # No change — component is network-reachable
-    "potentially_reachable": 0.8,  # Slight reduction — reachability unconfirmed
-    "unreachable": 0.5,  # Significant reduction — component not reachable
-    "unknown": 0.9,  # Small penalty — no reachability data for component
-}
+# PR #15 (Phase 2B): _REACHABILITY_MULTIPLIERS and _EPSS_BOOST_* removed.
+# Reachability and EPSS no longer modify detection confidence -- they feed
+# priority_score via scoring.compute_priority_score(). See docs/scoring_calibration.md.
 
 _CVSS_HIGH_THRESHOLD = 7.0
 _CVSS_CRITICAL_THRESHOLD = 9.0
 _CVSS_MEDIUM_THRESHOLD = 4.0
 
-# EPSS (Exploit Prediction Scoring System) -- best-effort enrichment
+# EPSS (Exploit Prediction Scoring System) -- best-effort enrichment.
+# Lookup constants only -- the score itself flows into priority_score, not
+# detection confidence (PR #15).
 _EPSS_API_URL = "https://api.first.org/data/v1/epss"
 _EPSS_BATCH_SIZE = 30
 _EPSS_TIMEOUT_S = 15
-_EPSS_BOOST_HIGH = 0.10  # boost for EPSS >= 0.10
-_EPSS_BOOST_MEDIUM = 0.05  # boost for EPSS >= 0.01
-_EPSS_PENALTY_LOW = -0.05  # penalty for EPSS < 0.001
 
 
 # ---------------------------------------------------------------------------
@@ -630,16 +629,9 @@ def _query_epss_with_cache(
     return results, api_failed
 
 
-def _epss_confidence_adjustment(epss_score: float | None) -> float:
-    if epss_score is None:
-        return 0.0
-    if epss_score >= 0.10:
-        return _EPSS_BOOST_HIGH
-    if epss_score >= 0.01:
-        return _EPSS_BOOST_MEDIUM
-    if epss_score < 0.001:
-        return _EPSS_PENALTY_LOW
-    return 0.0
+# PR #15 (Phase 2B): _epss_confidence_adjustment() removed.
+# EPSS now feeds priority_score via scoring.compute_priority_score(); it no
+# longer modifies detection confidence. See docs/scoring_calibration.md.
 
 
 # ---------------------------------------------------------------------------
@@ -1148,26 +1140,25 @@ class CveScanStage:
                 else _CONFIDENCE_PRODUCT
             )
 
-            confidence = _finding_confidence(match_conf, score)
+            # PR #15 (Phase 2B) -- detection_confidence is strict static evidence only.
+            # EPSS / reachability / backport now feed priority_score, NOT confidence.
+            # The cap is STATIC_CODE_VERIFIED_CAP (0.55) -- decompiled code level.
+            detection_confidence = _finding_confidence(match_conf, score)
+            detection_confidence = min(STATIC_CODE_VERIFIED_CAP, detection_confidence)
+
             severity = _severity_label(score)
             cve_id = str(m.get("cve_id", ""))
             comp_name_f = str(m.get("component", ""))
             comp_ver_f = str(m.get("version", ""))
 
-            # Apply reachability multiplier when data is available
+            # Reachability lookup (no longer modifies confidence -- feeds priority)
             reach_status = (
                 reachability_map.get(comp_name_f, "unknown")
                 if reachability_map
                 else "unknown"
             )
-            if reachability_map:
-                multiplier = _REACHABILITY_MULTIPLIERS.get(
-                    reach_status, _REACHABILITY_MULTIPLIERS["unknown"]
-                )
-                confidence = min(_STATIC_CONFIDENCE_CAP, confidence * multiplier)
 
-            # Backport detection: if component has a distro patch revision,
-            # the vulnerability may already be patched despite old version number.
+            # Backport detection (no longer modifies confidence -- feeds priority)
             component_metadata_any = m.get("component_metadata")
             component_metadata = (
                 cast(dict[str, object], component_metadata_any)
@@ -1176,15 +1167,21 @@ class CveScanStage:
             )
             _patch_rev = str(component_metadata.get("patch_revision", ""))
             _det_method = str(component_metadata.get("detection_method", ""))
-            if _patch_rev and _det_method == "opkg":
-                confidence = max(0.0, confidence - 0.30)
+            backport_present = bool(_patch_rev) and _det_method == "opkg"
 
             epss_score = _parse_optional_float(m.get("epss"))
             epss_percentile = _parse_optional_float(m.get("epss_percentile"))
-            confidence = min(
-                _STATIC_CONFIDENCE_CAP,
-                max(0.0, confidence + _epss_confidence_adjustment(epss_score)),
+
+            # Build PriorityInputs and compute the operational priority signal.
+            priority_inputs = PriorityInputs(
+                detection_confidence=detection_confidence,
+                epss_score=epss_score,
+                epss_percentile=epss_percentile,
+                reachability=reach_status,
+                backport_present=backport_present,
+                cvss_base=score,
             )
+            priority_score = compute_priority_score(priority_inputs)
 
             # Stable SBOM reference key
             sbom_ref_part = f"sbom:comp-{comp_name_f}"
@@ -1195,7 +1192,12 @@ class CveScanStage:
                 {
                     "title": f"{cve_id} in {comp_name_f} {comp_ver_f}".strip(),
                     "severity": severity,
-                    "confidence": round(confidence, 6),
+                    # NOTE (PR #15): "confidence" is now strict detection_confidence.
+                    # Existing consumers reading this field will see lower numbers;
+                    # use "priority_score" for ranking/triage.
+                    "confidence": round(detection_confidence, 6),
+                    "priority_score": round(priority_score, 6),
+                    "priority_inputs": priority_inputs_to_dict(priority_inputs),
                     "families": ["known_vulnerability", "cve_match"],
                     "disposition": "suspected",
                     "exploitability_tier": "suspected",

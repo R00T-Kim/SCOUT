@@ -4124,11 +4124,65 @@ def run_findings(
                 _f["reasoning_trail"] = cast(JsonValue, _clean_trail)
                 _reasoning_trail_count += 1
             else:
-                # Empty or malformed trail: drop the field to keep output lean
                 _f.pop("reasoning_trail", None)
         elif _trail_any is not None:
-            # Malformed (not a list): drop so consumers get consistent typing
             _f.pop("reasoning_trail", None)
+
+    # PR #15 — additive priority_score annotation (optional field; consumers may ignore).
+    # CVE findings already carry priority_score (set in cve_scan.py with full
+    # PriorityInputs). For all other findings the only known input is
+    # detection_confidence, so we synthesize a minimal PriorityInputs from it.
+    _priority_bucket_counts: dict[str, int] = {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+    }
+    try:
+        from .scoring import (
+            PriorityInputs as _PriorityInputs,
+        )
+        from .scoring import (
+            compute_priority_score as _compute_priority_score,
+        )
+        from .scoring import (
+            priority_bucket as _priority_bucket,
+        )
+        from .scoring import (
+            priority_inputs_to_dict as _priority_inputs_to_dict,
+        )
+
+        for _f in normalized:
+            existing_score_any = _f.get("priority_score")
+            if isinstance(existing_score_any, (int, float)):
+                _bucket = _priority_bucket(float(existing_score_any))
+                _priority_bucket_counts[_bucket] = (
+                    _priority_bucket_counts.get(_bucket, 0) + 1
+                )
+                continue
+            _conf_any = _f.get("confidence")
+            _det_conf = float(_conf_any) if isinstance(_conf_any, (int, float)) else 0.5
+            if _det_conf < 0.0:
+                _det_conf = 0.0
+            elif _det_conf > 1.0:
+                _det_conf = 1.0
+            _pi = _PriorityInputs(
+                detection_confidence=_det_conf,
+                epss_score=None,
+                epss_percentile=None,
+                reachability=None,
+                backport_present=False,
+                cvss_base=None,
+            )
+            _ps = _compute_priority_score(_pi)
+            _f["priority_score"] = round(_ps, 6)
+            _f["priority_inputs"] = cast(JsonValue, _priority_inputs_to_dict(_pi))
+            _bucket = _priority_bucket(_ps)
+            _priority_bucket_counts[_bucket] = (
+                _priority_bucket_counts.get(_bucket, 0) + 1
+            )
+    except Exception:
+        pass
 
     payload: dict[str, JsonValue] = {
         "status": "ok" if normalized else "partial",
@@ -4138,6 +4192,7 @@ def run_findings(
         "extracted_file_count": int(extracted_files),
         "category_counts": cast(JsonValue, dict(_category_counts)),
         "reasoning_trail_count": _reasoning_trail_count,
+        "priority_bucket_counts": cast(JsonValue, dict(_priority_bucket_counts)),
     }
 
     out_path = stage_dir / "findings.json"
