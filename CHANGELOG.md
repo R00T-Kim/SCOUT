@@ -3,6 +3,58 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.0] — 2026-04-13
+
+Phase 2B release. Performance + analyst copilot UX + confidence calibration. 6 atomic commits, single-session parallel execution via worktree isolation. Merged via [PR #6](https://github.com/R00T-Kim/SCOUT/pull/6) (rebase). All downstream consumers untouched (PR #7a additive-first pattern maintained throughout).
+
+### Added
+
+- **`reasoning_trail.py`** — Structured reasoning trail capture for LLM-driven finding adjustments. `ReasoningEntry` dataclass with 200-char `raw_response_excerpt` cap enforced at construction (`__post_init__`). Helpers: `append_entry`, `redact_excerpt`, `empty_trail`, `format_trail_for_markdown`, `format_trail_for_tui`, `normalize_trail`. _(PR #11, PR #13)_
+- **`scoring.py`** — Detection vs priority separation. `PriorityInputs` frozen dataclass (detection_confidence, epss_score, epss_percentile, reachability, backport_present, cvss_base) + `compute_priority_score()` (weights: detection 50% / EPSS 25% / reach 15% / CVSS 10%, backport -0.20 penalty) + `priority_bucket()` (critical/high/medium/low) + `priority_inputs_to_dict()`. Addresses external reviewer critique that EPSS-additive confidence looked like a ranking heuristic. _(PR #15)_
+- **`stage_dag.py`** — Manual `STAGE_DEPS` dict (42 entries, exact `_STAGE_FACTORIES` match) + Kahn `topo_levels()` with deterministic alphabetic sort within levels + `validate_deps()` warning surface. `findings` excluded (integrated step), `exploit_gate` included (inline factory). 15 levels / max-width 7. _(PR #10)_
+- **`run_stages_parallel()`** in `stage.py` — ThreadPoolExecutor level-wise execution with skip-on-failed-dep semantics, `fail_fast=True/False` modes, post-pool cancellation sweep. Sequential `run_stages()` unchanged. _(PR #10)_
+- **`--experimental-parallel [N]`** CLI flag on both `analyze` and `stages` subparsers (default 4 workers when specified without value). _(PR #10)_
+- **4 MCP analyst tools** in `mcp_server.py`: `scout_get_finding_reasoning`, `scout_inject_hint`, `scout_override_verdict`, `scout_filter_by_category`. Verdict enum validation, category validation via `FindingCategory` enum, `AIEDGE_MCP_MAX_OUTPUT_KB` truncation respected. _(PR #12)_
+- **Feedback registry extension** in `terminator_feedback.py`: `add_analyst_hint`, `get_analyst_hints`, `set_verdict_override` with `fcntl.flock` write safety + `assert_under_dir` path enforcement. Backward-compatible schema (existing `verdicts` list preserved). _(PR #12)_
+- **Analyst hint injection loop** in `adversarial_triage.py`: `_build_analyst_hint_prefix()` reads hints from `AIEDGE_FEEDBACK_DIR` and prefixes advocate prompts (priority-sorted). Opt-in via env var; byte-identical behavior when unset. _(PR #12)_
+- **Extraction failure analyst guidance** in `extraction.py`: structured `extraction_guidance` injected into all 4 failure paths (firmware missing, invalid rootfs, no binwalk, timeout) + success path sweep. Surfaces vendor_decrypt hint, `--rootfs` option, binwalk variants, issue-filing template. `run.py._emit_extraction_guidance()` prints to stderr (quiet mode respected) and logs to run dir. _(PR #14)_
+- **`docs/runbook.md#extraction-failure`** section with symptoms/causes/remediation table. _(PR #14)_
+- **`docs/scoring_calibration.md`** — full two-score contract with before/after worked example. _(PR #15)_
+- **`quality_metrics.py` per-priority bucket aggregation** (`count_findings_by_priority`, `PRIORITY_BUCKET_LABELS`) alongside existing per-confidence helpers. _(PR #15)_
+- **Progress out-of-order mode** — `ProgressTracker(out_of_order=True)` uses internal `_completion_counter` independent of idx, for parallel stage completion. _(PR #10)_
+- **Web viewer reasoning trail panel** — collapsible `<details>` section in the embedded template (`reporting.py`), CSS class set (`.reasoning-trail`, `.reasoning-trail-list`, `.reasoning-trail-rationale`), plain `Date()` for timestamp formatting. _(PR #13)_
+- **Analyst markdown reasoning trail subsection** — numbered list in `report_assembler.py` `write_analyst_report_v2_md`. _(PR #13)_
+- **TUI reasoning trail rendering** — `render_finding_detail_with_trail()` in `cli_tui_render.py`, `AIEDGE_TUI_ASCII`-compatible. _(PR #13)_
+
+### Changed
+
+- **`adversarial_triage.py`** debate loop now records structured reasoning trail entries for advocate / critic / decision steps with `llm_model` and truncated `raw_response_excerpt`. Existing `triage_outcome` field preserved unchanged. _(PR #11)_
+- **`fp_verification.py`** records trail entries for `sanitizer_detected`, `non_propagating_detected`, `sysfile_detected`, and LLM `<pattern>_detected` / `llm_verdict` outcomes with per-pattern `delta`. Existing `fp_verdict` / `fp_rationale` fields preserved. _(PR #11)_
+- **`findings.py`** additive `reasoning_trail` pass-through normalisation + `reasoning_trail_count` summary field (PR #11). Additive `priority_score` + `priority_inputs` + `priority_bucket_counts` annotation: CVE findings keep pre-computed score from `cve_scan.py`; all other findings get a default computed from `confidence` as the only known signal. **No schema version bump.** _(PR #11, PR #15)_
+- **`cve_scan.py:1140-1170`** refactored: `confidence` field now strictly capped at `STATIC_CODE_VERIFIED_CAP=0.55` (static evidence only). EPSS / reachability / backport / CVSS now feed `priority_score` instead. Deleted orphan internals: `_REACHABILITY_MULTIPLIERS`, `_EPSS_BOOST_*`, `_EPSS_PENALTY_LOW`, `_epss_confidence_adjustment()`. _(PR #15)_
+- **`sarif_export.py`** properties bag gains `scout_reasoning_trail` (PR #11) and `scout_priority_score` + `scout_priority_inputs` (PR #15) — mirrors the PR #7a `scout_category` precedent. _(PR #11, PR #15)_
+- **`run.py`** `run_subset()` + `analyze_run()` now accept both `quiet: bool` (PR #14) and `experimental_parallel: int | None` (PR #10) kwargs; call sites in `__main__.py` plumb both through. Autopoc rerun (line ~4097) remains sequential (single-stage reinvocation). _(PR #10, PR #14)_
+- **`reporting.py`** analyst report markdown path now consumes `reasoning_trail` via `report_assembler.py` helpers and includes a numbered "Reasoning Trail (N steps)" subsection per finding. Viewer template gains JS render block reading `item.reasoning_trail`. _(PR #13)_
+- **`cli_tui_data.py`** surfaces `findings_with_trails` in snapshot dict via new `_collect_tui_findings_with_trails` helper. _(PR #13)_
+- **`cli_tui_render.py`** snapshot includes `_append_findings_with_trails_section` block that runs even when no exploit candidates exist. _(PR #13)_
+
+### Verified
+
+- **pytest**: 865 → **1027 passed, 1 skipped** (+162 new tests: 20 reasoning_trail unit + 18 extraction_guidance + 33 mcp_analyst_tools + 14 stage_dag + 14 run_stages_parallel + 19 scoring + 44 reasoning_trail_viewer)
+- **ruff**: all checks passed
+- **pyright**: 0 errors, 0 warnings, 0 informations (Phase 2A baseline preserved)
+- **CI 5/5 green**: lint / typecheck / test (3.10) / test (3.11) / test (3.12)
+- **R7000 smoke (PR #15, codex driver)**: 3 findings, all carry `priority_score` + `priority_inputs`; `cve_confidence_above_0.55_cap = 0` (detection cap correctly enforced); `priority_bucket_counts = {critical: 0, high: 0, medium: 3, low: 0}`; `category_counts = {vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}`
+
+### Design Invariants Preserved
+
+- Additive only on `findings.py` (PR #7a pattern for `category`, now also `reasoning_trail`, `priority_score`, `priority_inputs`). **No report schema version bump.** Existing 7 downstream consumers untouched.
+- Sequential `run_stages()` behavior bit-identical to pre-PR state.
+- `StageContext` frozen invariant preserved (thread-safe sharing without locks).
+- All file writes continue to route through `assert_under_dir()` (`path_safety.py`).
+- Existing LLM driver contracts untouched; system_prompt + temperature + 5-stage parser (v2.5.0) all continue to work.
+- 200-char `raw_response_excerpt` cap enforced at construction time in `ReasoningEntry.__post_init__` (cannot be bypassed by call sites).
+
 ## [2.5.0] — 2026-04-13
 
 ### Added

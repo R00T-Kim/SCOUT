@@ -65,6 +65,63 @@ Phase 2A run.py decomposition: 4,476 → 4,140 lines (normalize/stage_executor/r
 - 파이프라인 29 → 34개 스테이지 (v2.1): `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
 - 파이프라인 34 → 42개 스테이지 (v2.2): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
 
+## v2.6.0 업그레이드 (2026-04-13, Phase 2B)
+
+전략 로드맵 Phase 2B 완료. 성능 (DAG 병렬화), analyst copilot UX (reasoning trail / MCP override), confidence calibration 3축 구현. 6개 atomic commit으로 단일 세션 병렬 실행 후 [PR #6](https://github.com/R00T-Kim/SCOUT/pull/6)로 rebase merge.
+
+### DAG 병렬화 PoC _(PR #10)_
+- **`stage_dag.py`** (신규): 42개 stage 수동 dependency dict (`STAGE_DEPS`) + Kahn `topo_levels()` 결정론적 알파벳 정렬 + `validate_deps()` 경고 집계. `findings` 제외 (integrated step), `exploit_gate` 포함 (inline factory). 현재 42-stage 기준 15 level / max-width 7
+- **`run_stages_parallel()`** in `stage.py`: ThreadPoolExecutor level-wise submit, skip-on-failed-dep semantics, `fail_fast=True/False` 모드. `run_stages()` 무수정
+- **`--experimental-parallel [N]`** CLI 플래그 (`analyze` + `stages` subparser), 기본 4 workers
+- **ProgressTracker out-of-order 모드**: 내부 `_completion_counter`로 parallel 완료 순서 렌더링
+
+### Reasoning trail 전면 도입 _(PR #11 + PR #13)_
+- **`reasoning_trail.py`** (신규): `ReasoningEntry` dataclass (stage/step/verdict/rationale/delta/timestamp/llm_model/raw_response_excerpt). `raw_response_excerpt` 200-char cap은 `__post_init__`에서 강제 (call site가 우회 불가)
+- **adversarial_triage.py**: debate loop에서 advocate/critic/decision 엔트리 기록 (기존 `triage_outcome` 유지)
+- **fp_verification.py**: sanitizer/non-propagating/sysfile 패턴 hit + LLM `<pattern>_detected` / `llm_verdict` 기록 (기존 `fp_verdict` / `fp_rationale` 유지)
+- **findings.py**: additive `reasoning_trail` 필드 (PR #7a 패턴, schema bump 없음) + `reasoning_trail_count` summary
+- **SARIF export**: `properties.scout_reasoning_trail` 노출
+- **Viewer 3개 surface**: 임베디드 HTML 뷰어 collapsible `<details>` + 애널리스트 markdown numbered subsection + TUI `render_finding_detail_with_trail()` (AIEDGE_TUI_ASCII 호환)
+
+### MCP analyst tools _(PR #12)_
+- **4개 신규 도구**: `scout_get_finding_reasoning` (trail 조회), `scout_inject_hint` (분석가 hint 추가), `scout_override_verdict` (verdict 강제), `scout_filter_by_category` (category 필터)
+- **`terminator_feedback.py` 확장**: `add_analyst_hint` / `get_analyst_hints` / `set_verdict_override`. `fcntl.flock` 쓰기 안전, `assert_under_dir` 경로 강제, 기존 `verdicts` 리스트 스키마 보존
+- **Analyst hint 루프**: `adversarial_triage._build_analyst_hint_prefix()`가 `AIEDGE_FEEDBACK_DIR`의 hint를 advocate 프롬프트에 priority-정렬 prefix. opt-in 기본 무동작
+
+### Detection vs Priority 분리 _(PR #15)_
+- **`scoring.py`** (신규): `PriorityInputs` frozen dataclass + `compute_priority_score()` (weights: detection 50% / EPSS 25% / reach 15% / CVSS 10%, backport -0.20) + `priority_bucket()` (critical/high/medium/low)
+- **`cve_scan.py:1140-1170`** 리팩토링: `confidence`는 `STATIC_CODE_VERIFIED_CAP=0.55`에서 엄격 유지. EPSS / reachability / backport / CVSS는 `priority_score`로 이동. `_REACHABILITY_MULTIPLIERS`, `_EPSS_BOOST_*`, `_epss_confidence_adjustment()` 고아 internal 삭제
+- **`findings.py`**: additive `priority_score` + `priority_inputs` + `priority_bucket_counts` (CVE finding은 cve_scan에서 선주입, 나머지는 `confidence` 기반 default)
+- **`sarif_export.py`**: `scout_priority_score` + `scout_priority_inputs` properties bag 추가
+- **`quality_metrics.py`**: `count_findings_by_priority` + `PRIORITY_BUCKET_LABELS` (기존 per-confidence helper 유지)
+- **`docs/scoring_calibration.md`** (신규): 두 score 계약 + before/after 예시
+- **리뷰어 비판 직접 응답**: "EPSS-additive confidence가 ranking heuristic으로 보인다"
+
+### Extraction 실패 analyst guidance _(PR #14)_
+- **`_build_extraction_guidance()`** in `extraction.py`: 4개 early-return 실패 경로 (firmware missing, invalid rootfs, no binwalk, timeout) + 성공 외 경로 모두에 entropy / vendor_decrypt / `--rootfs` / binwalk variants / 이슈 템플릿 가이드 주입
+- **`_emit_extraction_guidance()`** in `run.py`: stderr 출력 (quiet 모드 존중) + run dir 로그
+- **`docs/runbook.md#extraction-failure`** 섹션 (symptoms/causes/remediation 표)
+
+### 검증
+| 지표 | v2.5.0 | v2.6.0 |
+|------|--------|--------|
+| pytest | 865 | **1027** (+162) |
+| pyright errors | 0 | **0** (baseline 유지) |
+| ruff | clean | **clean** |
+| CI checks | 5/5 green | **5/5 green** |
+
+**신규 테스트 분포**: reasoning_trail 20 / extraction_guidance 18 / mcp_analyst_tools 33 / stage_dag 14 / run_stages_parallel 14 / scoring 19 / reasoning_trail_viewer 44
+
+**R7000 smoke (PR #15)**: 3 findings, 모두 `priority_score` + `priority_inputs` 보유, `cve_confidence_above_0.55_cap = 0` (detection cap 엄격 적용 확인), `priority_bucket_counts = {critical: 0, high: 0, medium: 3, low: 0}`
+
+### 설계 불변식 유지
+- `findings.py` additive only (PR #7a 패턴: `category`, `reasoning_trail`, `priority_score`, `priority_inputs`). **Report schema version bump 없음**. 7 downstream consumer 무수정
+- Sequential `run_stages()` bit-identical
+- `StageContext` frozen 유지 (thread-safe sharing)
+- `assert_under_dir()` 모든 file write 경로
+- v2.5.0의 LLM driver contract (system_prompt / temperature / 5-stage parser) 그대로
+- 200-char `raw_response_excerpt` cap은 `__post_init__`에서 강제
+
 ## v2.5.0 업그레이드 (2026-04-13)
 
 전략 로드맵 Phase 1 구현. 학술 논문 30+편, 경쟁 도구 12개(Theori Xint, FirmAgent, FIRMHIVE 등), Theori Xint 심층 분석 기반.
