@@ -9,15 +9,13 @@ from . import __version__
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    epilog = textwrap.dedent(
-        """\
+    epilog = textwrap.dedent("""\
         Exit codes:
           0   Success
           10  Partial success
           20  Fatal error
           30  Policy violation
-        """
-    )
+        """)
 
     parser = argparse.ArgumentParser(
         prog="aiedge",
@@ -157,6 +155,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Operator override: reopen duplicate-suppressed findings for retriage "
             "and emit deterministic duplicate-gate audit events."
+        ),
+    )
+    _ = analyze.add_argument(
+        "--experimental-parallel",
+        type=int,
+        nargs="?",
+        const=4,
+        default=None,
+        metavar="N",
+        help=(
+            "Enable DAG parallel stage execution (PoC). "
+            "Optional max_workers, default 4."
         ),
     )
 
@@ -342,6 +352,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-llm",
         action="store_true",
         help="Skip LLM probing and record deterministic skipped LLM report fields.",
+    )
+    _ = stages.add_argument(
+        "--experimental-parallel",
+        type=int,
+        nargs="?",
+        const=4,
+        default=None,
+        metavar="N",
+        help=(
+            "Enable DAG parallel stage execution (PoC). "
+            "Optional max_workers, default 4."
+        ),
     )
 
     corpus_validate = sub.add_parser(
