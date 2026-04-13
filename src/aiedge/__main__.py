@@ -226,13 +226,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_matches=max_matches,
                 )
 
+            experimental_parallel_raw = cast(
+                int | None, getattr(args, "experimental_parallel", None)
+            )
+            experimental_parallel: int | None = None
+            if (
+                isinstance(experimental_parallel_raw, int)
+                and experimental_parallel_raw > 0
+            ):
+                experimental_parallel = int(experimental_parallel_raw)
+
             # Progress tracker (--quiet suppresses)
             _progress = None
             if not getattr(args, "quiet", False):
                 try:
                     from .progress import ProgressTracker
 
-                    _progress = ProgressTracker()
+                    _progress = ProgressTracker(
+                        out_of_order=experimental_parallel is not None
+                    )
                 except Exception:
                     pass
 
@@ -250,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         no_llm=no_llm,
                         on_progress=_progress,
                         quiet=_is_quiet,
+                        experimental_parallel=experimental_parallel,
                     ),
                 )
                 stage_status = rep.status
@@ -263,6 +276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         force_retriage=force_retriage,
                         on_progress=_progress,
                         quiet=_is_quiet,
+                        experimental_parallel=experimental_parallel,
                     ),
                 )
         except ValueError as e:
@@ -339,12 +353,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_files=max_files,
                     max_matches=max_matches,
                 )
+            experimental_parallel_raw_stages = cast(
+                int | None, getattr(args, "experimental_parallel", None)
+            )
+            experimental_parallel_stages: int | None = None
+            if (
+                isinstance(experimental_parallel_raw_stages, int)
+                and experimental_parallel_raw_stages > 0
+            ):
+                experimental_parallel_stages = int(experimental_parallel_raw_stages)
+
             _progress_stages = None
             if not getattr(args, "quiet", False):
                 try:
                     from .progress import ProgressTracker
 
-                    _progress_stages = ProgressTracker()
+                    _progress_stages = ProgressTracker(
+                        out_of_order=experimental_parallel_stages is not None
+                    )
                 except Exception:
                     pass
 
@@ -357,6 +383,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     no_llm=no_llm,
                     on_progress=_progress_stages,
                     quiet=bool(getattr(args, "quiet", False)),
+                    experimental_parallel=experimental_parallel_stages,
                 ),
             )
         except ValueError as e:

@@ -46,7 +46,14 @@ from .schema import (
     JsonValue,
     empty_report,
 )
-from .stage import RunReport, Stage, StageContext, StageResult, run_stages
+from .stage import (
+    RunReport,
+    Stage,
+    StageContext,
+    StageResult,
+    run_stages,
+    run_stages_parallel,
+)
 from .stage_registry import stage_factories
 from .structure import StructureStage
 from .surfaces import SurfacesStage
@@ -2112,6 +2119,7 @@ def run_subset(
     no_llm: bool = False,
     on_progress: object | None = None,
     quiet: bool = False,
+    experimental_parallel: int | None = None,
 ) -> RunReport:
     ctx = StageContext(
         run_dir=info.run_dir,
@@ -2140,7 +2148,15 @@ def run_subset(
 
     if on_progress is not None and hasattr(on_progress, "register_batch"):
         cast(Any, on_progress).register_batch("Pipeline", len(stages))
-    rep = run_stages(stages, ctx, on_progress=on_progress)
+    if experimental_parallel:
+        rep = run_stages_parallel(
+            stages,
+            ctx,
+            max_workers=int(experimental_parallel),
+            on_progress=on_progress,
+        )
+    else:
+        rep = run_stages(stages, ctx, on_progress=on_progress)
     _write_stage_manifests(ctx=ctx, stages=stages, report=rep)
 
     for stage_result in rep.stage_results:
@@ -2201,6 +2217,7 @@ def analyze_run(
     force_retriage: bool = False,
     on_progress: object | None = None,
     quiet: bool = False,
+    experimental_parallel: int | None = None,
 ) -> str:
     ctx = StageContext(
         run_dir=info.run_dir,
@@ -3287,7 +3304,15 @@ def analyze_run(
         stages.append(ExploitEvidencePolicyStage())
     if on_progress is not None and hasattr(on_progress, "register_batch"):
         cast(Any, on_progress).register_batch("Pipeline", len(stages))
-    rep = run_stages(stages, ctx, on_progress=on_progress)
+    if experimental_parallel:
+        rep = run_stages_parallel(
+            stages,
+            ctx,
+            max_workers=int(experimental_parallel),
+            on_progress=on_progress,
+        )
+    else:
+        rep = run_stages(stages, ctx, on_progress=on_progress)
     _write_stage_manifests(ctx=ctx, stages=stages, report=rep)
     if _import_limitations:
         _existing_lims = normalize_limitations_list(report.get("limitations"))
