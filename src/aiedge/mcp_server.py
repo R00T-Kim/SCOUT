@@ -20,8 +20,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from . import terminator_feedback
+from .finding_categories import FindingCategory
 from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
 
@@ -36,8 +38,8 @@ PROTOCOL_VERSION = "2024-11-05"
 _MAX_OUTPUT_BYTES = int(os.environ.get("AIEDGE_MCP_MAX_OUTPUT_KB", "30")) * 1024
 
 # Root of the SCOUT project (two levels up from src/aiedge/)
-_SRC_DIR = Path(__file__).parent          # src/aiedge/
-_PROJECT_ROOT = _SRC_DIR.parent.parent    # SCOUT/
+_SRC_DIR = Path(__file__).parent  # src/aiedge/
+_PROJECT_ROOT = _SRC_DIR.parent.parent  # SCOUT/
 _RUNS_DIR = _PROJECT_ROOT / "aiedge-runs"
 
 # ---------------------------------------------------------------------------
@@ -171,8 +173,7 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "scout_graph",
         "description": (
-            "Get communication graph showing service relationships "
-            "and IPC channels."
+            "Get communication graph showing service relationships " "and IPC channels."
         ),
         "inputSchema": {
             "type": "object",
@@ -227,6 +228,114 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["run_id"],
         },
     },
+    # ---------------------------------------------------------------
+    # PR #12 -- analyst tools (override + hint injection + reasoning)
+    # ---------------------------------------------------------------
+    {
+        "name": "scout_get_finding_reasoning",
+        "description": (
+            "Get the full reasoning_trail and triage context for a specific "
+            "finding. Returns reasoning_trail (PR #11), category (PR #7a), "
+            "original and current confidence, fp_verdict and triage_outcome. "
+            "Useful for analysts auditing LLM debate transcripts."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "finding_id": {
+                    "type": "string",
+                    "description": "The finding ID (matches the 'id' field in findings.json)",
+                },
+            },
+            "required": ["run_id", "finding_id"],
+        },
+    },
+    {
+        "name": "scout_inject_hint",
+        "description": (
+            "Inject an analyst hint for a finding into the feedback registry. "
+            "Next time adversarial_triage runs with the same AIEDGE_FEEDBACK_DIR, "
+            "the advocate prompt is prefixed with the hint text. Priorities: "
+            "low, medium (default), high."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"},
+                "hint_text": {
+                    "type": "string",
+                    "description": "The analyst guidance to inject into the next-run LLM prompt",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "Hint priority (default 'medium')",
+                },
+                "added_by": {
+                    "type": "string",
+                    "description": "Optional analyst identifier",
+                },
+            },
+            "required": ["finding_id", "hint_text"],
+        },
+    },
+    {
+        "name": "scout_override_verdict",
+        "description": (
+            "Override the verdict for a specific finding. Writes to the "
+            "feedback registry so that the next run's duplicate_gate and "
+            "scoring_calibration stages can adjust the finding accordingly. "
+            "Verdicts: confirmed, false_positive, wont_fix, needs_info."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"},
+                "verdict": {
+                    "type": "string",
+                    "enum": [
+                        "confirmed",
+                        "false_positive",
+                        "wont_fix",
+                        "needs_info",
+                    ],
+                },
+                "rationale": {
+                    "type": "string",
+                    "description": "Optional verdict rationale",
+                },
+                "confidence_override": {
+                    "type": "number",
+                    "description": "Optional explicit confidence replacement in [0.0, 1.0]",
+                },
+            },
+            "required": ["finding_id", "verdict"],
+        },
+    },
+    {
+        "name": "scout_filter_by_category",
+        "description": (
+            "Filter findings by category (PR #7a taxonomy). Returns summarized "
+            "list with id, category, severity, confidence. Categories: "
+            "vulnerability, misconfiguration, pipeline_artifact."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "category": {
+                    "type": "string",
+                    "enum": [
+                        "vulnerability",
+                        "misconfiguration",
+                        "pipeline_artifact",
+                    ],
+                },
+            },
+            "required": ["run_id", "category"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -254,20 +363,28 @@ def _truncate_json(obj: Any, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
     if len(text.encode("utf-8", errors="replace")) <= max_bytes:
         return text
     if not isinstance(obj, dict):
-        return json.dumps({"_truncated": "object too large", "_type": str(type(obj).__name__)})
+        return json.dumps(
+            {"_truncated": "object too large", "_type": str(type(obj).__name__)}
+        )
     # Iteratively trim largest lists until it fits
     trimmed: dict[str, Any] = {}
     for k, v in obj.items():
         trimmed[k] = v
     for _ in range(10):
-        list_keys = [(k, len(v)) for k, v in trimmed.items() if isinstance(v, list) and len(v) > 3]
+        list_keys = [
+            (k, len(v))
+            for k, v in trimmed.items()
+            if isinstance(v, list) and len(v) > 3
+        ]
         if not list_keys:
             break
         list_keys.sort(key=lambda x: -x[1])
         key, length = list_keys[0]
         keep = max(3, length // 4)
         original = trimmed[key]
-        trimmed[key] = original[:keep] + [{"_truncated": f"{length - keep} of {length} items omitted"}]
+        trimmed[key] = original[:keep] + [
+            {"_truncated": f"{length - keep} of {length} items omitted"}
+        ]
         text = json.dumps(trimmed, indent=2, sort_keys=True)
         if len(text.encode("utf-8", errors="replace")) <= max_bytes:
             return text
@@ -305,9 +422,7 @@ def _resolve_run_dir(run_id: str) -> Path:
     # Path containment check — assert_under_dir works on files; do it manually
     # for directories so we can raise a friendlier error.
     if not str(candidate).startswith(str(runs_base)):
-        raise AIEdgePolicyViolation(
-            f"run_id escapes runs directory: {run_id!r}"
-        )
+        raise AIEdgePolicyViolation(f"run_id escapes runs directory: {run_id!r}")
     if not candidate.is_dir():
         raise FileNotFoundError(f"Run directory not found: {candidate}")
     return candidate
@@ -453,15 +568,16 @@ def _tool_list_findings(args: dict[str, Any]) -> list[dict[str, str]]:
     # Apply filters
     if severity_filter:
         findings = [
-            f for f in findings
+            f
+            for f in findings
             if isinstance(f, dict)
             and f.get("severity", "").lower() == severity_filter.lower()
         ]
     if min_confidence is not None:
         findings = [
-            f for f in findings
-            if isinstance(f, dict)
-            and float(f.get("confidence", 0.0)) >= min_confidence
+            f
+            for f in findings
+            if isinstance(f, dict) and float(f.get("confidence", 0.0)) >= min_confidence
         ]
 
     summary = {
@@ -513,7 +629,8 @@ def _tool_cve_lookup(args: dict[str, Any]) -> list[dict[str, str]]:
         if component_filter:
             component_lower = component_filter.lower()
             matches = [
-                m for m in matches
+                m
+                for m in matches
                 if isinstance(m, dict)
                 and component_lower in str(m.get("component", "")).lower()
             ]
@@ -552,9 +669,9 @@ def _tool_binary_info(args: dict[str, Any]) -> list[dict[str, str]]:
             if binary_filter:
                 flt = binary_filter.lower()
                 binaries = [
-                    b for b in binaries
-                    if isinstance(b, dict)
-                    and flt in str(b.get("path", "")).lower()
+                    b
+                    for b in binaries
+                    if isinstance(b, dict) and flt in str(b.get("path", "")).lower()
                 ]
 
             result = {"total": len(binaries), "binaries": binaries}
@@ -619,8 +736,7 @@ def _tool_run_stage(args: dict[str, Any]) -> list[dict[str, str]]:
     scout_bin = _PROJECT_ROOT / "scout"
     if not scout_bin.is_file():
         return _text_result(
-            f"./scout binary not found at {scout_bin}. "
-            "Cannot re-run stages."
+            f"./scout binary not found at {scout_bin}. " "Cannot re-run stages."
         )
 
     cmd = [
@@ -721,6 +837,311 @@ def _tool_cert_analysis(args: dict[str, Any]) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# PR #12 -- analyst tools (override + hint injection + reasoning access)
+# ---------------------------------------------------------------------------
+
+
+def _load_findings_list(run_dir: Path) -> list[Any] | None:
+    """Return the findings list for a run, or ``None`` when unavailable.
+
+    Mirrors the same two-location fallback as :func:`_tool_list_findings`
+    (``stages/findings/findings.json`` first, ``stages/llm_triage/findings.json``
+    second) and accepts both the list-root and ``{findings: [...]}`` shapes.
+    """
+    candidates = [
+        run_dir / "stages" / "findings" / "findings.json",
+        run_dir / "stages" / "llm_triage" / "findings.json",
+    ]
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        assert_under_dir(run_dir, candidate)
+        try:
+            data = _read_json(candidate)
+        except Exception as exc:
+            _err(f"Failed to read {candidate}: {exc}")
+            continue
+        if isinstance(data, list):
+            return cast_list(data)
+        if isinstance(data, dict):
+            findings_any = data.get("findings")
+            if isinstance(findings_any, list):
+                return cast_list(findings_any)
+    return None
+
+
+def cast_list(value: Any) -> list[Any]:
+    """Cast-like helper -- narrows ``object`` to ``list[Any]`` without import cycles."""
+    return list(value) if isinstance(value, list) else []
+
+
+def _find_finding_by_id(findings: list[Any], finding_id: str) -> dict[str, Any] | None:
+    """Return the first finding whose ``id`` matches ``finding_id``."""
+    for item in findings:
+        if isinstance(item, dict) and item.get("id") == finding_id:
+            return item
+    return None
+
+
+def _summarize_reasoning_trail(
+    trail: Any,
+    *,
+    max_entries: int = 20,
+    max_rationale_chars: int = 400,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Truncate a reasoning_trail so its JSON stays under the payload cap.
+
+    Returns ``(summarised_trail, was_truncated)``. Each entry keeps its key
+    structural fields (``stage`` / ``step`` / ``verdict`` / ``delta`` /
+    ``timestamp`` / ``llm_model``) while large ``rationale`` /
+    ``raw_response_excerpt`` fields are cropped.
+    """
+    if not isinstance(trail, list):
+        return [], False
+    source = cast(list[Any], trail)
+    original_len = len(source)
+    kept: list[Any] = source[:max_entries]
+    truncated = original_len > max_entries
+    summarised: list[dict[str, Any]] = []
+    for entry in kept:
+        if not isinstance(entry, dict):
+            continue
+        entry_dict = cast(dict[str, Any], entry)
+        reduced: dict[str, Any] = {}
+        for key in ("stage", "step", "verdict", "delta", "timestamp", "llm_model"):
+            if key in entry_dict:
+                reduced[key] = entry_dict[key]
+        rationale_any = entry_dict.get("rationale")
+        if isinstance(rationale_any, str):
+            if len(rationale_any) > max_rationale_chars:
+                reduced["rationale"] = rationale_any[: max_rationale_chars - 3] + "..."
+                truncated = True
+            else:
+                reduced["rationale"] = rationale_any
+        excerpt_any = entry_dict.get("raw_response_excerpt")
+        if isinstance(excerpt_any, str):
+            reduced["raw_response_excerpt"] = excerpt_any
+        summarised.append(reduced)
+    return summarised, truncated
+
+
+def _tool_get_finding_reasoning(args: dict[str, Any]) -> list[dict[str, str]]:
+    run_id: str = args["run_id"]
+    finding_id: str = args["finding_id"]
+
+    run_dir = _resolve_run_dir(run_id)
+
+    findings = _load_findings_list(run_dir)
+    if findings is None:
+        return _text_result(
+            f"No findings artifact found in run {run_id!r}. "
+            "Ensure the findings stage has completed."
+        )
+
+    finding = _find_finding_by_id(findings, finding_id)
+    if finding is None:
+        return _json_result(
+            {
+                "error": "finding_not_found",
+                "finding_id": finding_id,
+                "run_id": run_id,
+                "message": f"No finding with id={finding_id!r} in run {run_id!r}.",
+            }
+        )
+
+    reasoning_trail, trail_truncated = _summarize_reasoning_trail(
+        finding.get("reasoning_trail")
+    )
+    payload: dict[str, Any] = {
+        "finding_id": finding_id,
+        "reasoning_trail": reasoning_trail,
+        "original_confidence": finding.get("original_confidence"),
+        "current_confidence": finding.get("confidence"),
+        "category": finding.get("category"),
+        "fp_verdict": finding.get("fp_verdict"),
+        "triage_outcome": finding.get("triage_outcome"),
+    }
+    if trail_truncated:
+        payload["_trail_truncated"] = True
+
+    # Enforce the overall MCP output cap by dropping raw excerpts first if
+    # the payload still exceeds the limit after entry truncation.
+    text = json.dumps(payload, indent=2, sort_keys=True)
+    if len(text.encode("utf-8", errors="replace")) > _MAX_OUTPUT_BYTES:
+        stripped_trail: list[dict[str, Any]] = []
+        for entry in payload.get("reasoning_trail", []):
+            if isinstance(entry, dict):
+                entry_copy = dict(cast(dict[str, Any], entry))
+                entry_copy.pop("raw_response_excerpt", None)
+                rationale_any = entry_copy.get("rationale")
+                if isinstance(rationale_any, str) and len(rationale_any) > 120:
+                    entry_copy["rationale"] = rationale_any[:117] + "..."
+                stripped_trail.append(entry_copy)
+        payload["reasoning_trail"] = stripped_trail
+        payload["_trail_truncated"] = True
+
+    return _json_result(payload)
+
+
+def _tool_inject_hint(args: dict[str, Any]) -> list[dict[str, str]]:
+    finding_id: str = args.get("finding_id", "")
+    hint_text: str = args.get("hint_text", "")
+    priority: str = args.get("priority", "medium")
+    added_by_any: Any = args.get("added_by")
+    added_by: str | None = added_by_any if isinstance(added_by_any, str) else None
+
+    try:
+        terminator_feedback.add_analyst_hint(
+            finding_id,
+            hint_text,
+            priority=priority,
+            added_by=added_by,
+        )
+    except ValueError as exc:
+        return _json_result(
+            {
+                "success": False,
+                "error": "invalid_input",
+                "message": str(exc),
+                "finding_id": finding_id,
+            }
+        )
+    except Exception as exc:
+        _err(f"scout_inject_hint failed: {exc}")
+        return _json_result(
+            {
+                "success": False,
+                "error": "internal_error",
+                "message": str(exc),
+                "finding_id": finding_id,
+            }
+        )
+
+    hints = terminator_feedback.get_analyst_hints(finding_id)
+    return _json_result(
+        {
+            "success": True,
+            "finding_id": finding_id,
+            "hint_count": len(hints),
+            "priority": priority if priority in ("low", "medium", "high") else "medium",
+        }
+    )
+
+
+def _tool_override_verdict(args: dict[str, Any]) -> list[dict[str, str]]:
+    finding_id: str = args.get("finding_id", "")
+    verdict: str = args.get("verdict", "")
+    rationale_any: Any = args.get("rationale")
+    rationale: str | None = rationale_any if isinstance(rationale_any, str) else None
+    conf_any: Any = args.get("confidence_override")
+    confidence_override: float | None = None
+    if isinstance(conf_any, (int, float)) and not isinstance(conf_any, bool):
+        confidence_override = float(conf_any)
+
+    _valid_verdicts = {"confirmed", "false_positive", "wont_fix", "needs_info"}
+    if verdict not in _valid_verdicts:
+        return _json_result(
+            {
+                "success": False,
+                "error": "invalid_verdict",
+                "message": (
+                    f"verdict must be one of {sorted(_valid_verdicts)}, "
+                    f"got {verdict!r}"
+                ),
+                "finding_id": finding_id,
+            }
+        )
+
+    try:
+        terminator_feedback.set_verdict_override(
+            finding_id,
+            verdict,
+            rationale=rationale,
+            confidence_override=confidence_override,
+        )
+    except ValueError as exc:
+        return _json_result(
+            {
+                "success": False,
+                "error": "invalid_input",
+                "message": str(exc),
+                "finding_id": finding_id,
+            }
+        )
+    except Exception as exc:
+        _err(f"scout_override_verdict failed: {exc}")
+        return _json_result(
+            {
+                "success": False,
+                "error": "internal_error",
+                "message": str(exc),
+                "finding_id": finding_id,
+            }
+        )
+
+    return _json_result(
+        {
+            "success": True,
+            "finding_id": finding_id,
+            "verdict": verdict,
+            "rationale": rationale,
+            "confidence_override": confidence_override,
+        }
+    )
+
+
+def _tool_filter_by_category(args: dict[str, Any]) -> list[dict[str, str]]:
+    run_id: str = args.get("run_id", "")
+    category: str = args.get("category", "")
+
+    valid_categories = {c.value for c in FindingCategory}
+    if category not in valid_categories:
+        return _json_result(
+            {
+                "success": False,
+                "error": "invalid_category",
+                "message": (
+                    f"category must be one of {sorted(valid_categories)}, "
+                    f"got {category!r}"
+                ),
+            }
+        )
+
+    run_dir = _resolve_run_dir(run_id)
+    findings = _load_findings_list(run_dir)
+    if findings is None:
+        return _text_result(
+            f"No findings artifact found in run {run_id!r}. "
+            "Ensure the findings stage has completed."
+        )
+
+    matched: list[dict[str, Any]] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        f_cat_any = finding.get("category")
+        if not isinstance(f_cat_any, str) or f_cat_any != category:
+            continue
+        matched.append(
+            {
+                "id": finding.get("id"),
+                "category": f_cat_any,
+                "severity": finding.get("severity"),
+                "confidence": finding.get("confidence"),
+                "source": finding.get("source"),
+            }
+        )
+
+    return _json_result(
+        {
+            "category": category,
+            "total": len(matched),
+            "findings": matched,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -737,6 +1158,11 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "scout_run_stage": _tool_run_stage,
     "scout_analyze": _tool_analyze,
     "scout_cert_analysis": _tool_cert_analysis,
+    # PR #12 -- analyst tools
+    "scout_get_finding_reasoning": _tool_get_finding_reasoning,
+    "scout_inject_hint": _tool_inject_hint,
+    "scout_override_verdict": _tool_override_verdict,
+    "scout_filter_by_category": _tool_filter_by_category,
 }
 
 # ---------------------------------------------------------------------------
@@ -837,7 +1263,9 @@ def _handle_tools_call(request_id: Any, params: Any) -> dict[str, Any]:
         )
 
 
-def handle_request(request: Any, project_id: str | None = None) -> dict[str, Any] | None:
+def handle_request(
+    request: Any, project_id: str | None = None
+) -> dict[str, Any] | None:
     """Route a single JSON-RPC request to the appropriate handler.
 
     Returns None for notifications (no response expected).
@@ -935,7 +1363,9 @@ def main(project_id: str | None = None) -> int:
         except Exception as exc:
             _err(f"Unexpected error handling request: {exc}")
             req_id = request.get("id") if isinstance(request, dict) else None
-            response = _rpc_error(req_id, _ERR_INTERNAL, f"Internal server error: {exc}")
+            response = _rpc_error(
+                req_id, _ERR_INTERNAL, f"Internal server error: {exc}"
+            )
 
         if response is not None:
             try:
