@@ -14,6 +14,7 @@ from .cli_common import (
     _as_int,
     _normalize_ref,
     _path_tail,
+    _safe_ascii_label_for_comm,
     _safe_load_json_object,
     _safe_node_value,
     _short_text,
@@ -253,12 +254,16 @@ def _candidate_group_payload(item: dict[str, object]) -> dict[str, object]:
         "impact": impact,
         "next_step": next_step,
         "path_count": 1,
-        "candidate_ids": [cast(str, candidate_id)]
-        if isinstance(item.get("candidate_id"), str)
-        else [],
+        "candidate_ids": (
+            [cast(str, candidate_id)]
+            if isinstance(item.get("candidate_id"), str)
+            else []
+        ),
         "max_score": score,
         "sample_paths": [sample_path] if sample_path else [],
-        "representative_id": cast(str, candidate_id) if isinstance(candidate_id, str) else "",
+        "representative_id": (
+            cast(str, candidate_id) if isinstance(candidate_id, str) else ""
+        ),
     }
 
 
@@ -289,7 +294,9 @@ def _collect_tui_candidate_groups(
         candidate_score = _as_float(item.get("score"))
         if candidate_score > current_max_score:
             group["max_score"] = candidate_score
-            group["hypothesis"] = _short_text(item.get("attack_hypothesis"), max_len=240)
+            group["hypothesis"] = _short_text(
+                item.get("attack_hypothesis"), max_len=240
+            )
             impacts_any = item.get("expected_impact")
             impacts = (
                 [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
@@ -297,7 +304,9 @@ def _collect_tui_candidate_groups(
                 else []
             )
             group["impact"] = (
-                _short_text(impacts[0], max_len=240) if impacts else _short_text(group.get("impact"), max_len=240)
+                _short_text(impacts[0], max_len=240)
+                if impacts
+                else _short_text(group.get("impact"), max_len=240)
             )
             next = _candidate_next_step_text(item)
             if next:
@@ -325,7 +334,7 @@ def _collect_tui_candidate_groups(
 def _extract_service_node_value(value: str) -> tuple[str, int, str]:
     value_text = value.strip()
     if value_text.startswith("service:"):
-        value_text = value_text[len("service:"):]
+        value_text = value_text[len("service:") :]
     if "/" in value_text:
         service_part, protocol = value_text.rsplit("/", 1)
         proto = protocol.lower().strip() or "tcp"
@@ -368,9 +377,7 @@ def _count_bar(label: str, *, count: int, max_count: int, width: int = 24) -> st
     return f"{label:<6} |{bar}| {count}"
 
 
-def _collect_runtime_communication_summary(
-    *, run_dir: Path
-) -> dict[str, object]:
+def _collect_runtime_communication_summary(*, run_dir: Path) -> dict[str, object]:
     matrix_path = run_dir / "stages" / "graph" / "communication_matrix.json"
     if matrix_path.is_file():
         matrix_payload = _safe_load_json_object(matrix_path)
@@ -383,9 +390,7 @@ def _collect_runtime_communication_summary(
                     if not isinstance(row_any, dict):
                         continue
                     row = cast(dict[str, object], row_any)
-                    host = _safe_node_value(
-                        _short_text(row.get("host"), max_len=220)
-                    )
+                    host = _safe_node_value(_short_text(row.get("host"), max_len=220))
                     service_host = _safe_node_value(
                         _short_text(row.get("service_host"), max_len=220)
                     )
@@ -400,7 +405,9 @@ def _collect_runtime_communication_summary(
                         continue
                     if not component_label:
                         component_label = "unmapped"
-                    evidence_badge = _short_text(row.get("evidence_badge"), max_len=20) or "S"
+                    evidence_badge = (
+                        _short_text(row.get("evidence_badge"), max_len=20) or "S"
+                    )
                     evidence_signals_any = row.get("evidence_signals")
                     evidence_signals = (
                         [
@@ -411,7 +418,9 @@ def _collect_runtime_communication_summary(
                         if isinstance(evidence_signals_any, list)
                         else []
                     )
-                    dynamic_exploit_chain = bool(row.get("dynamic_exploit_chain", False))
+                    dynamic_exploit_chain = bool(
+                        row.get("dynamic_exploit_chain", False)
+                    )
                     matrix_rows.append(
                         {
                             "host": host,
@@ -421,7 +430,9 @@ def _collect_runtime_communication_summary(
                             "components": [component_label],
                             "component": component_label,
                             "confidence": row.get("confidence"),
-                            "observation": row.get("observation", "runtime_communication"),
+                            "observation": row.get(
+                                "observation", "runtime_communication"
+                            ),
                             "evidence_badge": evidence_badge,
                             "evidence_signals": evidence_signals,
                             "dynamic_evidence_count": _as_int(
@@ -445,22 +456,28 @@ def _collect_runtime_communication_summary(
                         row = cast(dict[str, object], row_any)
                         row_host = _short_text(row.get("host"), max_len=220)
                         row_component = _short_text(row.get("component"), max_len=120)
-                        row_service_host = _short_text(row.get("service_host"), max_len=220)
+                        row_service_host = _short_text(
+                            row.get("service_host"), max_len=220
+                        )
                         row_port = _as_int(row.get("port"))
                         row_protocol = (
                             _short_text(row.get("protocol"), max_len=12) or "tcp"
                         )
-                        endpoint = _service_endpoint(row_service_host, row_port, row_protocol)
+                        endpoint = _service_endpoint(
+                            row_service_host, row_port, row_protocol
+                        )
                         if row_host:
                             if row_component:
                                 host_components_map.setdefault(row_host, set()).add(
                                     row_component
                                 )
                             if endpoint:
-                                host_service_map.setdefault(row_host, set()).add(endpoint)
-                            protocol_counts[row_protocol] = protocol_counts.get(
-                                row_protocol, 0
-                            ) + 1
+                                host_service_map.setdefault(row_host, set()).add(
+                                    endpoint
+                                )
+                            protocol_counts[row_protocol] = (
+                                protocol_counts.get(row_protocol, 0) + 1
+                            )
                     runtime_system_map: list[dict[str, object]] = []
                     host_component_counts: dict[str, int] = {}
                     host_service_counts: dict[str, int] = {}
@@ -490,10 +507,18 @@ def _collect_runtime_communication_summary(
                         summary.update(
                             {
                                 "hosts": _as_int(summary_any.get("hosts"), default=0),
-                                "services": _as_int(summary_any.get("services"), default=0),
-                                "components": _as_int(summary_any.get("components"), default=0),
-                                "rows_dynamic": _as_int(summary_any.get("rows_dynamic"), default=0),
-                                "rows_exploit": _as_int(summary_any.get("rows_exploit"), default=0),
+                                "services": _as_int(
+                                    summary_any.get("services"), default=0
+                                ),
+                                "components": _as_int(
+                                    summary_any.get("components"), default=0
+                                ),
+                                "rows_dynamic": _as_int(
+                                    summary_any.get("rows_dynamic"), default=0
+                                ),
+                                "rows_exploit": _as_int(
+                                    summary_any.get("rows_exploit"), default=0
+                                ),
                                 "rows_verified_chain": _as_int(
                                     summary_any.get("rows_verified_chain"), default=0
                                 ),
@@ -510,16 +535,16 @@ def _collect_runtime_communication_summary(
                         )
                     return {
                         "available": True,
-                        "status": _short_text(
-                            matrix_payload.get("status"), max_len=16
-                        ) or "partial",
+                        "status": _short_text(matrix_payload.get("status"), max_len=16)
+                        or "partial",
                         "rows": cast(list[object], matrix_rows),
                         "summary": summary,
                     }
 
             return {
                 "available": True,
-                "status": _short_text(matrix_payload.get("status"), max_len=16) or "partial",
+                "status": _short_text(matrix_payload.get("status"), max_len=16)
+                or "partial",
                 "reason": "communication matrix empty",
                 "rows": cast(list[object], []),
                 "summary": {
@@ -534,7 +559,9 @@ def _collect_runtime_communication_summary(
                     "host_service_counts": {},
                     "host_component_counts": {},
                     "runtime_system_map": [],
-                    "artifacts": [_path_tail(str(matrix_path), max_segments=4, max_len=90)],
+                    "artifacts": [
+                        _path_tail(str(matrix_path), max_segments=4, max_len=90)
+                    ],
                 },
             }
 
@@ -572,8 +599,12 @@ def _collect_runtime_communication_summary(
             continue
         edge = cast(dict[str, object], edge_any)
         edge_type = edge.get("edge_type")
-        src = cast(str | None, edge.get("src") if isinstance(edge.get("src"), str) else None)
-        dst = cast(str | None, edge.get("dst") if isinstance(edge.get("dst"), str) else None)
+        src = cast(
+            str | None, edge.get("src") if isinstance(edge.get("src"), str) else None
+        )
+        dst = cast(
+            str | None, edge.get("dst") if isinstance(edge.get("dst"), str) else None
+        )
         if not src or not dst:
             continue
         if edge_type == "runtime_host_flow":
@@ -585,8 +616,12 @@ def _collect_runtime_communication_summary(
                 and src_node.get("type") == "component"
                 and dst_node.get("type") == "host"
             ):
-                comp = _safe_node_value(_safe_ascii_label(src))  # noqa: F821
-                host = _safe_node_value(_safe_ascii_label(cast(str, dst)))  # noqa: F821
+                # Prior code referenced an undefined ``_safe_ascii_label``
+                # (silenced with noqa: F821) -- route through the shared
+                # ``_safe_ascii_label_for_comm`` helper which performs the
+                # same ASCII label sanitization.
+                comp = _safe_node_value(_safe_ascii_label_for_comm(src))
+                host = _safe_node_value(_safe_ascii_label_for_comm(cast(str, dst)))
                 component_hosts.setdefault(comp, set()).add(host)
                 host_components.setdefault(host, set()).add(comp)
             continue
@@ -600,7 +635,11 @@ def _collect_runtime_communication_summary(
             continue
         host_label = _safe_node_value(_short_text(src_node.get("label"), max_len=220))
         service_label = _short_text(dst_node.get("label"), max_len=220)
-        host = host_label.removeprefix("host:") if host_label.startswith("host:") else host_label
+        host = (
+            host_label.removeprefix("host:")
+            if host_label.startswith("host:")
+            else host_label
+        )
         service_host, service_port, service_proto = _extract_service_node_value(
             str(service_label)
         )
@@ -615,7 +654,9 @@ def _collect_runtime_communication_summary(
     for host, services in sorted(
         host_services.items(), key=lambda item: item[0].lower()
     ):
-        unique_services = sorted(set(services), key=lambda item: (item[0], item[1], item[2]))
+        unique_services = sorted(
+            set(services), key=lambda item: (item[0], item[1], item[2])
+        )
         host_service_counts[host] = len(unique_services)
         comp_names = sorted(host_components.get(host, set())) or ["unmapped"]
         seen: set[tuple[str, int, str]] = set()
@@ -680,8 +721,12 @@ def _collect_tui_asset_inventory(
     run_dir: Path,
     candidates: list[dict[str, object]],
 ) -> dict[str, object]:
-    inv_obj = _safe_load_json_object(run_dir / "stages" / "inventory" / "inventory.json")
-    endpoints_obj = _safe_load_json_object(run_dir / "stages" / "endpoints" / "endpoints.json")
+    inv_obj = _safe_load_json_object(
+        run_dir / "stages" / "inventory" / "inventory.json"
+    )
+    endpoints_obj = _safe_load_json_object(
+        run_dir / "stages" / "endpoints" / "endpoints.json"
+    )
     ports_obj = _safe_load_json_object(
         run_dir / "stages" / "dynamic_validation" / "network" / "ports.json"
     )
@@ -690,7 +735,11 @@ def _collect_tui_asset_inventory(
     )
 
     inv_summary_any = inv_obj.get("summary")
-    inv_summary = cast(dict[str, object], inv_summary_any) if isinstance(inv_summary_any, dict) else {}
+    inv_summary = (
+        cast(dict[str, object], inv_summary_any)
+        if isinstance(inv_summary_any, dict)
+        else {}
+    )
     files = _as_int(inv_summary.get("files"))
     binaries = _as_int(inv_summary.get("binaries"))
     configs = _as_int(inv_summary.get("configs"))
@@ -755,7 +804,9 @@ def _collect_tui_asset_inventory(
             continue
         endpoint = cast(dict[str, object], endpoint_any)
         endpoint_type = _short_text(endpoint.get("type"), max_len=20) or "unknown"
-        endpoint_type_counts[endpoint_type] = endpoint_type_counts.get(endpoint_type, 0) + 1
+        endpoint_type_counts[endpoint_type] = (
+            endpoint_type_counts.get(endpoint_type, 0) + 1
+        )
         value = _short_text(endpoint.get("value"), max_len=260)
         if not value:
             continue
@@ -763,24 +814,32 @@ def _collect_tui_asset_inventory(
         if parsed.scheme:
             scheme = parsed.scheme.lower().strip()
             if scheme:
-                endpoint_protocol_counts[scheme] = endpoint_protocol_counts.get(scheme, 0) + 1
+                endpoint_protocol_counts[scheme] = (
+                    endpoint_protocol_counts.get(scheme, 0) + 1
+                )
             try:
                 parsed_port = parsed.port
             except ValueError:
                 parsed_port = None
             if parsed_port is not None and 0 <= int(parsed_port) <= 65535:
                 port_key = str(int(parsed_port))
-                endpoint_port_counts[port_key] = endpoint_port_counts.get(port_key, 0) + 1
+                endpoint_port_counts[port_key] = (
+                    endpoint_port_counts.get(port_key, 0) + 1
+                )
             continue
         host_port = re.match(r"^[a-zA-Z0-9_.:-]+:(\d{1,5})$", value)
         if host_port:
             port_num = int(host_port.group(1))
             if 0 <= port_num <= 65535:
                 port_key = str(port_num)
-                endpoint_port_counts[port_key] = endpoint_port_counts.get(port_key, 0) + 1
+                endpoint_port_counts[port_key] = (
+                    endpoint_port_counts.get(port_key, 0) + 1
+                )
 
     ports_any = ports_obj.get("ports")
-    ports = cast(list[dict[str, object]], ports_any) if isinstance(ports_any, list) else []
+    ports = (
+        cast(list[dict[str, object]], ports_any) if isinstance(ports_any, list) else []
+    )
     ports_summary_any = ports_obj.get("summary")
     ports_summary = (
         cast(dict[str, object], ports_summary_any)
@@ -845,7 +904,11 @@ def _collect_tui_asset_inventory(
         ifname = _short_text(iface.get("ifname"), max_len=20) or "if"
         ipv4_any = iface.get("ipv4")
         ipv4s = (
-            [_short_text(x, max_len=32) for x in cast(list[object], ipv4_any) if isinstance(x, str)]
+            [
+                _short_text(x, max_len=32)
+                for x in cast(list[object], ipv4_any)
+                if isinstance(x, str)
+            ]
             if isinstance(ipv4_any, list)
             else []
         )
@@ -916,9 +979,7 @@ def _collect_tui_threat_model(*, run_dir: Path) -> dict[str, object]:
 
     summary_any = threat_obj.get("summary")
     summary = (
-        cast(dict[str, object], summary_any)
-        if isinstance(summary_any, dict)
-        else {}
+        cast(dict[str, object], summary_any) if isinstance(summary_any, dict) else {}
     )
     threats_any = threat_obj.get("threats")
     threats = (
@@ -971,9 +1032,7 @@ def _collect_tui_threat_model(*, run_dir: Path) -> dict[str, object]:
         sample = (
             f"{category}: {title} -> {endpoint_value}"
             if title and endpoint_value
-            else f"{category}: {title}"
-            if title
-            else category
+            else f"{category}: {title}" if title else category
         )
         if sample not in top_threats:
             top_threats.append(sample)
@@ -1019,7 +1078,9 @@ def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
     dynamic_status = _short_text(dynamic_obj.get("status"), max_len=24) or (
         _short_text(dynamic_stage.get("status"), max_len=24) or "unknown"
     )
-    dynamic_scope = _short_text(dynamic_obj.get("dynamic_scope"), max_len=40) or "unknown"
+    dynamic_scope = (
+        _short_text(dynamic_obj.get("dynamic_scope"), max_len=40) or "unknown"
+    )
 
     target_any = dynamic_obj.get("target")
     target = cast(dict[str, object], target_any) if isinstance(target_any, dict) else {}
@@ -1030,7 +1091,11 @@ def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
     boot = cast(dict[str, object], boot_any) if isinstance(boot_any, dict) else {}
     boot_success = bool(boot.get("success", False))
     attempts_any = boot.get("attempts")
-    attempts = cast(list[dict[str, object]], attempts_any) if isinstance(attempts_any, list) else []
+    attempts = (
+        cast(list[dict[str, object]], attempts_any)
+        if isinstance(attempts_any, list)
+        else []
+    )
     boot_attempts = len(attempts)
     last_error = ""
     last_returncode = 0
@@ -1069,14 +1134,24 @@ def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
     )
     limitation_list = [
         x
-        for x in dict.fromkeys(dynamic_limitations + stage_limitations + emu_limitations)
+        for x in dict.fromkeys(
+            dynamic_limitations + stage_limitations + emu_limitations
+        )
         if x
     ]
 
     isolation_any = dynamic_obj.get("isolation")
-    isolation = cast(dict[str, object], isolation_any) if isinstance(isolation_any, dict) else {}
+    isolation = (
+        cast(dict[str, object], isolation_any)
+        if isinstance(isolation_any, dict)
+        else {}
+    )
     fw_cmds_any = isolation.get("firewall_commands")
-    fw_cmds = cast(list[dict[str, object]], fw_cmds_any) if isinstance(fw_cmds_any, list) else []
+    fw_cmds = (
+        cast(list[dict[str, object]], fw_cmds_any)
+        if isinstance(fw_cmds_any, list)
+        else []
+    )
     no_new_priv = False
     netlink_denied = False
     for cmd_any in fw_cmds:
@@ -1123,9 +1198,7 @@ def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
         remediation.append(
             "priv-run 설정: export AIEDGE_PRIV_RUNNER=./scripts/priv-run"
         )
-        remediation.append(
-            "sudo 검증: sudo -n true (필요 시 SUDO_PASSWORD 설정)"
-        )
+        remediation.append("sudo 검증: sudo -n true (필요 시 SUDO_PASSWORD 설정)")
     if "privileged_runner_failed" in blockers:
         remediation.append("priv-run 경로/권한 확인: ls -l ./scripts/priv-run")
     if ("boot_timeout" in blockers) or ("boot_flaky" in blockers):
@@ -1183,7 +1256,9 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     report_status = _short_text(report_completeness.get("status")) or "unknown"
     gate_passed = report_completeness.get("gate_passed")
     gate_passed_text = (
-        "true" if gate_passed is True else "false" if gate_passed is False else "unknown"
+        "true"
+        if gate_passed is True
+        else "false" if gate_passed is False else "unknown"
     )
 
     llm_any = report.get("llm")
@@ -1203,7 +1278,9 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     )
 
     summary_any = candidates_payload.get("summary")
-    summary = cast(dict[str, object], summary_any) if isinstance(summary_any, dict) else {}
+    summary = (
+        cast(dict[str, object], summary_any) if isinstance(summary_any, dict) else {}
+    )
     high = _as_int(summary.get("high"))
     medium = _as_int(summary.get("medium"))
     low = _as_int(summary.get("low"))
@@ -1235,7 +1312,8 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         "llm_status": llm_status,
         "verdict_state": verdict_state,
         "reason_codes": reason_codes,
-        "schema_version": _short_text(candidates_payload.get("schema_version")) or "unknown",
+        "schema_version": _short_text(candidates_payload.get("schema_version"))
+        or "unknown",
         "high": high,
         "medium": medium,
         "low": low,

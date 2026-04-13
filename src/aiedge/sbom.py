@@ -34,110 +34,111 @@ _STAGE_NAME = "sbom"
 
 # CPE vendor mapping: product-key → (vendor, canonical_product_name)
 _CPE_VENDOR: dict[str, tuple[str, str]] = {
-    "busybox":  ("busybox", "busybox"),
+    "busybox": ("busybox", "busybox"),
     "dropbear": ("matt_johnston", "dropbear"),
-    "dnsmasq":  ("thekelleys", "dnsmasq"),
-    "openssl":  ("openssl", "openssl"),
-    "linux":    ("linux", "linux_kernel"),
-    "nginx":    ("nginx", "nginx"),
-    "curl":     ("haxx", "curl"),
-    "openssh":  ("openbsd", "openssh"),
+    "dnsmasq": ("thekelleys", "dnsmasq"),
+    "openssl": ("openssl", "openssl"),
+    "linux": ("linux", "linux_kernel"),
+    "nginx": ("nginx", "nginx"),
+    "curl": ("haxx", "curl"),
+    "openssh": ("openbsd", "openssh"),
     "lighttpd": ("lighttpd", "lighttpd"),
-    "glibc":    ("gnu", "glibc"),
-    "musl":     ("musl_libc", "musl"),
-    "uclibc-ng":     ("uclibc-ng_project", "uclibc-ng"),
-    "uclibc":        ("uclibc_project", "uclibc"),
-    "wolfssl":       ("wolfssl", "wolfssl"),
-    "mbedtls":       ("arm", "mbedtls"),
-    "sqlite":        ("sqlite", "sqlite"),
-    "sqlite3":       ("sqlite", "sqlite3"),
-    "lua":           ("lua", "lua"),
-    "libexpat":      ("libexpat_project", "libexpat"),
-    "libxml2":       ("xmlsoft", "libxml2"),
-    "miniupnpd":     ("miniupnp_project", "miniupnpd"),
-    "hostapd":       ("w1.fi", "hostapd"),
-    "wpa_supplicant":("w1.fi", "wpa_supplicant"),
-    "avahi":         ("avahi", "avahi"),
-    "boa":           ("boa", "boa"),
-    "goahead":       ("embedthis", "goahead"),
-    "thttpd":        ("acme", "thttpd"),
-    "mini_httpd":    ("acme", "mini_httpd"),
-    "uhttpd":        ("openwrt", "uhttpd"),
-    "u-boot":        ("denx", "u-boot"),
-    "zlib":          ("zlib", "zlib"),
-    "xz":            ("tukaani", "xz"),
-    "pppd":          ("samba", "pppd"),
-    "xl2tpd":        ("xelerance", "xl2tpd"),
-    "iptables":      ("netfilter", "iptables"),
-    "iproute2":      ("iproute2_project", "iproute2"),
-    "libpcap":       ("tcpdump", "libpcap"),
-    "libz":          ("zlib", "libz"),
+    "glibc": ("gnu", "glibc"),
+    "musl": ("musl_libc", "musl"),
+    "uclibc-ng": ("uclibc-ng_project", "uclibc-ng"),
+    "uclibc": ("uclibc_project", "uclibc"),
+    "wolfssl": ("wolfssl", "wolfssl"),
+    "mbedtls": ("arm", "mbedtls"),
+    "sqlite": ("sqlite", "sqlite"),
+    "sqlite3": ("sqlite", "sqlite3"),
+    "lua": ("lua", "lua"),
+    "libexpat": ("libexpat_project", "libexpat"),
+    "libxml2": ("xmlsoft", "libxml2"),
+    "miniupnpd": ("miniupnp_project", "miniupnpd"),
+    "hostapd": ("w1.fi", "hostapd"),
+    "wpa_supplicant": ("w1.fi", "wpa_supplicant"),
+    "avahi": ("avahi", "avahi"),
+    "boa": ("boa", "boa"),
+    "goahead": ("embedthis", "goahead"),
+    "thttpd": ("acme", "thttpd"),
+    "mini_httpd": ("acme", "mini_httpd"),
+    "uhttpd": ("openwrt", "uhttpd"),
+    "u-boot": ("denx", "u-boot"),
+    "zlib": ("zlib", "zlib"),
+    "xz": ("tukaani", "xz"),
+    "pppd": ("samba", "pppd"),
+    "xl2tpd": ("xelerance", "xl2tpd"),
+    "iptables": ("netfilter", "iptables"),
+    "iproute2": ("iproute2_project", "iproute2"),
+    "libpcap": ("tcpdump", "libpcap"),
+    "libz": ("zlib", "libz"),
 }
 
 # Binary version patterns: (canonical_name, regex, confidence)
 _BINARY_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
-    ("busybox",  re.compile(r"BusyBox\s+v(\d+\.\d+[\.\d]*)"),          0.85),
+    ("busybox", re.compile(r"BusyBox\s+v(\d+\.\d+[\.\d]*)"), 0.85),
     ("dropbear", re.compile(r"Dropbear\s+(?:sshd\s+)?v?(\d+\.\d+\S*)"), 0.85),
-    ("dnsmasq",  re.compile(r"dnsmasq-(\d+\.\d+\S*)"),                   0.85),
-    ("lighttpd", re.compile(r"lighttpd/(\d+\.\d+\.\d+\S*)"),             0.85),
-    ("nginx",    re.compile(r"nginx/(\d+\.\d+\.\d+\S*)"),                0.85),
-    ("openssl",  re.compile(r"OpenSSL\s+(\d+\.\d+\.\d+[a-z]?)"),         0.85),
-    ("curl",     re.compile(r"curl/(\d+\.\d+\.\d+\S*)"),                 0.85),
-    ("openssh",  re.compile(r"OpenSSH_(\d+\.\d+[p\d]*)"),                0.85),
+    ("dnsmasq", re.compile(r"dnsmasq-(\d+\.\d+\S*)"), 0.85),
+    ("lighttpd", re.compile(r"lighttpd/(\d+\.\d+\.\d+\S*)"), 0.85),
+    ("nginx", re.compile(r"nginx/(\d+\.\d+\.\d+\S*)"), 0.85),
+    ("openssl", re.compile(r"OpenSSL\s+(\d+\.\d+\.\d+[a-z]?)"), 0.85),
+    ("curl", re.compile(r"curl/(\d+\.\d+\.\d+\S*)"), 0.85),
+    ("openssh", re.compile(r"OpenSSH_(\d+\.\d+[p\d]*)"), 0.85),
     # Crypto/TLS
-    ("wolfssl",  re.compile(r"wolfSSL\s+(\d+\.\d+\.\d+)"),                0.85),
-    ("mbedtls",  re.compile(r"mbed TLS\s+(\d+\.\d+\.\d+)"),              0.85),
-    ("mbedtls",  re.compile(r"mbedtls[/-](\d+\.\d+\.\d+)"),              0.85),
+    ("wolfssl", re.compile(r"wolfSSL\s+(\d+\.\d+\.\d+)"), 0.85),
+    ("mbedtls", re.compile(r"mbed TLS\s+(\d+\.\d+\.\d+)"), 0.85),
+    ("mbedtls", re.compile(r"mbedtls[/-](\d+\.\d+\.\d+)"), 0.85),
     # Web servers
-    ("uhttpd",   re.compile(r"uhttpd\s+v?(\d+\.\d+)"),                   0.85),
-    ("goahead",  re.compile(r"GoAhead[/-](\d+\.\d+\.\d+)"),              0.85),
-    ("boa",      re.compile(r"Boa/(\d+\.\d+\.\d+)"),                     0.85),
-    ("thttpd",   re.compile(r"thttpd/(\d+\.\d+)"),                       0.85),
-    ("mini_httpd", re.compile(r"mini_httpd/(\d+\.\d+)"),                  0.85),
+    ("uhttpd", re.compile(r"uhttpd\s+v?(\d+\.\d+)"), 0.85),
+    ("goahead", re.compile(r"GoAhead[/-](\d+\.\d+\.\d+)"), 0.85),
+    ("boa", re.compile(r"Boa/(\d+\.\d+\.\d+)"), 0.85),
+    ("thttpd", re.compile(r"thttpd/(\d+\.\d+)"), 0.85),
+    ("mini_httpd", re.compile(r"mini_httpd/(\d+\.\d+)"), 0.85),
     # Network services
-    ("miniupnpd",     re.compile(r"miniupnpd\s+v?(\d+\.\d+)"),           0.85),
-    ("hostapd",       re.compile(r"hostapd\s+v?(\d+\.\d+)"),             0.85),
-    ("wpa_supplicant", re.compile(r"wpa_supplicant\s+v?(\d+\.\d+)"),     0.85),
-    ("avahi",         re.compile(r"avahi-daemon\s+(\d+\.\d+\.\d+)"),     0.85),
-    ("pppd",          re.compile(r"pppd\s+version\s+(\d+\.\d+\.\d+)"),   0.85),
+    ("miniupnpd", re.compile(r"miniupnpd\s+v?(\d+\.\d+)"), 0.85),
+    ("hostapd", re.compile(r"hostapd\s+v?(\d+\.\d+)"), 0.85),
+    ("wpa_supplicant", re.compile(r"wpa_supplicant\s+v?(\d+\.\d+)"), 0.85),
+    ("avahi", re.compile(r"avahi-daemon\s+(\d+\.\d+\.\d+)"), 0.85),
+    ("pppd", re.compile(r"pppd\s+version\s+(\d+\.\d+\.\d+)"), 0.85),
     # Database/Scripting
-    ("sqlite3",  re.compile(r"SQLite\s+(?:version\s+)?(\d+\.\d+\.\d+)"), 0.85),
-    ("lua",      re.compile(r"Lua\s+(\d+\.\d+\.\d+)"),                   0.85),
+    ("sqlite3", re.compile(r"SQLite\s+(?:version\s+)?(\d+\.\d+\.\d+)"), 0.85),
+    ("lua", re.compile(r"Lua\s+(\d+\.\d+\.\d+)"), 0.85),
     # System
-    ("u-boot",   re.compile(r"U-Boot\s+(\d{4}\.\d{2})"),                 0.85),
-    ("zlib",     re.compile(r"zlib\s+(\d+\.\d+\.\d+)"),                  0.85),
-    ("uclibc-ng", re.compile(r"uClibc(?:-ng)?\s+(\d+\.\d+\.\d+)"),      0.85),
-    ("xz",       re.compile(r"XZ Utils\s+(\d+\.\d+\.\d+)"),             0.85),
+    ("u-boot", re.compile(r"U-Boot\s+(\d{4}\.\d{2})"), 0.85),
+    ("zlib", re.compile(r"zlib\s+(\d+\.\d+\.\d+)"), 0.85),
+    ("uclibc-ng", re.compile(r"uClibc(?:-ng)?\s+(\d+\.\d+\.\d+)"), 0.85),
+    ("xz", re.compile(r"XZ Utils\s+(\d+\.\d+\.\d+)"), 0.85),
     # Parsers
-    ("libexpat", re.compile(r"expat_(\d+\.\d+\.\d+)"),                   0.85),
-    ("libxml2",  re.compile(r"libxml2[/-](\d+\.\d+\.\d+)"),              0.85),
+    ("libexpat", re.compile(r"expat_(\d+\.\d+\.\d+)"), 0.85),
+    ("libxml2", re.compile(r"libxml2[/-](\d+\.\d+\.\d+)"), 0.85),
     # Packet capture
-    ("libpcap",  re.compile(r"libpcap\s+version\s+(\d+\.\d+\.\d+)"),    0.85),
+    ("libpcap", re.compile(r"libpcap\s+version\s+(\d+\.\d+\.\d+)"), 0.85),
 ]
 
 # SO library version patterns: filename → (canonical_name, version_regex)
 _SO_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = [
-    ("openssl",  "libssl",    re.compile(r"libssl\.so\.(\d+[\.\d]*)")),
-    ("openssl",  "libcrypto", re.compile(r"libcrypto\.so\.(\d+[\.\d]*)")),
-    ("glibc",    "libc",      re.compile(r"libc\.so\.(\d+\.\d[\.\d]*)")),
-    ("libpthread","libpthread",re.compile(r"libpthread\.so\.(\d+[\.\d]*)")),
-    ("libz",     "libz",      re.compile(r"libz\.so\.(\d+[\.\d]*)")),
+    ("openssl", "libssl", re.compile(r"libssl\.so\.(\d+[\.\d]*)")),
+    ("openssl", "libcrypto", re.compile(r"libcrypto\.so\.(\d+[\.\d]*)")),
+    ("glibc", "libc", re.compile(r"libc\.so\.(\d+\.\d[\.\d]*)")),
+    ("libpthread", "libpthread", re.compile(r"libpthread\.so\.(\d+[\.\d]*)")),
+    ("libz", "libz", re.compile(r"libz\.so\.(\d+[\.\d]*)")),
     ("uclibc-ng", "libuClibc", re.compile(r"libuClibc[.-](\d+\.\d+\.\d+)")),
-    ("wolfssl",  "libwolfssl", re.compile(r"libwolfssl\.so\.(\d+\.\d+\.\d+)")),
-    ("mbedtls",  "libmbedtls", re.compile(r"libmbedtls\.so\.(\d+)")),
-    ("mbedtls",  "libmbedcrypto", re.compile(r"libmbedcrypto\.so\.(\d+)")),
-    ("sqlite3",  "libsqlite3", re.compile(r"libsqlite3\.so\.(\d+\.\d+\.\d+)")),
-    ("lua",      "liblua",    re.compile(r"liblua\.so\.(\d+\.\d+)")),
-    ("libexpat", "libexpat",  re.compile(r"libexpat\.so\.(\d+\.\d+\.\d+)")),
-    ("libxml2",  "libxml2",   re.compile(r"libxml2\.so\.(\d+\.\d+\.\d+)")),
-    ("libpcap",  "libpcap",   re.compile(r"libpcap\.so\.(\d+\.\d+\.\d+)")),
-    ("avahi",    "libavahi",  re.compile(r"libavahi[.-](\d+\.\d+\.\d+)")),
+    ("wolfssl", "libwolfssl", re.compile(r"libwolfssl\.so\.(\d+\.\d+\.\d+)")),
+    ("mbedtls", "libmbedtls", re.compile(r"libmbedtls\.so\.(\d+)")),
+    ("mbedtls", "libmbedcrypto", re.compile(r"libmbedcrypto\.so\.(\d+)")),
+    ("sqlite3", "libsqlite3", re.compile(r"libsqlite3\.so\.(\d+\.\d+\.\d+)")),
+    ("lua", "liblua", re.compile(r"liblua\.so\.(\d+\.\d+)")),
+    ("libexpat", "libexpat", re.compile(r"libexpat\.so\.(\d+\.\d+\.\d+)")),
+    ("libxml2", "libxml2", re.compile(r"libxml2\.so\.(\d+\.\d+\.\d+)")),
+    ("libpcap", "libpcap", re.compile(r"libpcap\.so\.(\d+\.\d+\.\d+)")),
+    ("avahi", "libavahi", re.compile(r"libavahi[.-](\d+\.\d+\.\d+)")),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -169,7 +170,9 @@ def _safe_json_load(path: Path) -> dict[str, object] | None:
 def _write_json(run_dir: Path, path: Path, payload: object) -> None:
     assert_under_dir(run_dir, path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _sha256_of_json(payload: object) -> str:
@@ -198,21 +201,24 @@ def _cpe(name: str, version: str) -> str:
 # Component model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _Component:
-    comp_type: str        # "application" | "library" | "operating-system"
+    comp_type: str  # "application" | "library" | "operating-system"
     name: str
     version: str
-    detection_method: str  # "opkg" | "dpkg" | "binary_string" | "so_filename" | "kernel"
+    detection_method: (
+        str  # "opkg" | "dpkg" | "binary_string" | "so_filename" | "kernel"
+    )
     confidence: float
-    source_file: str       # run-dir-relative path or "" if unknown
-    evidence_ref: str      # sha256: of source evidence or ""
+    source_file: str  # run-dir-relative path or "" if unknown
+    evidence_ref: str  # sha256: of source evidence or ""
     patch_revision: str = ""  # distro patch revision (e.g., "1" from "1.33.2-1")
 
     def to_cyclonedx(self) -> dict[str, JsonValue]:
         ref = _bom_ref(self.name, self.version)
         props: list[dict[str, str]] = [
-            {"name": "scout:confidence",       "value": f"{self.confidence:.2f}"},
+            {"name": "scout:confidence", "value": f"{self.confidence:.2f}"},
             {"name": "scout:detection_method", "value": self.detection_method},
         ]
         if self.patch_revision:
@@ -221,7 +227,7 @@ class _Component:
             "bom-ref": ref,
             "cpe": _cpe(self.name, self.version),
             "name": self.name,
-            "properties": props,
+            "properties": cast(list[JsonValue], cast(list[object], props)),
             "type": self.comp_type,
             "version": self.version,
         }
@@ -246,6 +252,7 @@ class _Component:
 # Deduplication
 # ---------------------------------------------------------------------------
 
+
 class _ComponentRegistry:
     """Tracks unique (name, version) pairs; first detection wins."""
 
@@ -267,6 +274,7 @@ class _ComponentRegistry:
 # ---------------------------------------------------------------------------
 # Source parsers
 # ---------------------------------------------------------------------------
+
 
 def _is_pkg_installed(status_line: str) -> bool:
     """Return True only when the dpkg/opkg status field indicates installed state.
@@ -464,7 +472,9 @@ def _detect_kernel(
     for hint in cast(list[object], hints_any):
         if not isinstance(hint, str):
             continue
-        m = re.search(r"Linux\s+(?:kernel\s+)?v?(\d+\.\d+[\.\d\-\w]*)", hint, re.IGNORECASE)
+        m = re.search(
+            r"Linux\s+(?:kernel\s+)?v?(\d+\.\d+[\.\d\-\w]*)", hint, re.IGNORECASE
+        )
         if m:
             version = m.group(1).strip()
             comp = _Component(
@@ -543,9 +553,9 @@ def _collect_so_files_from_inventory(inventory: dict[str, object]) -> list[str]:
 
 # Maps reachability classification → (vex_state, justification_or_None)
 _REACHABILITY_TO_VEX: dict[str, tuple[str, str | None]] = {
-    "directly_reachable":   ("exploitable",          None),
-    "potentially_reachable": ("affected",             None),
-    "unreachable":           ("not_affected",         "code_not_reachable"),
+    "directly_reachable": ("exploitable", None),
+    "potentially_reachable": ("affected", None),
+    "unreachable": ("not_affected", "code_not_reachable"),
 }
 # Default when reachability data is absent or classification is unknown
 _VEX_DEFAULT_STATE = "under_investigation"
@@ -644,8 +654,12 @@ def _build_vex_vulnerabilities(
 
         if cve_id not in cve_agg:
             cve_agg[cve_id] = {
-                "cvss_score": float(score_any) if isinstance(score_any, (int, float)) else 0.0,
-                "cvss_severity": str(sev_any).lower() if isinstance(sev_any, str) else "unknown",
+                "cvss_score": (
+                    float(score_any) if isinstance(score_any, (int, float)) else 0.0
+                ),
+                "cvss_severity": (
+                    str(sev_any).lower() if isinstance(sev_any, str) else "unknown"
+                ),
                 "description": str(desc_any)[:300] if isinstance(desc_any, str) else "",
                 "affected_components": [],  # list of (comp_name, comp_ver)
             }
@@ -688,7 +702,9 @@ def _build_vex_vulnerabilities(
             )
 
             # Replace best if this is the first entry with data, or if more alarming
-            if best_state is None or _state_priority.get(state, 99) < _state_priority.get(best_state, 99):
+            if best_state is None or _state_priority.get(
+                state, 99
+            ) < _state_priority.get(best_state, 99):
                 best_state = state
                 best_justification = justification
                 if reach_class == "directly_reachable":
@@ -760,6 +776,7 @@ def _build_vex_vulnerabilities(
 # Stage
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SbomStage:
     run_dir: Path
@@ -803,9 +820,13 @@ class SbomStage:
             if fp is not None:
                 firmware_profile = fp
             else:
-                limitations.append("firmware_profile.json unreadable; kernel detection skipped")
+                limitations.append(
+                    "firmware_profile.json unreadable; kernel detection skipped"
+                )
         else:
-            limitations.append("firmware_profile.json missing; kernel detection skipped")
+            limitations.append(
+                "firmware_profile.json missing; kernel detection skipped"
+            )
 
         # binary_analysis is optional
         ba_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
@@ -819,7 +840,9 @@ class SbomStage:
             # Also accept a plain top-level list wrapped in {"items": [...]}
             # Fallback: try reading raw list via a different key or direct list
         elif not ba_path.is_file():
-            limitations.append("binary_analysis.json missing; binary version detection skipped")
+            limitations.append(
+                "binary_analysis.json missing; binary version detection skipped"
+            )
 
         max_components = _env_max_components()
         registry = _ComponentRegistry()
@@ -867,28 +890,35 @@ class SbomStage:
             or inventory.get("firmware_name")
             or inventory.get("label")
         )
-        firmware_name = str(firmware_name_any).strip() if firmware_name_any else "unknown"
+        firmware_name = (
+            str(firmware_name_any).strip() if firmware_name_any else "unknown"
+        )
 
         # ------------------------------------------------------------------ #
         # Emit CycloneDX 1.6 BOM
         # ------------------------------------------------------------------ #
         timestamp = _iso_utc_now()
         cyclonedx_components = [c.to_cyclonedx() for c in all_components]
-        bom: dict[str, JsonValue] = {
-            "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
-            "bomFormat": "CycloneDX",
-            "components": cyclonedx_components,
-            "metadata": {
-                "component": {
+        bom_metadata: dict[str, JsonValue] = {
+            "component": cast(
+                dict[str, JsonValue],
+                {
                     "bom-ref": "firmware-root",
                     "name": firmware_name,
                     "type": "firmware",
                 },
-                "timestamp": timestamp,
-                "tools": [
-                    {"name": "aiedge-sbom", "vendor": "SCOUT", "version": "1.0"}
-                ],
-            },
+            ),
+            "timestamp": timestamp,
+            "tools": cast(
+                list[JsonValue],
+                [{"name": "aiedge-sbom", "vendor": "SCOUT", "version": "1.0"}],
+            ),
+        }
+        bom: dict[str, JsonValue] = {
+            "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+            "bomFormat": "CycloneDX",
+            "components": cast(list[JsonValue], cyclonedx_components),
+            "metadata": bom_metadata,
             "specVersion": "1.6",
             "version": 1,
         }
@@ -983,9 +1013,7 @@ class SbomStage:
             limitations.append(f"stage.json write failed: {exc}")
 
         return StageOutcome(
-            status=cast(  # type: ignore[arg-type]
-                "StageStatus", status  # noqa: F821
-            ),
+            status=cast("StageStatus", status),  # type: ignore[arg-type]  # noqa: F821
             details=details,
             limitations=limitations,
         )
@@ -994,6 +1022,7 @@ class SbomStage:
 # ---------------------------------------------------------------------------
 # Factory (matches StageFactory signature in stage_registry.py)
 # ---------------------------------------------------------------------------
+
 
 def make_sbom_stage(
     info: object,
@@ -1004,9 +1033,7 @@ def make_sbom_stage(
     """Factory function for registration in _STAGE_FACTORIES."""
     firmware_dest_any = getattr(info, "firmware_dest", None)
     run_dir = (
-        firmware_dest_any.parent
-        if isinstance(firmware_dest_any, Path)
-        else Path(".")
+        firmware_dest_any.parent if isinstance(firmware_dest_any, Path) else Path(".")
     )
     return SbomStage(
         run_dir=run_dir,

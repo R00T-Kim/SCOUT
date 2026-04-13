@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_float, safe_int
 from .confidence_caps import (
     PCODE_VERIFIED_CAP,
     STATIC_CODE_VERIFIED_CAP,
@@ -494,9 +495,7 @@ class TaintPropagationStage:
                 src_addr = str(pt_d.get("source_address", "0x0"))
                 sink_addr = str(pt_d.get("sink_address", "0x0"))
                 sanitized = bool(pt_d.get("sanitized", False))
-                depth = (
-                    int(pt_d.get("depth", 0)) if pt_d.get("depth") is not None else 0
-                )
+                depth = safe_int(pt_d.get("depth"), default=0)
 
                 # Resolve binary from parent dir name (hash-keyed cache)
                 pcode_binary = pcode_file.parent.name
@@ -599,7 +598,7 @@ class TaintPropagationStage:
             source_list,
             key=lambda s: (
                 not bool(s.get("web_server")),
-                -float(s.get("confidence", 0)),
+                -safe_float(s.get("confidence"), default=0.0),
             ),
         )
         seen_static: set[tuple[str, str, str]] = set()
@@ -1009,7 +1008,10 @@ class TaintPropagationStage:
                                         "source_address": src_addr,
                                         "sink_symbol": sink_sym,
                                         "confidence": _clamp01(
-                                            float(cached.get("confidence", 0.5))
+                                            safe_float(
+                                                cached.get("confidence"),
+                                                default=0.5,
+                                            )
                                         ),
                                         "path_description": str(
                                             cached.get("path_description", "")

@@ -211,7 +211,7 @@ class SemanticClassifierStage:
                 "falling back to binary_analysis.json symbol-profile classification"
             )
             ba_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
-            classifications: list[dict[str, object]] = []
+            fallback_classifications: list[dict[str, object]] = []
             ba_data = _load_json_file(ba_path)
             if isinstance(ba_data, dict):
                 ba_hits_any = cast(dict[str, object], ba_data).get("hits")
@@ -283,7 +283,7 @@ class SemanticClassifierStage:
                         )
                         arch = str(hit.get("arch", "unknown"))
 
-                        classifications.append(
+                        fallback_classifications.append(
                             {
                                 "function_name": bin_path,
                                 "category": category,
@@ -299,7 +299,7 @@ class SemanticClassifierStage:
                             }
                         )
 
-            if not classifications:
+            if not fallback_classifications:
                 payload_empty: dict[str, JsonValue] = {
                     "schema_version": _SCHEMA_VERSION,
                     "status": "partial",
@@ -328,10 +328,10 @@ class SemanticClassifierStage:
                 "schema_version": _SCHEMA_VERSION,
                 "status": status_bp,
                 "total_functions_scanned": 0,
-                "total_binaries_profiled": len(classifications),
-                "dangerous_api_matches": len(classifications),
+                "total_binaries_profiled": len(fallback_classifications),
+                "dangerous_api_matches": len(fallback_classifications),
                 "classifications": cast(
-                    list[JsonValue], cast(list[object], classifications)
+                    list[JsonValue], cast(list[object], fallback_classifications)
                 ),
                 "deep_analyses": [],
                 "limitations": cast(
@@ -344,9 +344,9 @@ class SemanticClassifierStage:
                 encoding="utf-8",
             )
             details_bp: dict[str, JsonValue] = {
-                "classified": len(classifications),
+                "classified": len(fallback_classifications),
                 "deep_analyses": 0,
-                "dangerous_api_matches": len(classifications),
+                "dangerous_api_matches": len(fallback_classifications),
                 "method": "binary_profile_fallback",
             }
             return StageOutcome(
@@ -367,11 +367,17 @@ class SemanticClassifierStage:
             if driver.available():
                 # Prepare function summaries for LLM
                 func_summaries: list[dict[str, str]] = []
-                # Sort by matched API count (most dangerous first)
-                filtered.sort(
-                    key=lambda f: len(f.get("matched_dangerous_apis", [])),
-                    reverse=True,
-                )
+
+                # Sort by matched API count (most dangerous first). The raw
+                # value may be list/dict/None -- narrow with isinstance so
+                # ``len`` receives a Sized argument.
+                def _matched_api_count(f: dict[str, object]) -> int:
+                    value = f.get("matched_dangerous_apis", [])
+                    if isinstance(value, (list, tuple, set, dict, str)):
+                        return len(value)
+                    return 0
+
+                filtered.sort(key=_matched_api_count, reverse=True)
                 for func in filtered[:15]:  # Cap at 15 for reliable JSON parsing
                     fname = str(func.get("name", "unknown"))
                     body = str(func.get("body", ""))

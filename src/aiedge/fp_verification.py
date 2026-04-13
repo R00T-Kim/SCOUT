@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_float
 from .llm_driver import (
     LLMDriver,
     ModelTier,
@@ -172,10 +173,7 @@ def _build_fp_prompt(
 
     chain_section = ""
     if call_chain:
-        chain_section = (
-            "\n## Call Chain Evidence\n"
-            f"`{'  ->  '.join(call_chain)}`\n"
-        )
+        chain_section = "\n## Call Chain Evidence\n" f"`{'  ->  '.join(call_chain)}`\n"
 
     return (
         "You are a firmware vulnerability false-positive analyst.\n"
@@ -222,6 +220,7 @@ def _build_fp_prompt(
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
+
     return parse_json_from_llm_output(stdout)
 
 
@@ -356,9 +355,7 @@ class FPVerificationStage:
         alerts: list[dict[str, object]] = []
 
         # Try taint_propagation alerts first
-        taint_alerts_path = (
-            run_dir / "stages" / "taint_propagation" / "alerts.json"
-        )
+        taint_alerts_path = run_dir / "stages" / "taint_propagation" / "alerts.json"
         taint_data = _load_json_file(taint_alerts_path)
         if isinstance(taint_data, dict):
             alerts_any = cast(dict[str, object], taint_data).get("alerts")
@@ -369,9 +366,7 @@ class FPVerificationStage:
 
         # Fallback 1: try findings
         if not alerts:
-            findings_path = (
-                run_dir / "stages" / "findings" / "findings.json"
-            )
+            findings_path = run_dir / "stages" / "findings" / "findings.json"
             findings_data = _load_json_file(findings_path)
             if isinstance(findings_data, dict):
                 f_any = cast(dict[str, object], findings_data).get("findings")
@@ -382,9 +377,7 @@ class FPVerificationStage:
 
         # Fallback 2: attack_surface entries with confidence > 0.3
         if not alerts:
-            as_path = (
-                run_dir / "stages" / "attack_surface" / "attack_surface.json"
-            )
+            as_path = run_dir / "stages" / "attack_surface" / "attack_surface.json"
             as_data = _load_json_file(as_path)
             if isinstance(as_data, dict):
                 as_entries = cast(dict[str, object], as_data).get("attack_surface")
@@ -393,16 +386,13 @@ class FPVerificationStage:
                         if not isinstance(entry_any, dict):
                             continue
                         entry = cast(dict[str, object], entry_any)
-                        conf_any = (
-                            entry.get("confidence")
-                            or entry.get("confidence_calibrated")
+                        conf_any = entry.get("confidence") or entry.get(
+                            "confidence_calibrated"
                         )
                         if isinstance(conf_any, (int, float)) and float(conf_any) > 0.3:
                             alert_entry: dict[str, object] = {
                                 "source_api": str(entry.get("surface", "")),
-                                "source_binary": str(
-                                    entry.get("observation", "")
-                                ),
+                                "source_binary": str(entry.get("observation", "")),
                                 "sink_symbol": str(
                                     entry.get("classification", "candidate")
                                 ),
@@ -433,13 +423,10 @@ class FPVerificationStage:
                     "false_positives": 0,
                     "true_positives": 0,
                 },
-                "limitations": cast(
-                    list[JsonValue], cast(list[object], limitations)
-                ),
+                "limitations": cast(list[JsonValue], cast(list[object], limitations)),
             }
             out_json.write_text(
-                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-                + "\n",
+                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             return StageOutcome(
@@ -450,15 +437,17 @@ class FPVerificationStage:
 
         # --- Filter alerts with confidence >= 0.3 ---
         eligible = [
-            a for a in alerts
+            a
+            for a in alerts
             if isinstance(a.get("confidence"), (int, float))
-            and float(a["confidence"]) >= 0.3
+            and safe_float(a.get("confidence"), default=0.0) >= 0.3
         ]
         # Pass-through alerts below threshold unchanged
         below_threshold = [
-            a for a in alerts
+            a
+            for a in alerts
             if not isinstance(a.get("confidence"), (int, float))
-            or float(a["confidence"]) < 0.3
+            or safe_float(a.get("confidence"), default=0.0) < 0.3
         ]
 
         # --- LLM FP verification ---
@@ -522,7 +511,8 @@ class FPVerificationStage:
                                 if (
                                     sink_sym
                                     and sink_sym in finfo.get("body", "")
-                                    and finfo.get("name", "") != sink_sym  # skip PLT stub
+                                    and finfo.get("name", "")
+                                    != sink_sym  # skip PLT stub
                                     and peer_basename in finfo.get("binary", "")
                                     and finfo not in decompiled_context
                                 ):
@@ -552,7 +542,7 @@ class FPVerificationStage:
                             "Ghidra code confirms constant-sink pattern "
                             "(all sink arguments are literals)"
                         )
-                        orig_conf = float(alert.get("confidence", 0.5))
+                        orig_conf = safe_float(alert.get("confidence"), default=0.5)
                         alert_copy["original_confidence"] = orig_conf
                         alert_copy["confidence"] = _clamp01(
                             orig_conf - _CONFIDENCE_REDUCTION
@@ -564,8 +554,10 @@ class FPVerificationStage:
                         continue  # skip LLM
 
                     # Pre-filter 2: adjust confidence when sanitizer present
-                    if _check_sanitizer_in_context(decompiled_context, src_api, sink_sym):
-                        orig_conf = float(alert.get("confidence", 0.5))
+                    if _check_sanitizer_in_context(
+                        decompiled_context, src_api, sink_sym
+                    ):
+                        orig_conf = safe_float(alert.get("confidence"), default=0.5)
                         alert_copy["confidence"] = _clamp01(orig_conf - 0.15)
                         alert_copy["original_confidence"] = orig_conf
                         alert_copy["sanitizer_detected"] = True
@@ -574,7 +566,7 @@ class FPVerificationStage:
                 # libc API calls (gets, system, etc.), so absence of a path
                 # does NOT confirm FP. Only reduce confidence slightly.
                 if xref_map and src_api and sink_sym and call_chain is None:
-                    orig_conf = float(alert.get("confidence", 0.5))
+                    orig_conf = safe_float(alert.get("confidence"), default=0.5)
                     alert_copy["confidence"] = _clamp01(orig_conf - 0.05)
                     alert_copy["original_confidence"] = orig_conf
                     alert_copy["no_xref_path"] = True
@@ -584,7 +576,9 @@ class FPVerificationStage:
                 # -------------------------------------------------------
                 if self.no_llm:
                     alert_copy["fp_verdict"] = "static_only"
-                    alert_copy["fp_rationale"] = "no_llm_mode; static pre-filters applied"
+                    alert_copy["fp_rationale"] = (
+                        "no_llm_mode; static pre-filters applied"
+                    )
                 else:
                     prompt = _build_fp_prompt(
                         alert_copy,
@@ -627,10 +621,10 @@ class FPVerificationStage:
                             rationale = str(parsed.get("rationale", ""))
 
                             if verdict == "FP":
-                                orig_conf = float(alert.get("confidence", 0.5))
-                                new_conf = _clamp01(
-                                    orig_conf - _CONFIDENCE_REDUCTION
+                                orig_conf = safe_float(
+                                    alert.get("confidence"), default=0.5
                                 )
+                                new_conf = _clamp01(orig_conf - _CONFIDENCE_REDUCTION)
                                 alert_copy["confidence"] = new_conf
                                 alert_copy["original_confidence"] = orig_conf
                                 alert_copy["fp_verdict"] = "FP"
@@ -684,7 +678,9 @@ class FPVerificationStage:
         ):
             status = "partial"
         if parse_failure_count > 0:
-            limitations.append("One or more FP verification responses could not be parsed")
+            limitations.append(
+                "One or more FP verification responses could not be parsed"
+            )
         if llm_call_failure_count > 0:
             limitations.append("One or more FP verification LLM calls failed")
         if unverified_count > 0:
@@ -693,9 +689,7 @@ class FPVerificationStage:
         payload = {
             "schema_version": _SCHEMA_VERSION,
             "status": status,
-            "verified_alerts": cast(
-                list[JsonValue], cast(list[object], verified)
-            ),
+            "verified_alerts": cast(list[JsonValue], cast(list[object], verified)),
             "summary": {
                 "total_input": len(alerts),
                 "eligible_checked": len(eligible),
@@ -715,8 +709,7 @@ class FPVerificationStage:
             ),
         }
         out_json.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             encoding="utf-8",
         )
 

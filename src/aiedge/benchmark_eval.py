@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_int
 from .schema import JsonValue
 
 
@@ -138,13 +139,15 @@ def collect_run_metrics(run_dir: Path) -> dict[str, JsonValue]:
         if isinstance(quality_any, dict):
             quality = cast(dict[str, object], quality_any)
             inventory_quality_status = str(quality.get("status", "") or "")
-            files_seen = int(quality.get("files_seen", 0) or 0)
-            binaries_seen = int(quality.get("binaries_seen", 0) or 0)
+            files_seen = safe_int(quality.get("files_seen"), default=0)
+            binaries_seen = safe_int(quality.get("binaries_seen"), default=0)
 
     exploit_candidates_count = _count_listish(
         _load_json(run_dir / "stages" / "findings" / "exploit_candidates.json")
     )
-    actionable_candidate_count = max(exploit_candidates_count, high_or_critical_findings)
+    actionable_candidate_count = max(
+        exploit_candidates_count, high_or_critical_findings
+    )
 
     llm_triage_status = ""
     llm_triage_reason = ""
@@ -236,7 +239,9 @@ def collect_run_metrics(run_dir: Path) -> dict[str, JsonValue]:
     )
     if isinstance(attack_surface_obj, dict):
         attack_surface = cast(dict[str, object], attack_surface_obj)
-        items_any = attack_surface.get("attack_surface", attack_surface.get("endpoints", []))
+        items_any = attack_surface.get(
+            "attack_surface", attack_surface.get("endpoints", [])
+        )
         if isinstance(items_any, list):
             items = cast(list[object], items_any)
             attack_surface_count = len(items)
@@ -294,7 +299,9 @@ def collect_run_metrics(run_dir: Path) -> dict[str, JsonValue]:
     }
 
 
-def run_bundle_verifier(repo_root: Path, script_rel: str, bundle_dir: Path) -> dict[str, JsonValue]:
+def run_bundle_verifier(
+    repo_root: Path, script_rel: str, bundle_dir: Path
+) -> dict[str, JsonValue]:
     script_path = repo_root / script_rel
     if not script_path.is_file():
         return {
@@ -312,7 +319,9 @@ def run_bundle_verifier(repo_root: Path, script_rel: str, bundle_dir: Path) -> d
     )
     stdout = cp.stdout.strip()
     stderr = cp.stderr.strip()
-    reason = "ok" if cp.returncode == 0 else (stdout or stderr or f"exit_{cp.returncode}")
+    reason = (
+        "ok" if cp.returncode == 0 else (stdout or stderr or f"exit_{cp.returncode}")
+    )
     return {
         "ok": cp.returncode == 0,
         "reason": reason,
@@ -346,21 +355,21 @@ def evaluate_analyst_readiness(
     if llm_triage_status and llm_triage_status != "ok":
         degraded_reasons.append(f"llm_triage_{llm_triage_status}")
 
-    adv_total = int(metrics.get("adversarial_total", 0) or 0)
-    adv_ok = int(metrics.get("adversarial_parsed_ok", 0) or 0)
+    adv_total = safe_int(metrics.get("adversarial_total"), default=0)
+    adv_ok = safe_int(metrics.get("adversarial_parsed_ok"), default=0)
     if adv_total > 0 and adv_ok < adv_total:
         degraded_reasons.append("adversarial_parse_incomplete")
 
-    fp_total = int(metrics.get("fp_verified_total", 0) or 0)
-    fp_unverified = int(metrics.get("fp_unverified", 0) or 0)
+    fp_total = safe_int(metrics.get("fp_verified_total"), default=0)
+    fp_unverified = safe_int(metrics.get("fp_unverified"), default=0)
     if fp_total > 0 and fp_unverified > max(1, int(fp_total * 0.10)):
         degraded_reasons.append("fp_unverified_high")
 
     if bool(metrics.get("graph_empty")):
         degraded_reasons.append("graph_empty")
-    if int(metrics.get("attack_surface_reference_only_count", 0) or 0) > 0:
+    if safe_int(metrics.get("attack_surface_reference_only_count"), default=0) > 0:
         degraded_reasons.append("attack_surface_reference_only")
-    if int(metrics.get("actionable_candidate_count", 0) or 0) == 0:
+    if safe_int(metrics.get("actionable_candidate_count"), default=0) == 0:
         degraded_reasons.append("no_actionable_candidates")
 
     readiness = "ready"
@@ -372,10 +381,11 @@ def evaluate_analyst_readiness(
         readiness = "degraded"
         reasons = degraded_reasons
 
-    return {
+    result: dict[str, JsonValue] = {
         "analyst_readiness": readiness,
         "analyst_ready": readiness == "ready",
         "analyst_degraded": readiness == "degraded",
         "analyst_blocked": readiness == "blocked",
-        "analyst_reason_codes": reasons,
+        "analyst_reason_codes": cast(list[JsonValue], list(reasons)),
     }
+    return result

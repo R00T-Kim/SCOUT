@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_float
 from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_text
 from .stage import StageContext, StageOutcome
 
@@ -327,7 +328,12 @@ def _normalize_component_metadata(
     if not isinstance(component, dict):
         return None
     return {
-        "name": str(component.get("name") or component.get("component") or component.get("product") or ""),
+        "name": str(
+            component.get("name")
+            or component.get("component")
+            or component.get("product")
+            or ""
+        ),
         "version": str(component.get("version") or ""),
         "patch_revision": (
             str(component.get("patch_revision"))
@@ -585,7 +591,12 @@ def _query_epss_with_cache(
                     stats["epss_api_errors"] += 1
                     api_failed = True
                 continue
-            except (urllib.error.HTTPError, urllib.error.URLError, OSError, TimeoutError):
+            except (
+                urllib.error.HTTPError,
+                urllib.error.URLError,
+                OSError,
+                TimeoutError,
+            ):
                 stats["epss_api_errors"] += 1
                 api_failed = True
                 batch_data = None
@@ -1051,9 +1062,9 @@ class CveScanStage:
                     "component": str(sm.get("entry_point", "")),
                     "version": "",
                     "cve_id": str(sm["cve_id"]),
-                    "cvss_v3_score": float(sm.get("cvss_v3_score", 0)),
+                    "cvss_v3_score": safe_float(sm.get("cvss_v3_score"), default=0.0),
                     "match_type": "known_signature",
-                    "match_confidence": float(sm.get("confidence", 0)),
+                    "match_confidence": safe_float(sm.get("confidence"), default=0.0),
                     "description": str(sm.get("description", "")),
                     "evidence_ref": f"known_signature:{sm['cve_id']}",
                     "component_metadata": {
@@ -1084,7 +1095,9 @@ class CveScanStage:
                     artifacts=[],
                 )
                 return outcome
-            limitations.append("No SBOM; results from known CVE signature matching only")
+            limitations.append(
+                "No SBOM; results from known CVE signature matching only"
+            )
 
         epss_unavailable = False
         if matches:
@@ -1092,7 +1105,8 @@ class CveScanStage:
                 {
                     str(m.get("cve_id", "")).upper()
                     for m in matches
-                    if isinstance(m.get("cve_id"), str) and str(m.get("cve_id", "")).strip()
+                    if isinstance(m.get("cve_id"), str)
+                    and str(m.get("cve_id", "")).strip()
                 }
             )
             epss_map, epss_unavailable = _query_epss_with_cache(
@@ -1109,7 +1123,10 @@ class CveScanStage:
                     continue
                 match["epss"] = epss_entry.get("epss")
                 match["epss_percentile"] = epss_entry.get("percentile")
-                if match.get("epss") is not None or match.get("epss_percentile") is not None:
+                if (
+                    match.get("epss") is not None
+                    or match.get("epss_percentile") is not None
+                ):
                     stats["epss_enriched"] += 1
         if epss_unavailable:
             limitations.append("epss_unavailable")
@@ -1284,7 +1301,7 @@ class CveScanStage:
                 "components_with_cves": len(components_with_cves),
                 "total_cve_matches": len(matches),
                 "finding_candidates_count": len(finding_candidates),
-                "source": output_data["source"],
+                "source": str(output_data["source"]),
                 "api_key_used": api_key is not None,
                 "cache_hits": stats["cache_hits"],
                 "api_calls": stats["api_calls"],

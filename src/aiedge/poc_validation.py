@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_int
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
 
@@ -126,22 +127,26 @@ def _validate_poc_reproducibility(
         chain_id = str(bundle.get("chain_id", chain_dir.name))
         attempts_any = bundle.get("attempts")
         if not isinstance(attempts_any, list):
-            results.append({
-                "chain_id": chain_id,
-                "status": "no_data",
-                "result_code": _REASON_REPRODUCIBILITY_NO_DATA,
-                "note": "No attempts array in evidence bundle.",
-            })
+            results.append(
+                {
+                    "chain_id": chain_id,
+                    "status": "no_data",
+                    "result_code": _REASON_REPRODUCIBILITY_NO_DATA,
+                    "note": "No attempts array in evidence bundle.",
+                }
+            )
             continue
 
         attempts = cast(list[object], attempts_any)
         if not attempts:
-            results.append({
-                "chain_id": chain_id,
-                "status": "no_data",
-                "result_code": _REASON_REPRODUCIBILITY_NO_DATA,
-                "note": "Empty attempts array in evidence bundle.",
-            })
+            results.append(
+                {
+                    "chain_id": chain_id,
+                    "status": "no_data",
+                    "result_code": _REASON_REPRODUCIBILITY_NO_DATA,
+                    "note": "Empty attempts array in evidence bundle.",
+                }
+            )
             continue
 
         # Extract readback_hash values from proof_evidence strings
@@ -154,39 +159,45 @@ def _validate_poc_reproducibility(
             # Parse readback_hash=<value> from evidence string
             for token in evidence_str.split():
                 if token.startswith("readback_hash="):
-                    hash_val = token[len("readback_hash="):]
+                    hash_val = token[len("readback_hash=") :]
                     if hash_val and hash_val != "none":
                         hashes.append(hash_val)
                     break
 
         if not hashes:
-            results.append({
-                "chain_id": chain_id,
-                "status": "no_data",
-                "result_code": _REASON_REPRODUCIBILITY_NO_DATA,
-                "note": "No readback_hash values found in attempt evidence.",
-            })
+            results.append(
+                {
+                    "chain_id": chain_id,
+                    "status": "no_data",
+                    "result_code": _REASON_REPRODUCIBILITY_NO_DATA,
+                    "note": "No readback_hash values found in attempt evidence.",
+                }
+            )
             continue
 
         unique_hashes = set(hashes)
         if len(unique_hashes) == 1:
-            results.append({
-                "chain_id": chain_id,
-                "status": "consistent",
-                "result_code": _REASON_REPRODUCIBILITY_CONSISTENT,
-                "attempts_checked": len(hashes),
-                "readback_hash": hashes[0],
-                "note": "All attempts produced the same readback_hash.",
-            })
+            results.append(
+                {
+                    "chain_id": chain_id,
+                    "status": "consistent",
+                    "result_code": _REASON_REPRODUCIBILITY_CONSISTENT,
+                    "attempts_checked": len(hashes),
+                    "readback_hash": hashes[0],
+                    "note": "All attempts produced the same readback_hash.",
+                }
+            )
         else:
-            results.append({
-                "chain_id": chain_id,
-                "status": "inconsistent",
-                "result_code": _REASON_REPRODUCIBILITY_INCONSISTENT,
-                "attempts_checked": len(hashes),
-                "unique_hashes": len(unique_hashes),
-                "note": "Attempts produced different readback_hash values.",
-            })
+            results.append(
+                {
+                    "chain_id": chain_id,
+                    "status": "inconsistent",
+                    "result_code": _REASON_REPRODUCIBILITY_INCONSISTENT,
+                    "attempts_checked": len(hashes),
+                    "unique_hashes": len(unique_hashes),
+                    "note": "Attempts produced different readback_hash values.",
+                }
+            )
 
     return results
 
@@ -428,12 +439,16 @@ class PocValidationStage:
                 repro_code = str(
                     repro_item.get("result_code", _REASON_REPRODUCIBILITY_NO_DATA)
                 )
-                checks.append({
-                    "id": f"reproducibility:{repro_item.get('chain_id', 'unknown')}",
-                    "status": "ok" if repro_status == "consistent" else repro_status,
-                    "result_code": repro_code,
-                    "note": str(repro_item.get("note", "")),
-                })
+                checks.append(
+                    {
+                        "id": f"reproducibility:{repro_item.get('chain_id', 'unknown')}",
+                        "status": (
+                            "ok" if repro_status == "consistent" else repro_status
+                        ),
+                        "result_code": repro_code,
+                        "note": str(repro_item.get("note", "")),
+                    }
+                )
 
         all_chains_consistent = bool(reproducibility_results) and all(
             str(cast(dict[str, object], r).get("status", "")) == "consistent"
@@ -444,7 +459,7 @@ class PocValidationStage:
             for r in reproducibility_results
         )
         total_checked = sum(
-            int(cast(dict[str, object], r).get("attempts_checked", 0))
+            safe_int(cast(dict[str, object], r).get("attempts_checked"), default=0)
             for r in reproducibility_results
             if isinstance(cast(dict[str, object], r).get("attempts_checked"), int)
         )

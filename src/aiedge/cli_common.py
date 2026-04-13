@@ -16,6 +16,7 @@ from typing import Protocol, cast
 
 class _RunInfo(Protocol):
     run_dir: Path
+    manifest_path: Path | None
 
 
 class _RunReport(Protocol):
@@ -61,9 +62,9 @@ _ANSI_MAGENTA = "\x1b[35m"
 _ANSI_BLUE = "\x1b[34m"
 
 # Extended colors (256-color mode) for richer branding
-_ANSI_PURPLE_256 = "\x1b[38;5;141m"       # Soft violet (#af87ff) - brand accent
-_ANSI_DEEP_PURPLE_256 = "\x1b[38;5;98m"   # Deep purple (#875fd7) - secondary
-_ANSI_LIME_256 = "\x1b[38;5;149m"         # Lime green (#afd75f) - highlight
+_ANSI_PURPLE_256 = "\x1b[38;5;141m"  # Soft violet (#af87ff) - brand accent
+_ANSI_DEEP_PURPLE_256 = "\x1b[38;5;98m"  # Deep purple (#875fd7) - secondary
+_ANSI_LIME_256 = "\x1b[38;5;149m"  # Lime green (#afd75f) - highlight
 
 
 def _tui_ansi_supported() -> bool:
@@ -168,7 +169,9 @@ def _path_tail(value: object, *, max_segments: int = 4, max_len: int = 84) -> st
     return _short_path(tail, max_len=max_len)
 
 
-def _safe_node_text(value: object, *, fallback: str = "unknown", max_len: int = 160) -> str:
+def _safe_node_text(
+    value: object, *, fallback: str = "unknown", max_len: int = 160
+) -> str:
     if not isinstance(value, str):
         return fallback
     text = " ".join(value.replace("\n", " ").replace("\r", " ").split())
@@ -222,7 +225,9 @@ def _looks_like_run_dir(path: Path) -> bool:
     if not path.is_dir():
         return False
     manifest_ok = (path / "manifest.json").is_file()
-    report_ok = (path / "report" / "report.json").is_file() or (path / "report" / "viewer.html").is_file()
+    report_ok = (path / "report" / "report.json").is_file() or (
+        path / "report" / "viewer.html"
+    ).is_file()
     return bool(manifest_ok and report_ok)
 
 
@@ -244,7 +249,9 @@ def _run_dir_mtime(path: Path) -> float:
 
 def _discover_latest_run_dir(*, cwd: Path) -> Path | None:
     env_roots_raw = os.environ.get("AIEDGE_RUNS_DIRS", "").strip()
-    env_roots = [x for x in env_roots_raw.split(os.pathsep) if x] if env_roots_raw else []
+    env_roots = (
+        [x for x in env_roots_raw.split(os.pathsep) if x] if env_roots_raw else []
+    )
     roots: list[Path] = [Path(x).expanduser() for x in env_roots]
     roots.extend(
         [

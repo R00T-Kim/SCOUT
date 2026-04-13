@@ -3,11 +3,12 @@
 Renders stage-by-stage progress to stderr during pipeline execution.
 Supports TTY (colorized, overwriting) and pipe (plain text) modes.
 """
+
 from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .stage import StageResult
@@ -66,8 +67,11 @@ class ProgressTracker:
     """Tracks and renders pipeline stage progress to stderr."""
 
     def __init__(self, *, file: object = None) -> None:
-        self._file = file or sys.stderr
-        self._is_tty = hasattr(self._file, "isatty") and self._file.isatty()
+        # ``_file`` is a duck-typed text-stream (must support ``write`` /
+        # ``flush`` / ``isatty``). Typing as ``Any`` avoids requiring a
+        # specific ``IO[str]`` instance while preserving runtime behaviour.
+        self._file: Any = file or sys.stderr
+        self._is_tty = hasattr(self._file, "isatty") and bool(self._file.isatty())
         self._color = _stderr_color_supported()
         self._batch_label = ""
         self._running = False
@@ -76,7 +80,9 @@ class ProgressTracker:
         self._batch_label = label
         header = f"[SCOUT] {label}: {size} stages"
         if self._color:
-            header = f"{_BOLD}{_CYAN}[SCOUT]{_RESET} {label}: {_BOLD}{size}{_RESET} stages"
+            header = (
+                f"{_BOLD}{_CYAN}[SCOUT]{_RESET} {label}: {_BOLD}{size}{_RESET} stages"
+            )
         self._write(header + "\n")
 
     def on_start(self, index: int, total: int, name: str) -> None:
@@ -113,7 +119,9 @@ class ProgressTracker:
             reason = _color(f"         -> {result.error}", _RED, enabled=self._color)
             self._write(reason + "\n")
         elif status == "failed" and result.limitations:
-            reason = _color(f"         -> {result.limitations[0]}", _RED, enabled=self._color)
+            reason = _color(
+                f"         -> {result.limitations[0]}", _RED, enabled=self._color
+            )
             self._write(reason + "\n")
 
     def _format_status(self, status: str) -> str:

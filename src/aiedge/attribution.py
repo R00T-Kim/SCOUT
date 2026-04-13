@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_float
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -379,9 +380,11 @@ class AttributionStage:
 
             platform_val = "linux"
             platform_ev = [
-                id_pair[1]
-                if id_pair is not None
-                else next(iter(os_release_values.values()))[1]
+                (
+                    id_pair[1]
+                    if id_pair is not None
+                    else next(iter(os_release_values.values()))[1]
+                )
             ]
             c_platform = _claim(
                 claim_type="platform",
@@ -398,9 +401,9 @@ class AttributionStage:
                     value=id_pair[0],
                     confidence=0.72,
                     evidence_refs=[id_pair[1]],
-                    alternatives_considered=[name_pair[0]]
-                    if name_pair is not None
-                    else None,
+                    alternatives_considered=(
+                        [name_pair[0]] if name_pair is not None else None
+                    ),
                 )
                 if c_vendor is not None:
                     claims.append(c_vendor)
@@ -422,7 +425,7 @@ class AttributionStage:
             if version_pair is not None or version_id_pair is not None:
                 primary = version_pair if version_pair is not None else version_id_pair
                 assert primary is not None
-                alternatives = (
+                version_alternatives: list[str] | None = (
                     [version_id_pair[0]]
                     if version_pair is not None and version_id_pair is not None
                     else None
@@ -432,7 +435,7 @@ class AttributionStage:
                     value=primary[0],
                     confidence=0.78,
                     evidence_refs=[primary[1]],
-                    alternatives_considered=alternatives,
+                    alternatives_considered=version_alternatives,
                 )
                 if c_version is not None:
                     claims.append(c_version)
@@ -485,9 +488,11 @@ class AttributionStage:
             deduped.values(),
             key=lambda c: (
                 str(c.get("claim_type", "")),
-                -float(c.get("confidence", 0.0))
-                if isinstance(c.get("confidence"), (int, float))
-                else 0.0,
+                (
+                    -safe_float(c.get("confidence"), default=0.0)
+                    if isinstance(c.get("confidence"), (int, float))
+                    else 0.0
+                ),
                 str(c.get("value", "")),
             ),
         )

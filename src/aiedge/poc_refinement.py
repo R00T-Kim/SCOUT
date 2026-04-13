@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_float
 from .llm_driver import resolve_driver
 from .path_safety import assert_under_dir
 from .schema import JsonValue
@@ -114,6 +115,7 @@ def _build_refinement_prompt(
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
+
     return parse_json_from_llm_output(stdout)
 
 
@@ -189,8 +191,7 @@ class PoCRefinementStage:
                 "poc_results": [],
             }
             out_json.write_text(
-                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-                + "\n",
+                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             return StageOutcome(
@@ -218,11 +219,13 @@ class PoCRefinementStage:
                 if crash_file.is_file() and crash_file.stat().st_size > 0:
                     try:
                         crash_hex = crash_file.read_bytes().hex()
-                        crashes.append({
-                            "file": str(crash_file.name),
-                            "hex": crash_hex,
-                            "size": crash_file.stat().st_size,
-                        })
+                        crashes.append(
+                            {
+                                "file": str(crash_file.name),
+                                "hex": crash_hex,
+                                "size": crash_file.stat().st_size,
+                            }
+                        )
                     except Exception:
                         pass
                     if len(crashes) >= 20:
@@ -243,9 +246,7 @@ class PoCRefinementStage:
 
         # Fallback 1: fp_verification verified alerts
         if not taint_alerts:
-            fp_path = (
-                run_dir / "stages" / "fp_verification" / "verified_alerts.json"
-            )
+            fp_path = run_dir / "stages" / "fp_verification" / "verified_alerts.json"
             fp_data = _load_json_file(fp_path)
             if isinstance(fp_data, dict):
                 fp_any = cast(dict[str, object], fp_data).get("verified_alerts")
@@ -256,9 +257,7 @@ class PoCRefinementStage:
 
         # Fallback 2: exploit_candidates.json
         if not taint_alerts and not crashes:
-            ec_path = (
-                run_dir / "stages" / "findings" / "exploit_candidates.json"
-            )
+            ec_path = run_dir / "stages" / "findings" / "exploit_candidates.json"
             ec_data = _load_json_file(ec_path)
             if isinstance(ec_data, dict):
                 ec_cands = cast(dict[str, object], ec_data).get("candidates")
@@ -278,21 +277,23 @@ class PoCRefinementStage:
                             sink_sym = "strcpy"
                         elif "credential" in family_str.lower():
                             sink_sym = "credential_exposure"
-                        taint_alerts.append({
-                            "source_api": "external_input",
-                            "source_binary": cand_path,
-                            "source_address": "0x0",
-                            "sink_symbol": sink_sym,
-                            "confidence": 0.45,
-                            "path_description": (
-                                f"Exploit candidate: {family_str} in "
-                                f"{cand_path}"
-                            ),
-                            "method": "exploit_candidate_fallback",
-                            "attack_hypothesis": str(
-                                c.get("attack_hypothesis", "")
-                            ),
-                        })
+                        taint_alerts.append(
+                            {
+                                "source_api": "external_input",
+                                "source_binary": cand_path,
+                                "source_address": "0x0",
+                                "sink_symbol": sink_sym,
+                                "confidence": 0.45,
+                                "path_description": (
+                                    f"Exploit candidate: {family_str} in "
+                                    f"{cand_path}"
+                                ),
+                                "method": "exploit_candidate_fallback",
+                                "attack_hypothesis": str(
+                                    c.get("attack_hypothesis", "")
+                                ),
+                            }
+                        )
                     if taint_alerts:
                         limitations.append(
                             "Using exploit_candidates for PoC generation "
@@ -301,9 +302,7 @@ class PoCRefinementStage:
 
         # Fallback 3: pattern_scan findings
         if not taint_alerts and not crashes:
-            ps_path = (
-                run_dir / "stages" / "findings" / "pattern_scan.json"
-            )
+            ps_path = run_dir / "stages" / "findings" / "pattern_scan.json"
             ps_data = _load_json_file(ps_path)
             if isinstance(ps_data, dict):
                 ps_findings = cast(dict[str, object], ps_data).get("findings")
@@ -323,27 +322,26 @@ class PoCRefinementStage:
                             first_ev = ev_list[0]
                             if isinstance(first_ev, dict):
                                 bin_path = str(
-                                    cast(dict[str, object], first_ev).get(
-                                        "path", ""
-                                    )
+                                    cast(dict[str, object], first_ev).get("path", "")
                                 )
                         sink_sym = "system"
                         if "buffer" in family.lower():
                             sink_sym = "strcpy"
                         elif "format" in family.lower():
                             sink_sym = "sprintf"
-                        taint_alerts.append({
-                            "source_api": "external_input",
-                            "source_binary": bin_path,
-                            "source_address": "0x0",
-                            "sink_symbol": sink_sym,
-                            "confidence": 0.40,
-                            "path_description": (
-                                f"Pattern scan finding: {family} in "
-                                f"{bin_path}"
-                            ),
-                            "method": "pattern_scan_fallback",
-                        })
+                        taint_alerts.append(
+                            {
+                                "source_api": "external_input",
+                                "source_binary": bin_path,
+                                "source_address": "0x0",
+                                "sink_symbol": sink_sym,
+                                "confidence": 0.40,
+                                "path_description": (
+                                    f"Pattern scan finding: {family} in " f"{bin_path}"
+                                ),
+                                "method": "pattern_scan_fallback",
+                            }
+                        )
                     if taint_alerts:
                         limitations.append(
                             "Using pattern_scan findings for PoC generation "
@@ -368,19 +366,23 @@ class PoCRefinementStage:
                         for sink_api in cast(list[object], sink_apis):
                             if not isinstance(sink_api, str):
                                 continue
-                            taint_alerts.append({
-                                "source_api": str(s.get("api", "")),
-                                "source_binary": str(s.get("binary", "")),
-                                "source_address": str(s.get("address", "0x0")),
-                                "sink_symbol": sink_api,
-                                "confidence": float(s.get("confidence", 0.4)),
-                                "path_description": (
-                                    f"Static source: {s.get('binary', '')} "
-                                    f"imports {s.get('api', '')}() and "
-                                    f"{sink_api}()"
-                                ),
-                                "method": "enhanced_source_fallback",
-                            })
+                            taint_alerts.append(
+                                {
+                                    "source_api": str(s.get("api", "")),
+                                    "source_binary": str(s.get("binary", "")),
+                                    "source_address": str(s.get("address", "0x0")),
+                                    "sink_symbol": sink_api,
+                                    "confidence": safe_float(
+                                        s.get("confidence"), default=0.4
+                                    ),
+                                    "path_description": (
+                                        f"Static source: {s.get('binary', '')} "
+                                        f"imports {s.get('api', '')}() and "
+                                        f"{sink_api}()"
+                                    ),
+                                    "method": "enhanced_source_fallback",
+                                }
+                            )
                     if taint_alerts:
                         limitations.append(
                             "Using enhanced_source data for PoC generation "
@@ -397,13 +399,10 @@ class PoCRefinementStage:
                 "status": "skipped",
                 "reason": "no_input_data",
                 "poc_results": [],
-                "limitations": cast(
-                    list[JsonValue], cast(list[object], limitations)
-                ),
+                "limitations": cast(list[JsonValue], cast(list[object], limitations)),
             }
             out_json.write_text(
-                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-                + "\n",
+                json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
                 encoding="utf-8",
             )
             return StageOutcome(
@@ -442,9 +441,7 @@ class PoCRefinementStage:
                 if not crash_hex and crash.get("file"):
                     crash_hex = f"(crash file: {crash.get('file')})"
 
-                vuln_type = str(
-                    taint_alert.get("sink_symbol", "buffer_overflow")
-                )
+                vuln_type = str(taint_alert.get("sink_symbol", "buffer_overflow"))
                 if vuln_type in ("system", "popen", "execve"):
                     vuln_type = "command_injection"
                 elif vuln_type in ("strcpy", "sprintf", "gets"):
@@ -474,9 +471,7 @@ class PoCRefinementStage:
                         if poc_script:
                             poc_file = pocs_dir / f"poc_{pair_idx}.py"
                             assert_under_dir(run_dir, poc_file)
-                            poc_file.write_text(
-                                poc_script, encoding="utf-8"
-                            )
+                            poc_file.write_text(poc_script, encoding="utf-8")
 
                             poc_entry["status"] = "generated"
                             poc_entry["poc_file"] = f"pocs/poc_{pair_idx}.py"
@@ -491,9 +486,7 @@ class PoCRefinementStage:
                             # Refinement loop (if budget allows)
                             if not has_budget_limit:
                                 current_poc = poc_script
-                                for attempt in range(
-                                    2, _MAX_REFINEMENT_ATTEMPTS + 1
-                                ):
+                                for attempt in range(2, _MAX_REFINEMENT_ATTEMPTS + 1):
                                     exec_result = _try_execute_poc(poc_file)
                                     if exec_result.get("success"):
                                         poc_entry["status"] = "validated"
@@ -512,10 +505,8 @@ class PoCRefinementStage:
                                         + "\n"
                                         + str(exec_result.get("stdout", ""))
                                     )
-                                    refine_prompt = (
-                                        _build_refinement_prompt(
-                                            current_poc, crash_log, attempt
-                                        )
+                                    refine_prompt = _build_refinement_prompt(
+                                        current_poc, crash_log, attempt
                                     )
                                     refine_result = driver.execute(
                                         prompt=refine_prompt,
@@ -526,16 +517,12 @@ class PoCRefinementStage:
                                         model_tier="sonnet",
                                     )
                                     if refine_result.status == "ok":
-                                        refine_parsed = (
-                                            _parse_json_response(
-                                                refine_result.stdout
-                                            )
+                                        refine_parsed = _parse_json_response(
+                                            refine_result.stdout
                                         )
                                         if refine_parsed is not None:
                                             new_script = str(
-                                                refine_parsed.get(
-                                                    "poc_script", ""
-                                                )
+                                                refine_parsed.get("poc_script", "")
                                             )
                                             if new_script:
                                                 current_poc = new_script
@@ -543,9 +530,7 @@ class PoCRefinementStage:
                                                     new_script,
                                                     encoding="utf-8",
                                                 )
-                                                poc_entry["attempts"] = (
-                                                    attempt
-                                                )
+                                                poc_entry["attempts"] = attempt
                                     else:
                                         break
                         else:
@@ -562,9 +547,7 @@ class PoCRefinementStage:
             if cast(str, p.get("status")) in ("generated", "validated")
         )
         validated = sum(
-            1
-            for p in poc_results
-            if cast(str, p.get("status")) == "validated"
+            1 for p in poc_results if cast(str, p.get("status")) == "validated"
         )
         if not poc_results or generated == 0:
             status = "partial"
@@ -572,9 +555,7 @@ class PoCRefinementStage:
         payload = {
             "schema_version": _SCHEMA_VERSION,
             "status": status,
-            "poc_results": cast(
-                list[JsonValue], cast(list[object], poc_results)
-            ),
+            "poc_results": cast(list[JsonValue], cast(list[object], poc_results)),
             "summary": {
                 "total_pairs": len(poc_results),
                 "generated": generated,
@@ -585,8 +566,7 @@ class PoCRefinementStage:
             ),
         }
         out_json.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             encoding="utf-8",
         )
 

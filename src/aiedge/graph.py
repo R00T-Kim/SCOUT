@@ -6,11 +6,13 @@ import json
 import os
 import re
 import stat
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+from ._typing_helpers import safe_int
 from .confidence_caps import calibrated_confidence, evidence_level
 from .path_safety import assert_under_dir
 from .schema import JsonValue
@@ -171,9 +173,7 @@ _DYNAMIC_VALIDATION_PORTS_PATHS = {
     "summary_field": "network/ports",
     "default_rel_path": "stages/dynamic_validation/network/ports.json",
 }
-_DYNAMIC_VALIDATION_SUMMARY_PATH = (
-    "stages/dynamic_validation/dynamic_validation.json"
-)
+_DYNAMIC_VALIDATION_SUMMARY_PATH = "stages/dynamic_validation/dynamic_validation.json"
 _DYNAMIC_SUMMARY_IPS_KEY = "target_ip"
 _DYNAMIC_SUMMARY_PORTS_KEY = "target_port"
 _DYNAMIC_SUMMARY_TARGET_KEY = "target"
@@ -341,12 +341,20 @@ def _safe_join_for_csv(values: list[str]) -> str:
     return ";".join(sorted(set(values)))
 
 
-def _export_csv(path: Path, headers: list[str], rows: list[list[str]]) -> None:
+def _export_csv(
+    path: Path,
+    headers: list[str],
+    rows: Sequence[Sequence[object]],
+) -> None:
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream)
         _ = writer.writerow(headers)
         for row in rows:
-            _ = writer.writerow(row)
+            # ``csv.writer`` stringifies each cell itself, but it does not
+            # accept ``None``/``list``/``dict`` gracefully -- coerce to str
+            # here so the output is identical to the pre-widening behaviour
+            # when callers happened to pass ``list[list[str]]`` already.
+            _ = writer.writerow(["" if cell is None else str(cell) for cell in row])
 
 
 def _extract_service_candidates_from_inventory(
@@ -430,7 +438,11 @@ def _pick_endpoint_protocol_and_ports(
         if value.startswith("http://") or value.startswith("https://"):
             return (
                 "http",
-                [_SERVICE_DEFAULT_PORTS["https" if value.startswith("https://") else "http"]],
+                [
+                    _SERVICE_DEFAULT_PORTS[
+                        "https" if value.startswith("https://") else "http"
+                    ]
+                ],
                 value,
             )
 
@@ -457,7 +469,9 @@ def _node_key(node_type: str, value: str) -> str:
     return f"{node_type}:{value}"
 
 
-def _looks_like_binary(path: Path, *, stat_result: os.stat_result | None = None) -> bool:
+def _looks_like_binary(
+    path: Path, *, stat_result: os.stat_result | None = None
+) -> bool:
     try:
         st = path.stat() if stat_result is None else stat_result
     except OSError:
@@ -476,7 +490,9 @@ def _looks_like_binary(path: Path, *, stat_result: os.stat_result | None = None)
     return False
 
 
-def _binary_confidence(path: Path, *, stat_result: os.stat_result | None = None) -> float:
+def _binary_confidence(
+    path: Path, *, stat_result: os.stat_result | None = None
+) -> float:
     try:
         if stat_result is None:
             stat_result = path.stat()
@@ -521,11 +537,20 @@ def _pick_dynamic_artifact_path(
     run_dir: Path,
     summary_obj: dict[str, object] | None,
     *,
-    summary_field: list[str],
+    summary_field: str | list[str],
     default_rel_path: str,
 ) -> Path:
-
-    configured = _read_nested_str(summary_obj, path=summary_field)
+    # Historically the ``summary_field`` argument was passed as a ``str``
+    # (e.g. ``"network/interfaces"``) which _read_nested_str then iterated
+    # over character-by-character -- effectively never resolving a nested
+    # lookup. Preserve that legacy behaviour for ``str`` inputs (wrap in a
+    # single-element list) while still allowing explicit ``list[str]``
+    # callers to request a real nested lookup.
+    if isinstance(summary_field, str):
+        field_path: list[str] = [summary_field]
+    else:
+        field_path = list(summary_field)
+    configured = _read_nested_str(summary_obj, path=field_path)
     if configured:
         configured_norm = _safe_non_absolute_rel(configured)
         if configured_norm not in {"", "unresolved_path"}:
@@ -611,8 +636,9 @@ def _normalize_host_candidates(host: object) -> list[str]:
     host_text = host_text.strip().lower()
     if not host_text or host_text in {"any", "any4", "any6", "*", "0.0.0.0", "::"}:
         return []
-    if _to_ip_string(host_text) is not None:
-        return [_to_ip_string(host_text)]
+    ip_normalized = _to_ip_string(host_text)
+    if ip_normalized is not None:
+        return [ip_normalized]
     return [host_text]
 
 
@@ -677,7 +703,9 @@ def _collect_dynamic_interface_hosts(
     return sorted(host_values)
 
 
-def _collect_dynamic_open_ports(ports_obj: dict[str, object] | None) -> list[tuple[int, str]]:
+def _collect_dynamic_open_ports(
+    ports_obj: dict[str, object] | None,
+) -> list[tuple[int, str]]:
     if not isinstance(ports_obj, dict):
         return []
     ports_items: list[tuple[int, str]] = []
@@ -714,7 +742,9 @@ def _collect_dynamic_runtime_targets(
     if target_ip is None:
         target_ips_any = summary_obj.get("target")
         if isinstance(target_ips_any, dict):
-            target_ip = _read_nested_str(cast(dict[str, object], target_ips_any), path=["ip"])
+            target_ip = _read_nested_str(
+                cast(dict[str, object], target_ips_any), path=["ip"]
+            )
 
     host_candidates: list[str] = []
     if target_ip:
@@ -724,7 +754,11 @@ def _collect_dynamic_runtime_targets(
 
     host_candidates = _sorted_unique_refs(host_candidates)
 
-    open_ports = _extract_open_ports_from_object(ports_obj) if isinstance(ports_obj, dict) else []
+    open_ports = (
+        _extract_open_ports_from_object(ports_obj)
+        if isinstance(ports_obj, dict)
+        else []
+    )
     probe_ports = _collect_dynamic_open_ports(ports_obj)
     evidence_refs: list[str] = []
     evidence_by_source: dict[str, list[str]] = {}
@@ -764,7 +798,12 @@ def _collect_dynamic_runtime_targets(
         service_points.append((port, "tcp"))
 
     service_points = sorted(set(service_points))
-    return host_candidates, service_points, sorted(_sorted_unique_refs(evidence_refs)), evidence_by_source
+    return (
+        host_candidates,
+        service_points,
+        sorted(_sorted_unique_refs(evidence_refs)),
+        evidence_by_source,
+    )
 
 
 def _collect_exploit_chain_records(
@@ -839,7 +878,9 @@ def _extract_runtime_targets_from_exploit_record(
     return result
 
 
-def _parse_targets_from_proof_text(proof: str) -> list[tuple[str, int | None, str | None]]:
+def _parse_targets_from_proof_text(
+    proof: str,
+) -> list[tuple[str, int | None, str | None]]:
     found: list[tuple[str, int | None, str | None]] = []
     if not proof:
         return found
@@ -859,7 +900,9 @@ def _parse_targets_from_proof_text(proof: str) -> list[tuple[str, int | None, st
                 if host is None:
                     continue
                 port_text = m.group("port")
-                parsed_port = int(port_text) if port_text and port_text.isdigit() else None
+                parsed_port = (
+                    int(port_text) if port_text and port_text.isdigit() else None
+                )
                 found.append((host, parsed_port, None))
             continue
 
@@ -952,9 +995,17 @@ def _communication_matrix_payload(
         dst_node = comm_nodes.get(edge.dst)
         if src_node is None or dst_node is None:
             continue
-        if edge.edge_type == "runtime_host_flow" and src_node.node_type == "component" and dst_node.node_type == "host":
+        if (
+            edge.edge_type == "runtime_host_flow"
+            and src_node.node_type == "component"
+            and dst_node.node_type == "host"
+        ):
             host_to_components.setdefault(dst_node.node_id, set()).add(src_node.node_id)
-        if edge.edge_type == "runtime_service_binding" and src_node.node_type == "host" and dst_node.node_type == "service":
+        if (
+            edge.edge_type == "runtime_service_binding"
+            and src_node.node_type == "host"
+            and dst_node.node_type == "service"
+        ):
             host_to_service_edges.setdefault(src_node.node_id, []).append(edge)
 
     matrix_rows: list[dict[str, JsonValue]] = []
@@ -994,11 +1045,16 @@ def _communication_matrix_payload(
                 seen_rows.add(row_key)
                 component_node = comm_nodes.get(component_id)
                 component_label = (
-                    component_node.label if component_node else _safe_ascii_label(component_id)
+                    component_node.label
+                    if component_node
+                    else _safe_ascii_label(component_id)
                 )
-                evidence_signals, evidence_badge, evidence_counts, dynamic_exploit_chain = (
-                    _evidence_signal_profile(service_edge.evidence_refs)
-                )
+                (
+                    evidence_signals,
+                    evidence_badge,
+                    evidence_counts,
+                    dynamic_exploit_chain,
+                ) = _evidence_signal_profile(service_edge.evidence_refs)
                 matrix_rows.append(
                     {
                         "component_id": component_id,
@@ -1033,7 +1089,7 @@ def _communication_matrix_payload(
         key=lambda row: (
             str(row.get("component_id", "")),
             str(row.get("host", "")),
-            int(row.get("service_port", 0)),
+            safe_int(row.get("service_port"), default=0),
             str(row.get("protocol", "")),
         ),
     )
@@ -1046,17 +1102,20 @@ def _communication_matrix_payload(
         service_host = row.get("service_host")
         if not isinstance(service_host, str):
             service_host = host
-        service_port = _as_int(row.get("service_port"), default=0)
+        service_port = _as_int(row.get("service_port")) or 0
         protocol = _as_str(row.get("protocol")) or "tcp"
-        host_to_service_rows.setdefault(host, set()).add((service_host, service_port, protocol))
+        host_to_service_rows.setdefault(host, set()).add(
+            (service_host, service_port, protocol)
+        )
         component_label = row.get("component_label")
         if not isinstance(component_label, str):
             component_label = str(row.get("component_id", "unmapped"))
-        host_to_component_rows.setdefault(host, set()).add(component_label or "unmapped")
+        host_to_component_rows.setdefault(host, set()).add(
+            component_label or "unmapped"
+        )
 
     host_service_counts: dict[str, int] = {
-        host: len(services)
-        for host, services in sorted(host_to_service_rows.items())
+        host: len(services) for host, services in sorted(host_to_service_rows.items())
     }
     host_component_counts: dict[str, int] = {
         host: len(components)
@@ -1069,63 +1128,84 @@ def _communication_matrix_payload(
             host_to_service_rows.get(host, set()),
             key=lambda value: (str(value[0]), int(value[1]), str(value[2])),
         )
-        runtime_system_map.append(
-            {
-                "host": host,
-                "components": components,
-                "services": [
+        runtime_entry: dict[str, JsonValue] = {
+            "host": host,
+            "components": cast(list[JsonValue], list(components)),
+            "services": cast(
+                list[JsonValue],
+                [
                     f"{svc_host}:{svc_port}/{svc_protocol.upper()}"
                     for svc_host, svc_port, svc_protocol in services
                 ],
-                "component_count": len(components),
-                "service_count": len(services),
-            }
+            ),
+            "component_count": len(components),
+            "service_count": len(services),
+        }
+        runtime_system_map.append(runtime_entry)
+    # Compute hashable set-based stats using string coercion to avoid
+    # unhashable dict/list entries that JsonValue permits.
+    unique_components = {str(row.get("component_id", "")) for row in matrix_rows}
+    unique_hosts = {str(row.get("host", "")) for row in matrix_rows}
+    unique_services: set[tuple[str, str, str]] = {
+        (
+            str(row.get("service_host", "")),
+            str(row.get("service_port", "")),
+            str(row.get("protocol", "")),
         )
+        for row in matrix_rows
+    }
+    unique_observations: list[str] = sorted(
+        {str(row.get("observation", "")) for row in matrix_rows}
+    )
+
+    summary: dict[str, JsonValue] = {
+        "components": len(unique_components),
+        "hosts": len(unique_hosts),
+        "services": len(unique_services),
+        "service_count_by_protocol": cast(
+            dict[str, JsonValue], cast(dict[str, int], protocol_counts)
+        ),
+        "host_service_counts": cast(
+            dict[str, JsonValue], cast(dict[str, int], host_service_counts)
+        ),
+        "host_component_counts": cast(
+            dict[str, JsonValue], cast(dict[str, int], host_component_counts)
+        ),
+        "runtime_system_map": cast(
+            list[JsonValue], cast(list[object], runtime_system_map)
+        ),
+        "observations": cast(list[JsonValue], unique_observations),
+        "rows_dynamic": sum(
+            1
+            for row in matrix_rows
+            if _as_int(row.get("dynamic_evidence_count")) is not None
+            and (_as_int(row.get("dynamic_evidence_count")) or 0) > 0
+        ),
+        "rows_exploit": sum(
+            1
+            for row in matrix_rows
+            if _as_int(row.get("exploit_evidence_count")) is not None
+            and (_as_int(row.get("exploit_evidence_count")) or 0) > 0
+        ),
+        "rows_verified_chain": sum(
+            1
+            for row in matrix_rows
+            if _as_int(row.get("verified_chain_evidence_count")) is not None
+            and (_as_int(row.get("verified_chain_evidence_count")) or 0) > 0
+        ),
+        "rows_dynamic_exploit": sum(
+            1 for row in matrix_rows if bool(row.get("dynamic_exploit_chain"))
+        ),
+        "evidence_badges": cast(
+            list[JsonValue],
+            sorted({str(row.get("evidence_badge", "S")) for row in matrix_rows}),
+        ),
+        "classification": "candidate",
+    }
     matrix_payload: dict[str, JsonValue] = {
         "status": "ok" if matrix_rows else "partial",
         "rows": cast(list[JsonValue], cast(list[object], matrix_rows)),
-        "summary": {
-            "components": len({row.get("component_id") for row in matrix_rows}),
-            "hosts": len({row.get("host") for row in matrix_rows}),
-            "services": len(
-                {
-                    (row.get("service_host"), row.get("service_port"), row.get("protocol"))
-                    for row in matrix_rows
-                }
-            ),
-            "service_count_by_protocol": protocol_counts,
-            "host_service_counts": cast(dict[str, JsonValue], cast(dict[str, int], host_service_counts)),
-            "host_component_counts": cast(dict[str, JsonValue], cast(dict[str, int], host_component_counts)),
-            "runtime_system_map": cast(list[JsonValue], cast(list[object], runtime_system_map)),
-            "observations": sorted(
-                {row.get("observation", "") for row in matrix_rows}
-            ),
-            "rows_dynamic": sum(
-                1
-                for row in matrix_rows
-                if _as_int(row.get("dynamic_evidence_count")) is not None
-                and int(cast(int, row.get("dynamic_evidence_count"))) > 0
-            ),
-            "rows_exploit": sum(
-                1
-                for row in matrix_rows
-                if _as_int(row.get("exploit_evidence_count")) is not None
-                and int(cast(int, row.get("exploit_evidence_count"))) > 0
-            ),
-            "rows_verified_chain": sum(
-                1
-                for row in matrix_rows
-                if _as_int(row.get("verified_chain_evidence_count")) is not None
-                and int(cast(int, row.get("verified_chain_evidence_count"))) > 0
-            ),
-            "rows_dynamic_exploit": sum(
-                1 for row in matrix_rows if bool(row.get("dynamic_exploit_chain"))
-            ),
-            "evidence_badges": sorted(
-                {str(row.get("evidence_badge", "S")) for row in matrix_rows}
-            ),
-            "classification": "candidate",
-        },
+        "summary": summary,
     }
     return matrix_payload
 
@@ -1234,7 +1314,7 @@ def _derive_endpoint_record(
                     ports.append(parsed)
 
     host = _safe_node_value(",".join(sorted(host_candidates)), max_len=220)
-    return host, _sorted_unique_refs(ports), _normalize_protocol(protocol)
+    return host, sorted(set(ports)), _normalize_protocol(protocol)
 
 
 def _is_host_covered(
@@ -1265,7 +1345,10 @@ def _service_matches_observation(
         for observed_port, observed_proto in observed_ports:
             if observed_port != port:
                 continue
-            if endpoint_protocol in {"unknown", "tcp"} and observed_proto in {"tcp", "unknown"}:
+            if endpoint_protocol in {"unknown", "tcp"} and observed_proto in {
+                "tcp",
+                "unknown",
+            }:
                 return True
             if endpoint_protocol == observed_proto:
                 return True
@@ -1415,14 +1498,14 @@ class GraphStage:
             return node_id
 
         def upsert_edge(
-                *,
-                src: str,
-                dst: str,
-                edge_type: str,
-                confidence: float,
-                refs: list[str],
-                observation: str | None = "static_reference",
-            ) -> None:
+            *,
+            src: str,
+            dst: str,
+            edge_type: str,
+            confidence: float,
+            refs: list[str],
+            observation: str | None = "static_reference",
+        ) -> None:
             key = (src, dst, edge_type)
             edge_refs = tuple(_sorted_unique_refs(refs))
             if observation is None:
@@ -1448,19 +1531,19 @@ class GraphStage:
             merged_refs = tuple(sorted(set(existing.evidence_refs) | set(edge_refs)))
             merged_confidence = max(existing.confidence, confidence_clamped)
             edges[key] = _Edge(
-                    src=src,
-                    dst=dst,
-                    edge_type=edge_type,
+                src=src,
+                dst=dst,
+                edge_type=edge_type,
+                confidence=merged_confidence,
+                confidence_calibrated=calibrated_confidence(
                     confidence=merged_confidence,
-                    confidence_calibrated=calibrated_confidence(
-                        confidence=merged_confidence,
-                        observation=observation,
-                        evidence_refs=list(merged_refs),
-                    ),
-                    evidence_level=evidence_level(observation, list(merged_refs)),
                     observation=observation,
-                    evidence_refs=merged_refs,
-                )
+                    evidence_refs=list(merged_refs),
+                ),
+                evidence_level=evidence_level(observation, list(merged_refs)),
+                observation=observation,
+                evidence_refs=merged_refs,
+            )
 
         surfaces_any = None if surfaces_obj is None else surfaces_obj.get("surfaces")
         if isinstance(surfaces_any, list):
@@ -1701,7 +1784,9 @@ class GraphStage:
         # Collect IPC paths per component from binary_analysis
         binary_analysis_path = run_dir / "stages" / "inventory" / "binary_analysis.json"
         binary_analysis = _load_json_object(binary_analysis_path)
-        binaries_any = binary_analysis.get("hits") if binary_analysis is not None else None
+        binaries_any = (
+            binary_analysis.get("hits") if binary_analysis is not None else None
+        )
         binaries_list: list[dict[str, object]] = []
         if isinstance(binaries_any, list):
             for b in binaries_any:
@@ -1741,9 +1826,9 @@ class GraphStage:
 
             # Check pipe/exec references
             if ipc_ind.get("pipe_references") is True:
-                ipc_path_to_components.setdefault(
-                    f"ipc_pipe:{bin_name}", []
-                ).append(comp_id)
+                ipc_path_to_components.setdefault(f"ipc_pipe:{bin_name}", []).append(
+                    comp_id
+                )
             if ipc_ind.get("fork_exec_references") is True:
                 ipc_path_to_components.setdefault(
                     f"ipc_exec_chain:{bin_name}", []
@@ -1803,7 +1888,11 @@ class GraphStage:
                         ipc_edge_count += 1
 
         # Also detect IPC from service_candidates
-        svc_cands_any = inventory_payload.get("service_candidates") if inventory_payload is not None else None
+        svc_cands_any = (
+            inventory_payload.get("service_candidates")
+            if inventory_payload is not None
+            else None
+        )
         if isinstance(svc_cands_any, list):
             for sc in svc_cands_any:
                 if not isinstance(sc, dict):
@@ -1813,7 +1902,12 @@ class GraphStage:
                 name_any = sc_dict.get("name")
                 if not isinstance(kind_any, str) or not isinstance(name_any, str):
                     continue
-                if kind_any in ("unix_socket", "dbus_service", "shm_segment", "socket_unit"):
+                if kind_any in (
+                    "unix_socket",
+                    "dbus_service",
+                    "shm_segment",
+                    "socket_unit",
+                ):
                     if ipc_node_count >= _IPC_CHANNEL_LIMIT:
                         break
                     ipc_type_map = {
@@ -1978,7 +2072,9 @@ class GraphStage:
             if rel and rel != "unresolved_path":
                 target.append(rel)
 
-        dynamic_summary_obj = _load_json_object(run_dir / _DYNAMIC_VALIDATION_SUMMARY_PATH)
+        dynamic_summary_obj = _load_json_object(
+            run_dir / _DYNAMIC_VALIDATION_SUMMARY_PATH
+        )
         dynamic_interfaces_path = _pick_dynamic_artifact_path(
             run_dir,
             dynamic_summary_obj,
@@ -2004,10 +2100,19 @@ class GraphStage:
         )
 
         communication_source_artifacts: list[str] = []
-        _add_run_artifact_if_exists(run_dir / _DYNAMIC_VALIDATION_SUMMARY_PATH, target=communication_source_artifacts)
-        _add_run_artifact_if_exists(dynamic_interfaces_path, target=communication_source_artifacts)
-        _add_run_artifact_if_exists(dynamic_ports_path, target=communication_source_artifacts)
-        communication_source_artifacts.extend(_sorted_unique_refs(dynamic_evidence_refs))
+        _add_run_artifact_if_exists(
+            run_dir / _DYNAMIC_VALIDATION_SUMMARY_PATH,
+            target=communication_source_artifacts,
+        )
+        _add_run_artifact_if_exists(
+            dynamic_interfaces_path, target=communication_source_artifacts
+        )
+        _add_run_artifact_if_exists(
+            dynamic_ports_path, target=communication_source_artifacts
+        )
+        communication_source_artifacts.extend(
+            _sorted_unique_refs(dynamic_evidence_refs)
+        )
 
         flow_observations: list[dict[str, object]] = []
         flow_source = "dynamic_validation"
@@ -2027,8 +2132,15 @@ class GraphStage:
                 }
             )
 
-        for chain_id, bundle_obj, runtime_refs, _ in _collect_exploit_chain_records(run_dir):
-            for runtime_host, runtime_port_proto, _, _ in _extract_runtime_targets_from_exploit_record(
+        for chain_id, bundle_obj, runtime_refs, _ in _collect_exploit_chain_records(
+            run_dir
+        ):
+            for (
+                runtime_host,
+                runtime_port_proto,
+                _,
+                _,
+            ) in _extract_runtime_targets_from_exploit_record(
                 chain_id, cast(dict[str, object], bundle_obj.get("runtime", {}))
             ):
                 runtime_port, runtime_protocol = runtime_port_proto
@@ -2078,10 +2190,14 @@ class GraphStage:
                             }
                         )
 
-        communication_source_artifacts.extend(_sorted_unique_refs(dynamic_evidence_refs))
+        communication_source_artifacts.extend(
+            _sorted_unique_refs(dynamic_evidence_refs)
+        )
         for record in _collect_exploit_chain_records(run_dir):
             communication_source_artifacts.extend(record[2])
-        communication_source_artifacts = _sorted_unique_refs(communication_source_artifacts)
+        communication_source_artifacts = _sorted_unique_refs(
+            communication_source_artifacts
+        )
 
         communication_nodes: dict[str, _Node] = {}
         communication_edges: dict[tuple[str, str, str], _RuntimeEdge] = {}
@@ -2106,7 +2222,11 @@ class GraphStage:
                 )
                 return node_id
             merged_refs = tuple(sorted(set(existing.evidence_refs) | set(node_refs)))
-            merged_label = existing.label if existing.label != "unknown" else _safe_ascii_label(label)
+            merged_label = (
+                existing.label
+                if existing.label != "unknown"
+                else _safe_ascii_label(label)
+            )
             communication_nodes[node_id] = _Node(
                 node_id=node_id,
                 node_type=node_type,
@@ -2126,7 +2246,9 @@ class GraphStage:
             merged_refs = tuple(
                 sorted(set(existing.evidence_refs) | set(static_node.evidence_refs))
             )
-            merged_label = existing.label if existing.label != "unknown" else static_node.label
+            merged_label = (
+                existing.label if existing.label != "unknown" else static_node.label
+            )
             communication_nodes[node_id] = _Node(
                 node_id=node_id,
                 node_type=existing.node_type,
@@ -2216,11 +2338,12 @@ class GraphStage:
             [
                 x
                 for x in flow_observations
-                if isinstance(x.get("host"), str) and _normalize_host_name(x.get("host"))
+                if isinstance(x.get("host"), str)
+                and _normalize_host_name(x.get("host"))
             ],
             key=lambda item: (
                 str(item.get("host") or ""),
-                int(item.get("port") or 0),
+                safe_int(item.get("port"), default=0),
                 str(item.get("protocol") or ""),
             ),
         ):
@@ -2232,27 +2355,34 @@ class GraphStage:
             protocol = _normalize_protocol(observation.get("protocol"))
             port_candidates: list[tuple[int, str]] = []
             if port is not None:
-                try:
-                    p_norm = int(port)
-                except Exception:
-                    p_norm = None
-                if isinstance(p_norm, int) and 0 < p_norm <= 65535:
+                # safe_int returns ``default`` (here ``0``) for None / dict /
+                # unparseable strings -- combined with the upper-bound check
+                # below we filter the same set of malformed inputs the old
+                # ``int(port)`` / except-Exception pair rejected.
+                p_norm = safe_int(port, default=0)
+                if 0 < p_norm <= 65535:
                     port_candidates.append((p_norm, protocol))
             if not port_candidates:
                 port_candidates.extend(dynamic_service_points)
-            refs = _sorted_unique_refs(list(cast(tuple[str, ...], observation.get("refs", ()))))
+            refs = _sorted_unique_refs(
+                list(cast(tuple[str, ...], observation.get("refs", ())))
+            )
             source_tag = cast(str, observation.get("source"))
 
             matching_endpoints: list[_EndpointRecord] = []
             for endpoint in sorted(
-                endpoint_records, key=lambda record: (record.node_id, record.host, record.ports)
+                endpoint_records,
+                key=lambda record: (record.node_id, record.host, record.ports),
             ):
                 endpoint_hosts = _extract_endpoint_hosts(endpoint.host)
                 if not endpoint_hosts:
                     continue
                 host_match = (
                     host in endpoint_hosts
-                    or any(_is_host_covered(host, [candidate]) for candidate in endpoint_hosts)
+                    or any(
+                        _is_host_covered(host, [candidate])
+                        for candidate in endpoint_hosts
+                    )
                     or any(
                         _is_host_covered(candidate, [host])
                         for candidate in endpoint_hosts
@@ -2261,7 +2391,9 @@ class GraphStage:
                 if not host_match:
                     continue
 
-                if _service_matches_observation(list(endpoint.ports), endpoint.protocol, port_candidates):
+                if _service_matches_observation(
+                    list(endpoint.ports), endpoint.protocol, port_candidates
+                ):
                     matching_endpoints.append(endpoint)
                     obs_mark = cast(dict[str, object], observation)
                     obs_mark["matched"] = True
@@ -2283,13 +2415,19 @@ class GraphStage:
                     for source_component in sorted(source_components):
                         _copy_static_node(source_component)
                         host_observation = (
-                            "exploit_chain" if source_tag.startswith("exploit") else "dynamic_validation"
+                            "exploit_chain"
+                            if source_tag.startswith("exploit")
+                            else "dynamic_validation"
                         )
                         confidence = endpoint.confidence
                         if host_observation == "exploit_chain":
-                            confidence = min(1.0, max(0.85, _clamp01(confidence + 0.20)))
+                            confidence = min(
+                                1.0, max(0.85, _clamp01(confidence + 0.20))
+                            )
                         else:
-                            confidence = min(1.0, max(0.70, _clamp01(confidence + 0.10)))
+                            confidence = min(
+                                1.0, max(0.70, _clamp01(confidence + 0.10))
+                            )
                         _upsert_communication_edge(
                             src=source_component,
                             dst=endpoint.node_id,
@@ -2372,13 +2510,17 @@ class GraphStage:
                 )
 
         # Merge any unresolved exploitation-only evidence as host/service context without a direct endpoint mapping.
-        if communication_edges and all(not item.get("matched") for item in flow_observations):
+        if communication_edges and all(
+            not item.get("matched") for item in flow_observations
+        ):
             fallback_comp = _resolve_or_create_component_for_runtime()
-            for host in sorted(set(
-                cast(str, item.get("host"))
-                for item in flow_observations
-                if isinstance(item.get("host"), str)
-            )):
+            for host in sorted(
+                set(
+                    cast(str, item.get("host"))
+                    for item in flow_observations
+                    if isinstance(item.get("host"), str)
+                )
+            ):
                 if not host:
                     continue
                 host_refs = _sorted_unique_refs(
@@ -2468,9 +2610,7 @@ class GraphStage:
                     ),
                     "dynamic_evidence_count": int(edge_counts["dynamic"]),
                     "exploit_evidence_count": int(edge_counts["exploit"]),
-                    "verified_chain_evidence_count": int(
-                        edge_counts["verified_chain"]
-                    ),
+                    "verified_chain_evidence_count": int(edge_counts["verified_chain"]),
                     "static_evidence_count": int(edge_counts["static"]),
                     "dynamic_exploit_chain": bool(dynamic_exploit_chain),
                     "evidence_refs": cast(
@@ -2534,7 +2674,9 @@ class GraphStage:
         comm_summary = {
             "nodes": len(communication_node_payload),
             "edges": len(communication_edge_payload),
-            "components": len([n for n in comm_node_items if n.node_type == "component"]),
+            "components": len(
+                [n for n in comm_node_items if n.node_type == "component"]
+            ),
             "endpoints": len([n for n in comm_node_items if n.node_type == "endpoint"]),
             "surfaces": len([n for n in comm_node_items if n.node_type == "surface"]),
             "vendors": len([n for n in comm_node_items if n.node_type == "vendor"]),
@@ -2553,7 +2695,10 @@ class GraphStage:
                 ),
                 "summary": cast(
                     dict[str, JsonValue],
-                    cast(dict[str, object], communication_matrix_payload.get("summary", {})),
+                    cast(
+                        dict[str, object],
+                        communication_matrix_payload.get("summary", {}),
+                    ),
                 ),
             },
             "neo4j_schema_version": "neo4j-comm-v2",
@@ -2580,11 +2725,17 @@ class GraphStage:
                 ),
             )
 
-        communication_status: StageStatus = "ok" if communication_edge_payload else "partial"
+        communication_status: StageStatus = (
+            "ok" if communication_edge_payload else "partial"
+        )
         communication_payload: dict[str, JsonValue] = {
             "status": communication_status,
-            "nodes": cast(list[JsonValue], cast(list[object], communication_node_payload)),
-            "edges": cast(list[JsonValue], cast(list[object], communication_edge_payload)),
+            "nodes": cast(
+                list[JsonValue], cast(list[object], communication_node_payload)
+            ),
+            "edges": cast(
+                list[JsonValue], cast(list[object], communication_edge_payload)
+            ),
             "summary": comm_summary,
             "limitations": cast(
                 list[JsonValue],
@@ -2614,7 +2765,12 @@ class GraphStage:
             encoding="utf-8",
         )
         _ = out_matrix_json.write_text(
-            json.dumps(communication_matrix_payload, indent=2, sort_keys=True, ensure_ascii=True)
+            json.dumps(
+                communication_matrix_payload,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=True,
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -2631,9 +2787,7 @@ class GraphStage:
                     row.get("id", ""),
                     row.get("type", ""),
                     row.get("label", ""),
-                    _safe_csv_field(
-                        row.get("evidence_refs", "")
-                    ),
+                    _safe_csv_field(row.get("evidence_refs", "")),
                 ]
                 for row in communication_node_payload
             ],
@@ -2782,7 +2936,9 @@ class GraphStage:
             [
                 "] AS row",
                 "MERGE (n:CommNode {id: row.id})",
-                "SET n.type = row.type, n.label = row.label, n.evidence_refs = row.evidence_refs, n.schema_version = '" + neo4j_schema_version + "'",
+                "SET n.type = row.type, n.label = row.label, n.evidence_refs = row.evidence_refs, n.schema_version = '"
+                + neo4j_schema_version
+                + "'",
                 "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommComponent' THEN [1] ELSE [] END | SET n:CommComponent)",
                 "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommHost' THEN [1] ELSE [] END | SET n:CommHost)",
                 "FOREACH (_ IN CASE WHEN row.neo4j_label = 'CommService' THEN [1] ELSE [] END | SET n:CommService)",
@@ -2840,7 +2996,9 @@ class GraphStage:
                 "] AS row",
                 "MATCH (src:CommNode {id: row.src}), (dst:CommNode {id: row.dst})",
                 "MERGE (src)-[r:COMM_FLOW {edge_type: row.edge_type, src: row.src, dst: row.dst}]->(dst)",
-                "SET r.confidence = row.confidence, r.confidence_calibrated = row.confidence_calibrated, r.evidence_level = row.evidence_level, r.observation = row.observation, r.evidence_refs = row.evidence_refs, r.evidence_badge = row.evidence_badge, r.evidence_signals = row.evidence_signals, r.dynamic_evidence_count = row.dynamic_evidence_count, r.exploit_evidence_count = row.exploit_evidence_count, r.verified_chain_evidence_count = row.verified_chain_evidence_count, r.static_evidence_count = row.static_evidence_count, r.dynamic_exploit_chain = row.dynamic_exploit_chain, r.schema_version = '" + neo4j_schema_version + "'",
+                "SET r.confidence = row.confidence, r.confidence_calibrated = row.confidence_calibrated, r.evidence_level = row.evidence_level, r.observation = row.observation, r.evidence_refs = row.evidence_refs, r.evidence_badge = row.evidence_badge, r.evidence_signals = row.evidence_signals, r.dynamic_evidence_count = row.dynamic_evidence_count, r.exploit_evidence_count = row.exploit_evidence_count, r.verified_chain_evidence_count = row.verified_chain_evidence_count, r.static_evidence_count = row.static_evidence_count, r.dynamic_exploit_chain = row.dynamic_exploit_chain, r.schema_version = '"
+                + neo4j_schema_version
+                + "'",
             ]
         )
         if not comm_cypher_lines:
@@ -2888,8 +3046,12 @@ class GraphStage:
             "graph_mermaid": _rel_to_run_dir(run_dir, out_mmd),
             "reference_graph_json": _rel_to_run_dir(run_dir, out_ref_json),
             "communication_graph_json": _rel_to_run_dir(run_dir, out_comm_json),
-            "communication_graph_nodes_csv": _rel_to_run_dir(run_dir, out_comm_nodes_csv),
-            "communication_graph_edges_csv": _rel_to_run_dir(run_dir, out_comm_edges_csv),
+            "communication_graph_nodes_csv": _rel_to_run_dir(
+                run_dir, out_comm_nodes_csv
+            ),
+            "communication_graph_edges_csv": _rel_to_run_dir(
+                run_dir, out_comm_edges_csv
+            ),
             "communication_graph_cypher": _rel_to_run_dir(run_dir, out_comm_cypher),
             "communication_graph_schema_cypher": _rel_to_run_dir(
                 run_dir, out_comm_schema_cypher

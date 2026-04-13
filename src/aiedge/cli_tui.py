@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from .cli_common import _tui_ansi_supported
 from .cli_tui_data import _build_tui_snapshot
@@ -31,7 +31,10 @@ def _run_tui_interactive(*, run_dir: Path, limit: int, interval_s: float) -> int
     refresh_interval = max(0.3, float(interval_s))
 
     def _curses_main(stdscr: object) -> int:
-        win = cast("curses._CursesWindow", stdscr)
+        # ``curses._CursesWindow`` is a private attribute that pyright
+        # cannot resolve; fall back to ``Any`` to preserve runtime duck
+        # typing without exposing the private name.
+        win = cast(Any, stdscr)
         win.nodelay(True)
         win.keypad(True)
         try:
@@ -145,7 +148,10 @@ def _run_tui(
         return 20
     effective_mode = mode
     if interactive and watch:
-        print("Invalid flags: --interactive and --watch cannot be combined", file=sys.stderr)
+        print(
+            "Invalid flags: --interactive and --watch cannot be combined",
+            file=sys.stderr,
+        )
         return 20
     if interactive:
         effective_mode = "interactive"
@@ -157,9 +163,7 @@ def _run_tui(
 
     if effective_mode == "auto":
         effective_mode = (
-            "interactive"
-            if sys.stdin.isatty() and sys.stdout.isatty()
-            else "once"
+            "interactive" if sys.stdin.isatty() and sys.stdout.isatty() else "once"
         )
 
     if effective_mode == "interactive":

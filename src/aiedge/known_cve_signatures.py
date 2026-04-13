@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._typing_helpers import safe_float
+
 
 @dataclass(frozen=True)
 class CveSignature:
@@ -42,7 +44,20 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2016-6277",
         vendor_patterns=frozenset({"netgear"}),
-        model_patterns=frozenset({"r7000", "r6250", "r6400", "r6700", "r6900", "r7300", "r7900", "r8000", "d6220", "d6400"}),
+        model_patterns=frozenset(
+            {
+                "r7000",
+                "r6250",
+                "r6400",
+                "r6700",
+                "r6900",
+                "r7300",
+                "r7900",
+                "r8000",
+                "d6220",
+                "d6400",
+            }
+        ),
         binary_indicators=frozenset({"httpd"}),
         sink_symbols=frozenset({"system", "popen"}),
         vuln_type="cmd_injection",
@@ -75,7 +90,20 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2025-34037",
         vendor_patterns=frozenset({"linksys"}),
-        model_patterns=frozenset({"e4200", "e3200", "e3000", "e2500", "e2100l", "e1550", "e1500", "e1200", "e1000", "e900"}),
+        model_patterns=frozenset(
+            {
+                "e4200",
+                "e3200",
+                "e3000",
+                "e2500",
+                "e2100l",
+                "e1550",
+                "e1500",
+                "e1200",
+                "e1000",
+                "e900",
+            }
+        ),
         binary_indicators=frozenset({"httpd"}),
         sink_symbols=frozenset({"system", "popen"}),
         vuln_type="cmd_injection",
@@ -131,7 +159,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2017-6548",
         vendor_patterns=frozenset({"asus"}),
-        model_patterns=frozenset({"rt-n56u", "rt-n66u", "rt-ac66u", "rt-ac68u", "rt-ac87u"}),
+        model_patterns=frozenset(
+            {"rt-n56u", "rt-n66u", "rt-ac66u", "rt-ac68u", "rt-ac87u"}
+        ),
         binary_indicators=frozenset({"networkmap"}),
         sink_symbols=frozenset({"strcpy", "sprintf", "strcat"}),
         vuln_type="buffer_overflow",
@@ -142,7 +172,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2020-15636",
         vendor_patterns=frozenset({"netgear"}),
-        model_patterns=frozenset({"r6400", "r6700", "r7000", "r7850", "r7900", "r8000"}),
+        model_patterns=frozenset(
+            {"r6400", "r6700", "r7000", "r7850", "r7900", "r8000"}
+        ),
         binary_indicators=frozenset({"check_ra"}),
         sink_symbols=frozenset({"strcpy", "sprintf"}),
         vuln_type="buffer_overflow",
@@ -165,7 +197,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2017-5521",
         vendor_patterns=frozenset({"netgear"}),
-        model_patterns=frozenset({"r8500", "r8300", "r7000", "r6400", "r7300", "wndr3400"}),
+        model_patterns=frozenset(
+            {"r8500", "r8300", "r7000", "r6400", "r7300", "wndr3400"}
+        ),
         binary_indicators=frozenset({"httpd"}),
         sink_symbols=frozenset({"system"}),  # less relevant for auth bypass
         vuln_type="auth_bypass",
@@ -211,7 +245,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2022-27596",
         vendor_patterns=frozenset({"qnap"}),
-        model_patterns=frozenset({"ts-231", "ts-431", "ts-451", "ts-253", "ts-653", "ts-873"}),
+        model_patterns=frozenset(
+            {"ts-231", "ts-431", "ts-451", "ts-253", "ts-653", "ts-873"}
+        ),
         binary_indicators=frozenset({"photo_station", "httpd"}),
         sink_symbols=frozenset({"sqlite3_exec", "system"}),
         vuln_type="cmd_injection",
@@ -223,7 +259,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2018-14847",
         vendor_patterns=frozenset({"mikrotik"}),
-        model_patterns=frozenset({"routeros", "rb750", "rb951", "rb2011", "rb3011", "hap"}),
+        model_patterns=frozenset(
+            {"routeros", "rb750", "rb951", "rb2011", "rb3011", "hap"}
+        ),
         binary_indicators=frozenset({"winbox", "mproxy"}),
         sink_symbols=frozenset({"fopen", "read", "write"}),
         vuln_type="path_traversal",
@@ -270,7 +308,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2019-3927",
         vendor_patterns=frozenset({"synology"}),
-        model_patterns=frozenset({"ds218", "ds418", "ds918", "ds1019", "ds1520", "rs820"}),
+        model_patterns=frozenset(
+            {"ds218", "ds418", "ds918", "ds1019", "ds1520", "rs820"}
+        ),
         binary_indicators=frozenset({"synologyphoto", "httpd", "nginx"}),
         sink_symbols=frozenset(),
         vuln_type="auth_bypass",
@@ -282,7 +322,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2014-1635",
         vendor_patterns=frozenset({"belkin"}),
-        model_patterns=frozenset({"f5d8236", "n600", "n750", "n900", "f9k1102", "f7d4301"}),
+        model_patterns=frozenset(
+            {"f5d8236", "n600", "n750", "n900", "f9k1102", "f7d4301"}
+        ),
         binary_indicators=frozenset({"httpd", "setup.cgi"}),
         sink_symbols=frozenset({"system", "popen"}),
         vuln_type="cmd_injection",
@@ -294,7 +336,9 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2019-11399",
         vendor_patterns=frozenset({"trendnet"}),
-        model_patterns=frozenset({"tew-827dru", "tew-632brp", "tew-652brp", "tew-731br", "tew-813dru"}),
+        model_patterns=frozenset(
+            {"tew-827dru", "tew-632brp", "tew-652brp", "tew-731br", "tew-813dru"}
+        ),
         binary_indicators=frozenset({"httpd", "cgi-bin"}),
         sink_symbols=frozenset({"system", "popen", "execve"}),
         vuln_type="cmd_injection",
@@ -318,7 +362,19 @@ KNOWN_CVE_SIGNATURES: list[CveSignature] = [
     CveSignature(
         cve_id="CVE-2021-34991",
         vendor_patterns=frozenset({"netgear"}),
-        model_patterns=frozenset({"r6400", "r6700", "r7000", "r7850", "r7900", "r8000", "rax35", "rax38", "rax40"}),
+        model_patterns=frozenset(
+            {
+                "r6400",
+                "r6700",
+                "r7000",
+                "r7850",
+                "r7900",
+                "r8000",
+                "rax35",
+                "rax38",
+                "rax40",
+            }
+        ),
         binary_indicators=frozenset({"httpd", "upnpd"}),
         sink_symbols=frozenset({"system", "popen", "sprintf", "strcpy"}),
         vuln_type="buffer_overflow",
@@ -399,20 +455,27 @@ def match_known_signatures(
         if confidence < 0.50:
             continue
 
-        matches.append({
-            "cve_id": sig.cve_id,
-            "vendor_match": vendor_match,
-            "model_match": model_match,
-            "binary_match": binary_match,
-            "sink_match": sink_match,
-            "confidence": round(confidence, 2),
-            "cvss_v3_score": sig.cvss_v3_score,
-            "vuln_type": sig.vuln_type,
-            "description": sig.description,
-            "entry_point": sig.entry_point,
-            "match_type": "known_signature",
-        })
+        matches.append(
+            {
+                "cve_id": sig.cve_id,
+                "vendor_match": vendor_match,
+                "model_match": model_match,
+                "binary_match": binary_match,
+                "sink_match": sink_match,
+                "confidence": round(confidence, 2),
+                "cvss_v3_score": sig.cvss_v3_score,
+                "vuln_type": sig.vuln_type,
+                "description": sig.description,
+                "entry_point": sig.entry_point,
+                "match_type": "known_signature",
+            }
+        )
 
     # Sort by confidence descending
-    matches.sort(key=lambda m: (-float(m.get("confidence", 0)), str(m.get("cve_id", ""))))
+    matches.sort(
+        key=lambda m: (
+            -safe_float(m.get("confidence"), default=0.0),
+            str(m.get("cve_id", "")),
+        )
+    )
     return matches

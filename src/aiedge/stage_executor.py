@@ -11,7 +11,7 @@ run_stages() for-loop.
 
 import subprocess
 import time
-from typing import cast
+from typing import Any, cast
 
 from .schema import JsonValue
 from .stage import (
@@ -49,7 +49,7 @@ def execute_single_stage(
     stage_name = getattr(stage, "name", stage.__class__.__name__)
 
     if on_progress is not None and hasattr(on_progress, "on_start"):
-        on_progress.on_start(idx, total, stage_name)
+        cast(Any, on_progress).on_start(idx, total, stage_name)
 
     started_at = _iso_utc_now()
     t0 = time.monotonic()
@@ -94,6 +94,6 @@ def execute_single_stage(
     )
 
     if on_progress is not None and hasattr(on_progress, "on_end"):
-        on_progress.on_end(idx, total, stage_name, res)
+        cast(Any, on_progress).on_end(idx, total, stage_name, res)
 
     return res

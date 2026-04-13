@@ -12,7 +12,7 @@ import stat
 import struct
 import subprocess
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from http.client import HTTPResponse
@@ -21,6 +21,7 @@ from typing import cast
 from urllib import error as url_error
 from urllib import request as url_request
 
+from ._typing_helpers import safe_int
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
@@ -197,7 +198,9 @@ def _run_command(
         )
 
 
-def _resolve_privileged_executor(*, run_dir: Path) -> tuple[PrivilegedExecutor, list[str]]:
+def _resolve_privileged_executor(
+    *, run_dir: Path
+) -> tuple[PrivilegedExecutor, list[str]]:
     limitations: list[str] = []
     sudo_bin = shutil.which("sudo")
 
@@ -521,7 +524,9 @@ def _collect_static_port_hints(*, run_dir: Path) -> tuple[list[int], list[str]]:
     hints: set[int] = set(_BASE_PROBE_PORTS)
     sources: list[str] = []
 
-    inv_obj = _safe_load_json_object(run_dir / "stages" / "inventory" / "inventory.json")
+    inv_obj = _safe_load_json_object(
+        run_dir / "stages" / "inventory" / "inventory.json"
+    )
     service_candidates_any = inv_obj.get("service_candidates")
     if isinstance(service_candidates_any, list):
         for item_any in cast(list[object], service_candidates_any):
@@ -539,7 +544,9 @@ def _collect_static_port_hints(*, run_dir: Path) -> tuple[list[int], list[str]]:
             if matched:
                 sources.append(f"service:{name}")
 
-    endpoints_obj = _safe_load_json_object(run_dir / "stages" / "endpoints" / "endpoints.json")
+    endpoints_obj = _safe_load_json_object(
+        run_dir / "stages" / "endpoints" / "endpoints.json"
+    )
     endpoints_any = endpoints_obj.get("endpoints")
     if isinstance(endpoints_any, list):
         for endpoint_any in cast(list[object], endpoints_any):
@@ -645,7 +652,7 @@ def _iter_port_scan_plan(
     range_start: int,
     range_end: int,
     full_range: bool,
-) -> Iterable[int]:
+) -> Iterator[int]:
     seen: set[int] = set()
     extra_count = 0
     for port in prioritized:
@@ -678,7 +685,9 @@ def _iter_port_scan_plan(
         yield port
 
 
-def _scan_single_tcp_port(*, target_ip: str, port: int, timeout_s: float) -> tuple[int, str, str]:
+def _scan_single_tcp_port(
+    *, target_ip: str, port: int, timeout_s: float
+) -> tuple[int, str, str]:
     sock: object | None = None
     try:
         # keep socket.create_connection for compatibility with tests/monkeypatching
@@ -735,11 +744,15 @@ def _probe_target_ports(
         }, limitations
 
     hint_ports, hint_sources = _collect_static_port_hints(run_dir=run_dir)
-    connect_timeout_s, workers, budget_s, range_start, range_end, top_k_ports, full_range = (
-        _derive_portscan_config(
-        timeout_s=timeout_s
-    )
-    )
+    (
+        connect_timeout_s,
+        workers,
+        budget_s,
+        range_start,
+        range_end,
+        top_k_ports,
+        full_range,
+    ) = _derive_portscan_config(timeout_s=timeout_s)
     plan_iter = _iter_port_scan_plan(
         prioritized=hint_ports,
         top_k_ports=top_k_ports,
@@ -843,8 +856,12 @@ def _probe_target_ports(
     payload: dict[str, JsonValue] = {
         "status": status,
         "target_ip": target_ip,
-        "scan_strategy": "adaptive_top_k_tcp" if not full_range else "adaptive_full_range_tcp",
-        "scan_range": cast(list[JsonValue], cast(list[object], [int(range_start), int(range_end)])),
+        "scan_strategy": (
+            "adaptive_top_k_tcp" if not full_range else "adaptive_full_range_tcp"
+        ),
+        "scan_range": cast(
+            list[JsonValue], cast(list[object], [int(range_start), int(range_end)])
+        ),
         "scan_top_k": int(top_k_ports),
         "scan_full_range": bool(full_range),
         "scan_connect_timeout_s": float(connect_timeout_s),
@@ -990,9 +1007,7 @@ def _capture_firewall_snapshot(
                         "firewall_snapshot_incomplete",
                     ]
                 )
-                sections.append(
-                    f"### {label}\nSKIP: privileged executor unavailable\n"
-                )
+                sections.append(f"### {label}\nSKIP: privileged executor unavailable\n")
                 continue
             argv = wrapped
 
@@ -1068,7 +1083,11 @@ def _capture_pcap(
     if wrapped_argv is None:
         _write_minimal_pcap(pcap_path, linktype=1)
         limitations.extend(
-            ["pcap_placeholder", "privileged_executor_missing", "sudo_nopasswd_required"]
+            [
+                "pcap_placeholder",
+                "privileged_executor_missing",
+                "sudo_nopasswd_required",
+            ]
         )
         return sorted(set(limitations)), {
             "status": "placeholder",
@@ -1088,9 +1107,8 @@ def _capture_pcap(
         _write_minimal_pcap(pcap_path, linktype=1)
         limitations.append("pcap_placeholder")
 
-    if (
-        (not pcap_path.exists())
-        or (pcap_path.is_file() and pcap_path.stat().st_size < 24)
+    if (not pcap_path.exists()) or (
+        pcap_path.is_file() and pcap_path.stat().st_size < 24
     ):
         _write_minimal_pcap(pcap_path, linktype=1)
         limitations.append("pcap_placeholder")
@@ -1201,13 +1219,18 @@ def _scan_roots_for_binary(
                 score += 260
             if any(name_low.endswith(suffix) for suffix in priority_suffixes):
                 score += 220
-            if any(segment in rel.lower() for segment in ("/sbin/", "/bin/", "/usr/sbin/", "/usr/bin/")):
+            if any(
+                segment in rel.lower()
+                for segment in ("/sbin/", "/bin/", "/usr/sbin/", "/usr/bin/")
+            ):
                 score += 90
             if name_low in executable_names:
                 score += 110
             if name_low.startswith(("ubnt-", "vyatta-", "wireguard")):
                 score += 100
-            if name_low.startswith(("dhcp", "http", "ssh", "dropbear", "nginx", "lighttpd")):
+            if name_low.startswith(
+                ("dhcp", "http", "ssh", "dropbear", "nginx", "lighttpd")
+            ):
                 score += 80
             if path.suffix.lower() == ".cgi":
                 score += 70
@@ -1443,7 +1466,9 @@ def _run_qemu_user_fallback(
                 "candidate": candidate_index,
                 "candidate_path": candidate_rel,
                 "argv": cast(list[JsonValue], cast(list[object], safe_argv)),
-                "attempt_args": cast(list[JsonValue], cast(list[object], list(attempt_args))),
+                "attempt_args": cast(
+                    list[JsonValue], cast(list[object], list(attempt_args))
+                ),
                 "returncode": int(res.returncode),
                 "timed_out": bool(res.timed_out),
                 "success": _looks_like_qemu_success_output(
@@ -1489,10 +1514,11 @@ def _run_qemu_user_fallback(
                 f"[#{entry.get('index', '')}] candidate={entry.get('candidate', '')} "
                 f"args={entry_attempt_args} rc={entry.get('returncode', 'unknown')} "
                 f"success={entry.get('success', False)}",
-                "  command: "
-                + " ".join(cast(list[str], entry_argv))
-                if isinstance(entry_argv, list)
-                else "  command: <missing>",
+                (
+                    "  command: " + " ".join(cast(list[str], entry_argv))
+                    if isinstance(entry_argv, list)
+                    else "  command: <missing>"
+                ),
                 "  stdout: " + cast(str, entry.get("stdout_sample", "")),
                 "  stderr: " + cast(str, entry.get("stderr_sample", "")),
                 "",
@@ -1504,7 +1530,11 @@ def _run_qemu_user_fallback(
         proof_path,
         {
             "status": proof_status,
-            "reason": "qemu_user_fallback_attempted" if fallback_succeeded else "qemu_user_fallback_failed",
+            "reason": (
+                "qemu_user_fallback_attempted"
+                if fallback_succeeded
+                else "qemu_user_fallback_failed"
+            ),
             "dynamic_scope": dynamic_scope,
             "candidate_count": int(len(candidates)),
             "attempts": cast(list[JsonValue], cast(list[object], attempt_records)),
@@ -1541,9 +1571,11 @@ def _run_qemu_user_fallback(
 
     best_attempt_argv = cast(
         list[object],
-        best_attempt.get("argv", cast(list[JsonValue], cast(list[object], [])))
-        if isinstance(best_attempt, dict)
-        else cast(list[JsonValue], cast(list[object], [])),
+        (
+            best_attempt.get("argv", cast(list[JsonValue], cast(list[object], [])))
+            if isinstance(best_attempt, dict)
+            else cast(list[JsonValue], cast(list[object], []))
+        ),
     )
     run_result = {
         "status": proof_status,
@@ -1554,14 +1586,22 @@ def _run_qemu_user_fallback(
                 best_attempt_argv if isinstance(best_attempt_argv, list) else [],
             ),
         ),
-        "returncode": int(best_attempt.get("returncode", -1))
-        if isinstance(best_attempt, dict)
-        else -1,
-        "timed_out": bool(best_attempt.get("timed_out", False))
-        if isinstance(best_attempt, dict)
-        else False,
+        "returncode": (
+            safe_int(best_attempt.get("returncode"), default=-1)
+            if isinstance(best_attempt, dict)
+            else -1
+        ),
+        "timed_out": (
+            bool(best_attempt.get("timed_out", False))
+            if isinstance(best_attempt, dict)
+            else False
+        ),
         "error": _sanitize_string_paths(
-            str(best_attempt.get("error", "")) if isinstance(best_attempt, dict) else "",
+            (
+                str(best_attempt.get("error", ""))
+                if isinstance(best_attempt, dict)
+                else ""
+            ),
             run_dir=run_dir,
         ),
     }
@@ -1670,7 +1710,9 @@ class DynamicValidationStage:
             {"path": _rel_to_run_dir(ctx.run_dir, pcap_path)},
         ]
 
-        _resolved_firmae = self.firmae_root or os.environ.get("AIEDGE_FIRMAE_ROOT", "/opt/FirmAE")
+        _resolved_firmae = self.firmae_root or os.environ.get(
+            "AIEDGE_FIRMAE_ROOT", "/opt/FirmAE"
+        )
         firmae_root = Path(_resolved_firmae)
         run_sh = firmae_root / "run.sh"
         scratch_root = firmae_root / "scratch"
@@ -1701,9 +1743,7 @@ class DynamicValidationStage:
                 break
 
             boot_cmd = [str(run_sh), "-c", "auto", str(firmware_path)]
-            argv = _build_privileged_argv(
-                boot_cmd, executor=privileged_executor
-            )
+            argv = _build_privileged_argv(boot_cmd, executor=privileged_executor)
             if argv is None:
                 limitations.extend(
                     [
@@ -1787,8 +1827,7 @@ class DynamicValidationStage:
                 or ("sudo" in stderr_l and "askpass" in stderr_l)
             )
             sudo_exec_blocked = "sudo" in stderr_l and (
-                "no new privileges" in stderr_l
-                or "operation not permitted" in stderr_l
+                "no new privileges" in stderr_l or "operation not permitted" in stderr_l
             )
             if sudo_auth_blocked:
                 limitations.append("sudo_nopasswd_required")
@@ -1903,9 +1942,11 @@ class DynamicValidationStage:
 
         summary_doc: dict[str, JsonValue] = {
             "schema_version": "1.0",
-            "status": "ok"
-            if dynamic_scope == "full_system" and not limitations
-            else "partial",
+            "status": (
+                "ok"
+                if dynamic_scope == "full_system" and not limitations
+                else "partial"
+            ),
             "dynamic_scope": dynamic_scope,
             "target": {
                 "iid": target_iid or "",

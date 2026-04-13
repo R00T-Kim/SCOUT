@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from . import __version__ as AIEDGE_VERSION
+from ._typing_helpers import safe_float
 from .exploit_tiering import (
     default_exploitability_tier,
     exploitability_tier_rank,
@@ -2662,10 +2663,10 @@ def _hardening_score_multiplier(hardening_summary: dict[str, object] | None) -> 
     if not isinstance(elf_total, (int, float)) or elf_total <= 0:
         return 1.0
 
-    nx_pct = float(hardening_summary.get("nx_pct", 0) or 0)
-    pie_pct = float(hardening_summary.get("pie_pct", 0) or 0)
-    relro_pct = float(hardening_summary.get("relro_full_pct", 0) or 0)
-    canary_pct = float(hardening_summary.get("canary_pct", 0) or 0)
+    nx_pct = safe_float(hardening_summary.get("nx_pct"), default=0.0)
+    pie_pct = safe_float(hardening_summary.get("pie_pct"), default=0.0)
+    relro_pct = safe_float(hardening_summary.get("relro_full_pct"), default=0.0)
+    canary_pct = safe_float(hardening_summary.get("canary_pct"), default=0.0)
 
     pcts = [nx_pct, pie_pct, relro_pct, canary_pct]
     # Count how many protections are weak (<=20%)
@@ -2741,9 +2742,11 @@ def _build_exploit_candidates_payload(
                 if str(finding_by_source_id[source_id].get("family", ""))
             }
         )
-        evidence_refs: set[str] = set(_as_run_relative_refs(chain.get("evidence_refs")))
+        evidence_refs_set: set[str] = set(
+            _as_run_relative_refs(chain.get("evidence_refs"))
+        )
         for source_id in source_finding_ids:
-            evidence_refs.update(
+            evidence_refs_set.update(
                 _as_run_relative_refs(
                     finding_by_source_id[source_id].get("evidence_refs")
                 )
@@ -2763,7 +2766,7 @@ def _build_exploit_candidates_payload(
             ),
             "families": cast(list[JsonValue], cast(list[object], families)),
             "evidence_refs": cast(
-                list[JsonValue], cast(list[object], sorted(evidence_refs))
+                list[JsonValue], cast(list[object], sorted(evidence_refs_set))
             ),
             "summary": f"Chain-backed candidate from {len(finding_ids)} linked finding(s).",
             "why_candidate": (

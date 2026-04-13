@@ -282,9 +282,15 @@ def run_codex_exec_summary(
     # Map driver attempts to site-specific log format
     attempts: list[dict[str, JsonValue]] = []
     for att in result.attempts:
+        argv_raw = att.get("argv", [])
+        argv_list: list[JsonValue] = (
+            cast(list[JsonValue], list(cast(list[object], argv_raw)))
+            if isinstance(argv_raw, list)
+            else []
+        )
         attempts.append(
             {
-                "argv": cast(JsonValue, list(att.get("argv", []))),
+                "argv": argv_list,
                 "exit_code": cast(JsonValue, att.get("returncode", -1)),
                 "stdout": _truncate_text(str(att.get("stdout", ""))),
                 "stderr": _truncate_text(str(att.get("stderr", ""))),
