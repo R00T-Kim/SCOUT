@@ -373,11 +373,50 @@ def _parse_dpkg_status(
     return added
 
 
+def _extract_ascii_runs(data: bytes, min_len: int = 6) -> str:
+    """Return space-joined printable ASCII runs of length >= min_len from ``data``.
+
+    Lightweight replacement for the ``strings`` utility so SBOM binary
+    version scanning does not take a runtime dependency. Used when the
+    inventory-level ``binary_analysis`` entries do not carry pre-computed
+    ``string_hits`` (current schema, post-v2.x).
+    """
+    runs: list[str] = []
+    buf: bytearray = bytearray()
+    for b in data:
+        if 32 <= b < 127:
+            buf.append(b)
+        else:
+            if len(buf) >= min_len:
+                runs.append(buf.decode("ascii"))
+            buf.clear()
+    if len(buf) >= min_len:
+        runs.append(buf.decode("ascii"))
+    return " ".join(runs)
+
+
 def _detect_from_binary_analysis(
     binary_analysis: list[object],
     registry: _ComponentRegistry,
+    *,
+    run_dir: Path | None = None,
+    max_scan_bytes: int = 256 * 1024,
 ) -> int:
-    """Scan binary_analysis string_hits for known version patterns."""
+    """Scan binary_analysis entries for known version patterns.
+
+    Supports two inventory schemas for backward compatibility:
+
+    1. **Pre-v2.x**: entries carry a ``string_hits`` list of pre-extracted
+       printable strings; the function concatenates them and applies
+       ``_BINARY_PATTERNS`` regexes.
+    2. **Post-v2.x** (current): entries only carry ``path`` / ``arch`` /
+       ``matched_symbols`` / ``hardening`` and have no pre-extracted strings.
+       When ``run_dir`` is provided, the function reads the first
+       ``max_scan_bytes`` bytes of each binary directly via
+       :func:`_extract_ascii_runs` and applies the same regexes.
+
+    Fail-open: unreadable files are silently skipped.
+    """
     added = 0
     for entry in binary_analysis:
         if not isinstance(entry, dict):
@@ -385,12 +424,29 @@ def _detect_from_binary_analysis(
         entry_d = cast(dict[str, object], entry)
         path_any = entry_d.get("path", "")
         source_rel = str(path_any) if isinstance(path_any, str) else ""
+
+        hits_text = ""
         string_hits_any = entry_d.get("string_hits", [])
-        if not isinstance(string_hits_any, list):
+        if isinstance(string_hits_any, list) and string_hits_any:
+            hits_text = " ".join(
+                str(h)
+                for h in cast(list[object], string_hits_any)
+                if isinstance(h, str)
+            )
+
+        if not hits_text and run_dir is not None and source_rel:
+            bin_path = (run_dir / source_rel).resolve()
+            try:
+                if bin_path.is_file() and bin_path.is_relative_to(run_dir.resolve()):
+                    with bin_path.open("rb") as fh:
+                        data = fh.read(max_scan_bytes)
+                    hits_text = _extract_ascii_runs(data)
+            except (OSError, ValueError):
+                hits_text = ""
+
+        if not hits_text:
             continue
-        hits_text = " ".join(
-            str(h) for h in cast(list[object], string_hits_any) if isinstance(h, str)
-        )
+
         for canon_name, pattern, confidence in _BINARY_PATTERNS:
             m = pattern.search(hits_text)
             if not m:
@@ -405,7 +461,7 @@ def _detect_from_binary_analysis(
                 detection_method="binary_string",
                 confidence=confidence,
                 source_file=source_rel,
-                evidence_ref=f"sha256:{sha256_text(hits_text)}",
+                evidence_ref=f"sha256:{sha256_text(hits_text[:1024])}",
             )
             if registry.add(comp):
                 added += 1
@@ -533,18 +589,59 @@ def _scan_rootfs_for_pkg_dbs(
     return limitations
 
 
-def _collect_so_files_from_inventory(inventory: dict[str, object]) -> list[str]:
-    """Return all run-relative file paths ending in .so* from inventory file_list."""
+def _collect_so_files_from_inventory(
+    inventory: dict[str, object], run_dir: Path | None = None
+) -> list[str]:
+    """Return run-relative paths ending in ``.so*`` under inventory roots.
+
+    The pre-v2.x inventory schema emitted a top-level ``file_list`` array
+    that this helper read directly. The current inventory schema only
+    exposes ``roots`` (a list of run-relative extracted filesystem roots)
+    and a top-level ``entries`` *count*, so we walk each root on disk and
+    glob for ``.so*`` files. When ``run_dir`` is ``None`` (legacy callers
+    or tests that pass only ``inventory``), the function falls back to the
+    legacy ``file_list`` read for backward compatibility.
+
+    Fail-open: missing roots or unreadable paths yield an empty list.
+    """
     file_list_any = inventory.get("file_list", [])
-    if not isinstance(file_list_any, list):
+    if isinstance(file_list_any, list) and file_list_any:
+        legacy: list[str] = []
+        for item in cast(list[object], file_list_any):
+            if isinstance(item, str) and ".so" in item:
+                legacy.append(item)
+        if legacy:
+            return legacy
+
+    if run_dir is None:
         return []
-    result: list[str] = []
-    for item in cast(list[object], file_list_any):
-        if not isinstance(item, str):
+
+    roots_any = inventory.get("roots", [])
+    if not isinstance(roots_any, list):
+        return []
+
+    walked: list[str] = []
+    run_dir_resolved = run_dir.resolve()
+    for root_str in cast(list[object], roots_any):
+        if not isinstance(root_str, str) or not root_str or root_str.startswith("/"):
             continue
-        if ".so" in item:
-            result.append(item)
-    return result
+        root_path = (run_dir / root_str).resolve()
+        try:
+            if not root_path.is_relative_to(run_dir_resolved):
+                continue
+        except ValueError:
+            continue
+        if not root_path.is_dir():
+            continue
+        for candidate in root_path.rglob("*.so*"):
+            if not candidate.is_file():
+                continue
+            try:
+                rel = candidate.relative_to(run_dir_resolved)
+            except ValueError:
+                continue
+            walked.append(str(rel))
+    return walked
 
 
 # ---------------------------------------------------------------------------
@@ -834,11 +931,13 @@ class SbomStage:
         if ba_path.is_file():
             ba_raw = _safe_json_load(ba_path)
             if isinstance(ba_raw, dict):
-                entries_any = ba_raw.get("binaries", ba_raw.get("entries", []))
+                # Post-v2.x inventory schema uses ``hits``; earlier schemas
+                # used ``binaries`` or ``entries``. Accept all three.
+                entries_any = ba_raw.get(
+                    "hits", ba_raw.get("binaries", ba_raw.get("entries", []))
+                )
                 if isinstance(entries_any, list):
                     binary_analysis = cast(list[object], entries_any)
-            # Also accept a plain top-level list wrapped in {"items": [...]}
-            # Fallback: try reading raw list via a different key or direct list
         elif not ba_path.is_file():
             limitations.append(
                 "binary_analysis.json missing; binary version detection skipped"
@@ -855,12 +954,15 @@ class SbomStage:
         pkg_limits = _scan_rootfs_for_pkg_dbs(run_dir, inventory, registry)
         limitations.extend(pkg_limits)
 
-        # 2. Binary string version detection
+        # 2. Binary string version detection. ``run_dir`` lets the helper
+        #    fall back to reading printable runs from the binary file when
+        #    the inventory entry lacks pre-extracted ``string_hits``.
         if binary_analysis:
-            _detect_from_binary_analysis(binary_analysis, registry)
+            _detect_from_binary_analysis(binary_analysis, registry, run_dir=run_dir)
 
-        # 3. SO library filenames from inventory file list
-        so_files = _collect_so_files_from_inventory(inventory)
+        # 3. SO library filenames walked from inventory roots (pre-v2.x
+        #    ``file_list`` is honoured as a fallback inside the helper).
+        so_files = _collect_so_files_from_inventory(inventory, run_dir=run_dir)
         if so_files:
             _detect_so_libraries(so_files, registry)
 
