@@ -4,7 +4,7 @@
 
 # SCOUT
 
-### Deterministic Firmware Security Analysis Pipeline
+### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
 
 **펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인이 나옵니다 -- 명령어 하나로.**
 
@@ -33,10 +33,16 @@
 <td align="center"><strong>≈ 0%</strong><br/><sub>False Negative<br/>Rate</sub></td>
 </tr>
 </table>
+<sub>기준 데이터(carry-over): Tier 1 v2.4.0, 2026-04-05, static-only, 1,123 펌웨어 · Tier 2 v2.3.0, 2026-04-09, claude-code 드라이버, 36 펌웨어</sub>
 
 [English](README.md) | [한국어 (이 파일)](README.ko.md)
 
 </div>
+
+---
+
+> [!NOTE]
+> **README의 벤치마크 수치는 모두 carry-over baseline입니다** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123개 펌웨어 · Tier 2: v2.3.0 claude-code 드라이버, 2026-04-09, 36개 펌웨어). v2.5.0 기준 fresh corpus 재검증은 대기 중입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md) 와 [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
 
 ---
 
@@ -45,8 +51,8 @@
 > **모든 finding에 해시 기반 증거 체인이 있습니다.**
 > 파일 경로, 바이트 오프셋, SHA-256 해시, 근거 없이는 finding을 생성하지 않습니다. 펌웨어 블롭에서 최종 판정까지 추적 가능.
 
-> **3-tier 신뢰도 상한 + Ghidra P-code 검증 -- 정직한 점수.**
-> SYMBOL_COOCCURRENCE 0.40, STATIC_CODE_VERIFIED 0.55, PCODE_VERIFIED 0.75. `confirmed` 승격에는 동적 검증이 필요합니다. 점수를 부풀리지 않습니다.
+> **4-tier 신뢰도 상한 + Ghidra P-code 검증 -- 정직한 점수.**
+> SYMBOL_COOCCURRENCE 0.40, STATIC_CODE_VERIFIED 0.55, STATIC_ONLY 0.60, PCODE_VERIFIED 0.75. `confirmed` 승격에는 동적 검증이 필요합니다. 점수를 부풀리지 않습니다.
 
 > **SARIF + CycloneDX VEX + SLSA -- 표준 포맷.**
 > GitHub Code Scanning, VS Code, CI/CD 즉시 연동.
@@ -125,7 +131,7 @@
 | :link: | **증거 체인** | SHA-256 앵커 아티팩트 + 4-tier 신뢰도 상한 (0.40/0.55/0.60/0.75) + 5단계 exploit 승격 ladder |
 | :scroll: | **표준 출력** | SARIF 2.1.0 (GitHub Code Scanning) + CycloneDX 1.6 + VEX + SLSA Level 2 in-toto 인증 |
 | :gear: | **CI/CD 통합** | GitHub Action (`.github/actions/scout-scan/`) composite Docker action + GitHub Security 탭 SARIF 자동 업로드 |
-| :scales: | **규제 준수** | EU CRA Annex I 12개 필수 요구사항 매핑 (`docs/cra_compliance_mapping.md`); FDA SBOM 대응; ISO 21434 / UN R155 호환 출력 |
+| :scales: | **규제 정합성** | EU CRA Annex I 호환 출력 포맷 (`docs/cra_compliance_mapping.md`); FDA Section 524B 가이던스 호환 SBOM 출력; ISO 21434 / UN R155 호환 출력 포맷 |
 | :chart_with_upwards_trend: | **벤치마킹** | FirmAE 데이터셋 (1,123 펌웨어), analyst-readiness 점수화, verifier 기반 archive bundle, TP/FP 분석 스크립트 |
 | :key: | **벤더 복호화** | D-Link SHRS AES-128-CBC 자동 복호화; Shannon entropy 암호화 탐지 (>7.9); binwalk v3 호환 |
 | :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib만 사용 — pip 의존성 없음, 에어갭 환경 배포 친화적 |
@@ -196,11 +202,17 @@ OTA 전용 스테이지: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boott
 ## 벤치마크
 
 ### Tier 1 (정적 분석, frozen baseline)
+
+_기준 데이터: v2.4.0, 2026-04-05, static-only (carry-over; v2.5.0 코퍼스 재검증 예정)_
+
 - `1,123`개 펌웨어 / `8`개 벤더 / `99.2%` 분석 가능 비율
 - `1,110` success / `4` partial / `9` failed
 - `3,523` findings / `13,893` CVE 매칭
 
 ### Tier 2 (LLM Adversarial Debate, GPT-5.3-Codex)
+
+_기준 데이터: v2.3.0, 2026-04-09, claude-code 드라이버 (carry-over; v2.5.0 코퍼스 재검증 예정)_
+
 - `36`개 펌웨어 / `9`개 벤더
 - `2,430` findings 토론 → `2,412` downgraded + `18` maintained
 - **FPR 감소율: 99.3%** | **False negative rate: ≈ 0%**
@@ -233,7 +245,7 @@ OTA 전용 스테이지: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boott
 |                                                                    |
 |  --> 에뮬레이션 --> [퍼징] --> 익스플로잇 체인 --> PoC --> 검증       |
 |                                                                    |
-|  42단계 . SHA-256 매니페스트 . 2-tier 신뢰도 상한 (0.40/0.55)        |
+|  42단계 . SHA-256 매니페스트 . 4-tier 신뢰도 상한 (0.40/0.55/0.60/0.75)     |
 |  출력: SARIF + CycloneDX VEX + SLSA L2 + Markdown 보고서            |
 +--------------------------------------------------------------------+
 |                    핸드오프 (firmware_handoff.json)                 |

@@ -1,0 +1,75 @@
+{
+  "version": "2.5.0",
+  "release_date": "2026-04-13",
+  "release_tag": "v2.5.0",
+  "release_commit": "8a2105c",
+  "status": "carry-over",
+  "notes": "Tier 1/2 baselines carried over from earlier versions. Fresh corpus re-validation pending. Single-firmware validation on R7000 documented separately.",
+  "tier1": {
+    "source_version": "v2.4.0",
+    "source_date": "2026-04-05",
+    "validation_date": "2026-04-05",
+    "driver": "static-only",
+    "firmware_count": 1123,
+    "analysis_rate": "99.2%",
+    "findings_count": 3523,
+    "cve_matches": 13893,
+    "official_for_v2.5.0": false,
+    "carry_over": true
+  },
+  "tier2": {
+    "source_version": "v2.3.0",
+    "source_date": "2026-04-09",
+    "validation_date": "2026-04-09",
+    "driver": "claude-code",
+    "firmware_count": 36,
+    "findings_debated": 2430,
+    "cve_count": 988,
+    "fpr_reduction": "99.3%",
+    "true_findings_maintained": 18,
+    "official_for_v2.5.0": false,
+    "carry_over": true
+  },
+  "single_firmware_validations": [
+    {
+      "name": "R7000",
+      "vendor": "Netgear",
+      "input_path": "aiedge-inputs/netgear/R7000-V1.0.11.136_10.2.120.chk",
+      "size_mb": 31,
+      "driver": "codex",
+      "validation_date": "2026-04-13",
+      "run_id": "aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c",
+      "metrics": {
+        "adversarial_triage": {
+          "debated": 100,
+          "parsed_ok": 100,
+          "parse_failures": 0,
+          "llm_call_failures": 0,
+          "downgraded": 99,
+          "maintained": 1
+        },
+        "fp_verification": {
+          "eligible_checked": 100,
+          "true_positives": 57,
+          "false_positives": 43,
+          "unverified": 0,
+          "parse_failures": 0,
+          "llm_call_failures": 0
+        },
+        "cve_scan": {
+          "total_cve_matches": 23,
+          "finding_candidates": 22,
+          "epss_enriched": 23,
+          "epss_api_calls": 1
+        }
+      },
+      "scope": "single-firmware-validation",
+      "generalization_claim": false
+    }
+  ],
+  "fresh_corpus_pending": {
+    "tier1_target": "1,000+ firmware fresh re-run with v2.5.0",
+    "tier2_target": "36+ firmware fresh re-run with v2.5.0",
+    "estimated_completion": "2026-Q3"
+  }
+}

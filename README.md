@@ -4,7 +4,7 @@
 
 # SCOUT
 
-### Deterministic Firmware Security Analysis Pipeline
+### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
 
 **Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, and a hash-anchored evidence chain -- in one command.**
 
@@ -33,10 +33,16 @@
 <td align="center"><strong>≈ 0%</strong><br/><sub>False Negative<br/>Rate</sub></td>
 </tr>
 </table>
+<sub>Baseline (carry-over): Tier 1 v2.4.0, 2026-04-05, static-only, 1,123 firmware · Tier 2 v2.3.0, 2026-04-09, claude-code driver, 36 firmware</sub>
 
 [English (this file)](README.md) | [한국어](README.ko.md)
 
 </div>
+
+---
+
+> [!NOTE]
+> **Benchmark numbers in this README are carry-over baselines** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123 firmware · Tier 2: v2.3.0 claude-code driver, 2026-04-09, 36 firmware). Fresh v2.5.0 corpus re-validation is pending. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md) and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
 
 ---
 
@@ -45,8 +51,8 @@
 > **Every finding has a hash-anchored evidence chain.**
 > No finding without a file path, byte offset, SHA-256 hash, and rationale. Artifacts are immutable and traceable from firmware blob to final verdict.
 
-> **3-tier confidence with Ghidra P-code verification -- honest scoring.**
-> SYMBOL_COOCCURRENCE capped at 0.40, STATIC_CODE_VERIFIED at 0.55, PCODE_VERIFIED at 0.75. Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
+> **4-tier confidence caps with Ghidra P-code verification -- honest scoring.**
+> SYMBOL_COOCCURRENCE capped at 0.40, STATIC_CODE_VERIFIED at 0.55, STATIC_ONLY at 0.60, PCODE_VERIFIED at 0.75. Promotion to `confirmed` requires dynamic verification. We don't inflate scores.
 
 > **SARIF + CycloneDX VEX + SLSA provenance -- standard formats.**
 > GitHub Code Scanning, VS Code, CI/CD integration out of the box.
@@ -125,7 +131,7 @@
 | :link: | **Evidence Chain** | SHA-256 anchored artifacts + 4-tier confidence caps (0.40/0.55/0.60/0.75) + 5-tier exploit promotion ladder |
 | :scroll: | **Standard Output** | SARIF 2.1.0 (GitHub Code Scanning) + CycloneDX 1.6 + VEX + SLSA Level 2 in-toto attestation |
 | :gear: | **CI/CD Integration** | GitHub Action (`.github/actions/scout-scan/`) with composite Docker action + automatic SARIF upload to GitHub Security tab |
-| :scales: | **Regulatory Compliance** | EU CRA Annex I 12 essential requirements mapped (`docs/cra_compliance_mapping.md`); FDA SBOM ready; ISO 21434 / UN R155 compatible outputs |
+| :scales: | **Regulatory Alignment** | Output formats compatible with EU CRA Annex I (`docs/cra_compliance_mapping.md`); SBOM output compatible with FDA Section 524B guidance; output formats compatible with ISO 21434 / UN R155 |
 | :chart_with_upwards_trend: | **Benchmarking** | FirmAE dataset (1,123 firmware), analyst-readiness scoring, verifier-backed archive bundles, TP/FP analysis scripts |
 | :key: | **Vendor Decrypt** | D-Link SHRS AES-128-CBC auto-decryption; Shannon entropy encryption detection (>7.9); binwalk v3 compatibility |
 | :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib only — no pip dependencies, air-gap friendly deployment |
@@ -196,11 +202,17 @@ OTA-specific stages: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boottriag
 ## Benchmarks
 
 ### Tier 1 (Static, frozen baseline)
+
+_Baseline: v2.4.0, 2026-04-05, static-only (carry-over; fresh v2.5.0 corpus re-validation pending)_
+
 - `1,123` firmware / `8` vendors / `99.2%` analysis rate
 - `1,110` success / `4` partial / `9` failed
 - `3,523` findings / `13,893` CVE matches
 
 ### Tier 2 (LLM Adversarial Debate, GPT-5.3-Codex)
+
+_Baseline: v2.3.0, 2026-04-09, claude-code driver (carry-over; fresh v2.5.0 corpus re-validation pending)_
+
 - `36` firmware / `9` vendors
 - `2,430` findings debated → `2,412` downgraded + `18` maintained
 - **FPR reduction: 99.3%** | **False negative rate: ≈ 0%**
@@ -233,7 +245,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for full version history.
 |                                                                    |
 |  --> Emulation --> [Fuzzing] --> Exploit Chain --> PoC --> Verify  |
 |                                                                    |
-|  42 stages . SHA-256 manifests . 2-tier confidence caps (0.40/0.55) |
+|  42 stages . SHA-256 manifests . 4-tier confidence caps (0.40/0.55/0.60/0.75) |
 |  Outputs: SARIF + CycloneDX VEX + SLSA L2 + Markdown reports       |
 +--------------------------------------------------------------------+
 |                    Handoff (firmware_handoff.json)                 |

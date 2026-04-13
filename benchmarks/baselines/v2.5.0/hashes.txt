@@ -1,0 +1,3 @@
+# SHA-256 hashes for baseline artifacts
+9d6f9a05a8781cbc985b6ddc071864219456570c756414f92994cf0065f32026  manifest.json
+2d81aef73a66b178224edcbab142e530f5fdb84201b8302902b73c79f58815d0  single_firmware/r7000_codex.json

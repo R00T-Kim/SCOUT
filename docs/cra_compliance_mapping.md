@@ -1,4 +1,4 @@
-# SCOUT CRA Compliance Mapping
+# SCOUT CRA Compatibility Mapping
 
 **Document Version:** 1.0  
 **SCOUT Version:** 2.5.0+  
@@ -7,9 +7,13 @@
 
 ---
 
+> **Disclaimer**: This document maps SCOUT outputs to EU CRA Annex I requirements for reference. SCOUT's output formats are *compatible with* CRA evidence requirements; full compliance certification is outside the scope of this tool and depends on the operator's complete compliance program.
+
+---
+
 ## Executive Summary
 
-The EU Cyber Resilience Act (CRA), entering force with its vulnerability reporting obligations on September 11, 2026, and full compliance requirements (including SBOM and CE marking) by December 11, 2027, establishes comprehensive security requirements for products with digital elements. SCOUT addresses the most technically demanding aspects of CRA compliance through deterministic firmware analysis, evidence chain validation, and machine-readable output in CRA-aligned formats.
+The EU Cyber Resilience Act (CRA), entering force with its vulnerability reporting obligations on September 11, 2026, and full compliance requirements (including SBOM and CE marking) by December 11, 2027, establishes comprehensive security requirements for products with digital elements. SCOUT addresses the most technically demanding aspects of CRA evidence requirements through hash-anchored evidence packaging, evidence chain validation, and machine-readable output in CRA-aligned formats.
 
 SCOUT is a 42-stage firmware security analysis pipeline that produces:
 - **CycloneDX 1.6 SBOM** — supply chain artifact inventory for vulnerability tracking
@@ -62,7 +66,7 @@ SCOUT's compliance coverage is assessed across all 12 Annex I essential security
 
 ---
 
-## SCOUT Output Formats for CRA Compliance
+## SCOUT Output Formats for CRA Compatibility
 
 ### 1. CycloneDX 1.6 SBOM
 
@@ -82,7 +86,7 @@ SCOUT's compliance coverage is assessed across all 12 Annex I essential security
 - License identification (to extent detectable from source)
 - Supply chain provenance markers
 
-**CRA Compliance Value:**
+**CRA Compatibility Value:**
 - Provides the machine-readable supply chain artifact required by Art. 13(15)
 - Enables automated vulnerability matching workflow
 - Consumable by policy and compliance platforms
@@ -108,7 +112,7 @@ SCOUT's compliance coverage is assessed across all 12 Annex I essential security
 - Reachability analysis: identifies CVEs in unused code paths (significant FP reduction)
 - Vendor patch detection: opkg revision analysis for backported patches not reflected in version number
 
-**CRA Compliance Value:**
+**CRA Compatibility Value:**
 - Directly satisfies Annex I(2) requirement for known vulnerability status
 - Enables proportionality assessment (immaterial CVEs in unreachable code paths can be documented)
 - Supports risk-based remediation prioritization
@@ -135,7 +139,7 @@ SCOUT's compliance coverage is assessed across all 12 Annex I essential security
 - Rule definitions with security-severity metadata
 - Evidence chain linkage to supporting artifacts
 
-**CRA Compliance Value:**
+**CRA Compatibility Value:**
 - Standard format accepted by GitHub Code Scanning, VS Code, GitLab, and other CI/CD platforms
 - Enables automated policy enforcement in development pipelines
 - Supports automated escalation to vulnerability management systems
@@ -161,7 +165,7 @@ SCOUT's compliance coverage is assessed across all 12 Annex I essential security
 - Tool versions and configuration (reproducibility baseline)
 - Timing and resource metrics
 
-**CRA Compliance Value:**
+**CRA Compatibility Value:**
 - Provides evidence that analysis is deterministic and auditable
 - Supports conformity assessment documentation
 - Enables third-party verification (re-analysis reproducibility)
@@ -185,7 +189,7 @@ SCOUT's compliance coverage is assessed across all 12 Annex I essential security
 - Verdict state per finding: VERIFIED, ATTEMPTED_INCONCLUSIVE, NOT_ATTEMPTED, NOT_APPLICABLE
 - Reason codes (e.g., VERIFIED_ALL_GATES_PASSED, NOT_ATTEMPTED_DYNAMIC_VALIDATION_MISSING)
 
-**CRA Compliance Value:**
+**CRA Compatibility Value:**
 - Structured report for vulnerability disclosure coordination
 - Clear evidence of due diligence in vulnerability assessment
 - Supports communication with vendors and coordinated disclosure platforms
@@ -217,7 +221,7 @@ SCOUT provides useful but incomplete evidence for:
 
 ### Limited Coverage (1/12 Requirement)
 
-7. **Requirement 7 (Availability and resilience)** — Only available when dynamic stages (`emulation`, `dynamic_validation`) are enabled; deterministic pipeline does not include these by default
+7. **Requirement 7 (Availability and resilience)** — Only available when dynamic stages (`emulation`, `dynamic_validation`) are enabled; the `--no-llm` evidence packaging mode does not include these by default
 
 ---
 
@@ -425,7 +429,7 @@ SCOUT provides useful but incomplete evidence for:
 - Exploitability assessment is static (EPSS scores are predictive, not definitive)
 - Zero-days cannot be identified by definition
 
-**CRA Compliance:** Requirement 1 is **fully satisfied** by SCOUT's SBOM + CVE + reachability pipeline. This is the single most important CRA compliance requirement, and SCOUT is designed to address it comprehensively.
+**CRA Coverage Assessment:** Requirement 1 is **fully satisfied** by SCOUT's SBOM + CVE + reachability pipeline. This is the single most important CRA Annex I requirement, and SCOUT's outputs are designed to be compatible with it comprehensively.
 
 ---
 
@@ -456,7 +460,7 @@ SCOUT provides useful but incomplete evidence for:
 - Does not verify firmware image signature or verified boot chain
 - Does not assess privilege separation (DAC/capability-based security)
 
-**CRA Compliance:** Requirement 2 is **partially satisfied**. SCOUT provides strong evidence for binary hardening and obvious misconfigurations; deeper assessment requires dynamic validation or hardware-in-the-loop testing.
+**CRA Coverage Assessment:** Requirement 2 is **partially satisfied**. SCOUT provides strong evidence for binary hardening and obvious misconfigurations; deeper assessment requires dynamic validation or hardware-in-the-loop testing.
 
 ---
 
@@ -490,7 +494,7 @@ SCOUT provides useful but incomplete evidence for:
 - Does not test integrity checking at runtime
 - Does not assess key management practices
 
-**CRA Compliance:** Requirement 5 is **fully satisfied** for modern hardening techniques. SCOUT's per-binary analysis provides a complete audit trail of data integrity protections.
+**CRA Coverage Assessment:** Requirement 5 is **fully satisfied** for modern hardening techniques. SCOUT's per-binary analysis provides a complete audit trail of data integrity protections.
 
 ---
 
@@ -522,7 +526,7 @@ SCOUT provides useful but incomplete evidence for:
 - Cannot verify that updates are actually delivered to end users
 - Does not assess time-to-patch distribution (SLA compliance)
 
-**CRA Compliance:** Requirement 9 is **fully satisfied** for transparency. SCOUT provides the supply chain artifact (SBOM + version tracking) that enables evaluation of update feasibility. The actual process assessment is a business and operational matter outside the scope of technical analysis.
+**CRA Coverage Assessment:** Requirement 9 is **fully satisfied** for transparency. SCOUT provides the supply chain artifact (SBOM + version tracking) that enables evaluation of update feasibility. The actual process assessment is a business and operational matter outside the scope of technical analysis.
 
 ---
 
@@ -555,7 +559,7 @@ SCOUT provides useful but incomplete evidence for:
 - SPDX format not supported (CycloneDX only)
 - Requires re-analysis to update (not continuous monitoring)
 
-**CRA Compliance:** Requirement 10 is **fully satisfied**. SCOUT's SBOM + VEX pipeline directly addresses Art. 13(15) and Annex I(2). This is SCOUT's strongest compliance area.
+**CRA Coverage Assessment:** Requirement 10 is **fully satisfied**. SCOUT's SBOM + VEX pipeline directly addresses Art. 13(15) and Annex I(2). This is SCOUT's strongest compliance area.
 
 ---
 
@@ -588,11 +592,11 @@ SCOUT provides useful but incomplete evidence for:
 - Does not manage embargo periods
 - Disclosure timeline is input to SCOUT, not output
 
-**CRA Compliance:** Requirement 11 is **fully satisfied**. SCOUT's SARIF + evidence chain pipeline is designed to meet Art. 14 (vulnerability reporting) requirements. The evidence chain ensures auditability and reproducibility of findings.
+**CRA Coverage Assessment:** Requirement 11 is **fully satisfied**. SCOUT's SARIF + evidence chain pipeline is designed to meet Art. 14 (vulnerability reporting) requirements. The evidence chain ensures auditability and reproducibility of findings.
 
 ---
 
-## Implementation Timeline for CRA Compliance
+## Implementation Timeline for CRA Compatibility
 
 ### Phase 1: CRA 2026/09 Reporting Readiness (By August 2026)
 
@@ -603,7 +607,7 @@ SCOUT provides useful but incomplete evidence for:
 2. CycloneDX 1.6 SBOM generation (already implemented)
 3. VEX (Vulnerability Exploitability eXchange) output (already implemented)
 4. Analyst digest with structured disclosure metadata (already implemented)
-5. CRA compliance mapping document (**this document**)
+5. CRA compatibility mapping document (**this document**)
 
 **Effort:** 0 — all components are production-ready in SCOUT v2.5+
 
@@ -613,7 +617,7 @@ SCOUT provides useful but incomplete evidence for:
 
 ### Phase 2: CRA 2027/12 Full Compliance Preparation (By October 2027)
 
-**Goal:** Complete technical readiness for full CRA compliance (SBOM, CE marking documentation)
+**Goal:** Complete technical readiness for full CRA compatibility (SBOM, CE marking documentation)
 
 **Deliverables:**
 1. Extended secure configuration assessment (privilege separation, trusted boot)
@@ -663,7 +667,7 @@ SCOUT provides useful but incomplete evidence for:
 - VEX document enables documented risk acceptance
 - Recommend integrating with vendor security advisories for higher-value components
 
-**Impact on CRA:** Medium — CRA compliance assumes reasonable use of "available information" (Art. 2)
+**Impact on CRA:** Medium — CRA assumes reasonable use of "available information" (Art. 2)
 
 ---
 
@@ -704,16 +708,16 @@ SCOUT provides useful but incomplete evidence for:
 **Mitigation:**
 - SCOUT uses confidence caps (0.75 max) to account for LLM uncertainty
 - Adversarial triage (Advocate/Critic debate) reduces false positives
-- Deterministic analysis (`--no-llm`) available for production compliance runs
+- `--no-llm` deterministic evidence packaging available for production compliance runs
 - SLSA provenance includes LLM driver and model versions
 
-**Impact on CRA:** Low — Deterministic analysis is always available; LLM findings are supplementary
+**Impact on CRA:** Low — Deterministic evidence packaging (`--no-llm`) is always available; LLM findings are supplementary
 
 ---
 
 ## Comparison to Competing Tools
 
-| Tool | CRA Compliance | SBOM | Vulnerability Report | Evidence Chain | Notes |
+| Tool | CRA Coverage | SBOM | Vulnerability Report | Evidence Chain | Notes |
 |------|---|---|---|---|---|
 | **SCOUT** | Full (requirements 1,5,9,10,11); Partial (2,3,4,6,8,12) | CycloneDX 1.6 ✅ | SARIF 2.1.0 ✅ | SHA-256 + SLSA L2 ✅ | Open-source, deterministic, firmware-specialized |
 | **EMBA** | Partial | CycloneDX ✅ | EMBA format ⚠️ | None ❌ | Broader checks; no evidence chain |
@@ -727,7 +731,7 @@ SCOUT provides useful but incomplete evidence for:
 
 ## Conclusion
 
-SCOUT provides **comprehensive, machine-readable compliance evidence** for 5 of 12 CRA Annex I requirements (1, 5, 9, 10, 11), with **partial coverage** for 6 additional requirements (2, 3, 4, 6, 8, 12), and **limited coverage** for 1 requirement (7). This places SCOUT among the strongest open-source tools for CRA compliance support.
+SCOUT provides **comprehensive, machine-readable evidence** compatible with 5 of 12 CRA Annex I requirements (1, 5, 9, 10, 11), with **partial coverage** for 6 additional requirements (2, 3, 4, 6, 8, 12), and **limited coverage** for 1 requirement (7). This places SCOUT among the strongest open-source tools for CRA evidence generation.
 
 The pipeline's key strengths are:
 - **Deterministic evidence chain** (SHA-256 hashing + SLSA L2 provenance) enabling regulatory audit
@@ -740,7 +744,7 @@ The primary gaps are:
 - Coordinated disclosure process (business/policy layer, not technical)
 - Data classification and retention analysis (requires higher semantic understanding)
 
-**Recommendation:** Organizations deploying SCOUT for CRA compliance should:
+**Recommendation:** Organizations deploying SCOUT to support CRA evidence requirements should:
 1. Use the `--no-llm` deterministic mode for all compliance runs
 2. Enable dynamic stages (`emulation`, `dynamic_validation`) for high-risk products
 3. Integrate SCOUT SBOM/SARIF outputs with external disclosure platform
