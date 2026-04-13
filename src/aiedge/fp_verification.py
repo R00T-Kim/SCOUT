@@ -24,6 +24,7 @@ from .llm_driver import (
     write_llm_trace,
 )
 from .path_safety import assert_under_dir
+from .reasoning_trail import ReasoningEntry, append_entry, redact_excerpt
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
@@ -532,22 +533,49 @@ class FPVerificationStage:
                 # Step 6: Static pre-filters (skip LLM when possible)
                 # -------------------------------------------------------
                 alert_copy = dict(alert)
+                # PR #11 -- accumulate per-alert reasoning trail. Upstream
+                # stages may have already populated one; preserve it.
+                _existing_trail_any: object = alert.get("reasoning_trail")
+                alert_trail: list[dict[str, JsonValue]]
+                if isinstance(_existing_trail_any, list):
+                    alert_trail = [
+                        cast(dict[str, JsonValue], _e)
+                        for _e in cast(list[object], _existing_trail_any)
+                        if isinstance(_e, dict)
+                    ]
+                else:
+                    alert_trail = []
+                _FP_STAGE_LABEL = "fp_verification"
 
                 if decompiled_context:
                     # Pre-filter 1: constant-sink
                     if _check_constant_sink_in_context(decompiled_context, sink_sym):
-                        alert_copy["fp_verdict"] = "FP"
-                        alert_copy["fp_pattern"] = "constant_sink"
-                        alert_copy["fp_rationale"] = (
+                        _const_rationale = (
                             "Ghidra code confirms constant-sink pattern "
                             "(all sink arguments are literals)"
                         )
+                        alert_copy["fp_verdict"] = "FP"
+                        alert_copy["fp_pattern"] = "constant_sink"
+                        alert_copy["fp_rationale"] = _const_rationale
                         orig_conf = safe_float(alert.get("confidence"), default=0.5)
+                        _new_const = _clamp01(orig_conf - _CONFIDENCE_REDUCTION)
                         alert_copy["original_confidence"] = orig_conf
-                        alert_copy["confidence"] = _clamp01(
-                            orig_conf - _CONFIDENCE_REDUCTION
-                        )
+                        alert_copy["confidence"] = _new_const
                         alert_copy["static_prefilter"] = True
+                        # PR #11 trail entry
+                        alert_trail = append_entry(
+                            alert_trail,
+                            ReasoningEntry(
+                                stage=_FP_STAGE_LABEL,
+                                step="constant_sink_detected",
+                                verdict="downgrade",
+                                rationale=_const_rationale,
+                                delta=_new_const - orig_conf,
+                            ),
+                        )
+                        alert_copy["reasoning_trail"] = cast(
+                            JsonValue, cast(list[object], alert_trail)
+                        )
                         fp_count += 1
                         static_fp_count += 1
                         verified.append(cast(dict[str, JsonValue], alert_copy))
@@ -558,18 +586,50 @@ class FPVerificationStage:
                         decompiled_context, src_api, sink_sym
                     ):
                         orig_conf = safe_float(alert.get("confidence"), default=0.5)
-                        alert_copy["confidence"] = _clamp01(orig_conf - 0.15)
+                        _new_san = _clamp01(orig_conf - 0.15)
+                        alert_copy["confidence"] = _new_san
                         alert_copy["original_confidence"] = orig_conf
                         alert_copy["sanitizer_detected"] = True
+                        # PR #11 trail entry
+                        alert_trail = append_entry(
+                            alert_trail,
+                            ReasoningEntry(
+                                stage=_FP_STAGE_LABEL,
+                                step="sanitizer_detected",
+                                verdict="downgrade",
+                                rationale=(
+                                    "Static scan matched a sanitizer function "
+                                    "between source and sink; confidence reduced "
+                                    f"from {orig_conf:.3f} to {_new_san:.3f}"
+                                ),
+                                delta=_new_san - orig_conf,
+                            ),
+                        )
 
                 # Note: xref graph tracks user-defined function calls, not
                 # libc API calls (gets, system, etc.), so absence of a path
                 # does NOT confirm FP. Only reduce confidence slightly.
                 if xref_map and src_api and sink_sym and call_chain is None:
                     orig_conf = safe_float(alert.get("confidence"), default=0.5)
-                    alert_copy["confidence"] = _clamp01(orig_conf - 0.05)
+                    _new_nx = _clamp01(orig_conf - 0.05)
+                    alert_copy["confidence"] = _new_nx
                     alert_copy["original_confidence"] = orig_conf
                     alert_copy["no_xref_path"] = True
+                    # PR #11 trail entry (non-propagating heuristic)
+                    alert_trail = append_entry(
+                        alert_trail,
+                        ReasoningEntry(
+                            stage=_FP_STAGE_LABEL,
+                            step="non_propagating_detected",
+                            verdict="downgrade",
+                            rationale=(
+                                "No call-chain path from source to sink in xref "
+                                "graph; confidence nudged down "
+                                f"from {orig_conf:.3f} to {_new_nx:.3f}"
+                            ),
+                            delta=_new_nx - orig_conf,
+                        ),
+                    )
 
                 # -------------------------------------------------------
                 # LLM call with enriched prompt (skipped under --no-llm)
@@ -631,10 +691,53 @@ class FPVerificationStage:
                                 alert_copy["fp_pattern"] = fp_pattern
                                 alert_copy["fp_rationale"] = rationale
                                 fp_count += 1
+                                # PR #11 -- per-pattern trail entry
+                                _pattern_label = (
+                                    str(fp_pattern)
+                                    if isinstance(fp_pattern, str) and fp_pattern
+                                    else "llm_classified"
+                                )
+                                alert_trail = append_entry(
+                                    alert_trail,
+                                    ReasoningEntry(
+                                        stage=_FP_STAGE_LABEL,
+                                        step=f"{_pattern_label}_detected",
+                                        verdict="downgrade",
+                                        rationale=rationale
+                                        or (
+                                            "LLM classified this alert as a "
+                                            f"{_pattern_label} false positive"
+                                        ),
+                                        delta=new_conf - orig_conf,
+                                        llm_model="sonnet",
+                                        raw_response_excerpt=redact_excerpt(
+                                            result.stdout
+                                        ),
+                                    ),
+                                )
                             else:
                                 alert_copy["fp_verdict"] = "TP"
                                 alert_copy["fp_rationale"] = rationale
                                 tp_count += 1
+                                # PR #11 -- maintain entry
+                                alert_trail = append_entry(
+                                    alert_trail,
+                                    ReasoningEntry(
+                                        stage=_FP_STAGE_LABEL,
+                                        step="llm_verdict",
+                                        verdict="maintain",
+                                        rationale=rationale
+                                        or (
+                                            "LLM classified this alert as a "
+                                            "true positive"
+                                        ),
+                                        delta=0.0,
+                                        llm_model="sonnet",
+                                        raw_response_excerpt=redact_excerpt(
+                                            result.stdout
+                                        ),
+                                    ),
+                                )
                         else:
                             alert_copy["fp_verdict"] = "unverified"
                             alert_copy["fp_rationale"] = "LLM response parse failure"
@@ -659,6 +762,12 @@ class FPVerificationStage:
                 if trace_refs:
                     alert_copy["trace_refs"] = cast(
                         list[JsonValue], cast(list[object], trace_refs[-2:])
+                    )
+                # PR #11 -- attach accumulated trail to the alert (additive).
+                # Only include non-empty trails to keep outputs lean.
+                if alert_trail:
+                    alert_copy["reasoning_trail"] = cast(
+                        JsonValue, cast(list[object], alert_trail)
                     )
 
                 verified.append(cast(dict[str, JsonValue], alert_copy))
