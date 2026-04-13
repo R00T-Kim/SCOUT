@@ -32,6 +32,53 @@ from .cli_tui_data import (
     _collect_tui_candidate_groups,
     _count_bar,
 )
+from .reasoning_trail import format_trail_for_tui
+
+
+def render_finding_detail_with_trail(
+    finding: dict[str, object],
+    *,
+    use_unicode: bool = True,
+    max_rationale_chars: int = 80,
+) -> list[str]:
+    """Return TUI lines for a single finding, including reasoning trail.
+
+    PR #13 -- analyst-facing TUI surface for the LLM debate steps captured
+    by PR #11. Renders the finding's id/title/severity/confidence header
+    followed by a "Reasoning Trail (N):" section if the finding has a
+    non-empty trail. The trail section is hidden when the trail is missing
+    or empty so existing TUI layouts that show findings without trails
+    continue to work unchanged.
+
+    The function is the single source of truth for the snapshot renderer
+    and the interactive curses frame so tests can exercise it in isolation
+    without curses. ``use_unicode`` follows the ``AIEDGE_TUI_ASCII`` env
+    contract: when False, no non-ASCII glyphs appear in the output.
+    """
+    lines: list[str] = []
+    fid = _short_text(finding.get("id"), max_len=80) or "(unknown id)"
+    title = _short_text(finding.get("title"), max_len=80)
+    severity = _short_text(finding.get("severity"), max_len=12) or "unknown"
+    confidence = _as_float(finding.get("confidence"))
+    category = _short_text(finding.get("category"), max_len=24)
+
+    header_parts = [f"id={fid}", f"sev={severity}", f"conf={confidence:.2f}"]
+    if category:
+        header_parts.append(f"cat={category}")
+    lines.append("  " + " ".join(header_parts))
+    if title:
+        lines.append(f"    title: {title}")
+
+    trail_lines = format_trail_for_tui(
+        finding.get("reasoning_trail"),
+        use_unicode=use_unicode,
+        max_rationale_chars=max_rationale_chars,
+    )
+    if trail_lines:
+        lines.append(f"    Reasoning Trail ({len(trail_lines)}):")
+        for line in trail_lines:
+            lines.append(f"    {line}")
+    return lines
 
 
 def _build_tui_snapshot_lines(
@@ -582,6 +629,17 @@ def _build_tui_snapshot_lines(
     if not candidates:
         lines.append("")
         lines.append("(no candidates)")
+        # PR #13: even when no exploit candidates exist, still surface the
+        # findings_with_trails section so analysts can see LLM debate
+        # output captured by adversarial_triage / fp_verification.
+        _append_findings_with_trails_section(
+            lines=lines,
+            snapshot=snapshot,
+            limit=limit,
+            use_ansi=use_ansi,
+            use_unicode=use_unicode,
+            section_rule=section_rule,
+        )
         return lines
 
     lines.append("")
@@ -681,7 +739,61 @@ def _build_tui_snapshot_lines(
                     f"      - {_path_tail(sample, max_segments=6, max_len=96)}"
                 )
 
+    # PR #13: append a "Findings with Reasoning Trail" section when the
+    # findings stage captured at least one trail. Hidden when no trail is
+    # present (additive only) so legacy snapshots keep working unchanged.
+    _append_findings_with_trails_section(
+        lines=lines,
+        snapshot=snapshot,
+        limit=limit,
+        use_ansi=use_ansi,
+        use_unicode=use_unicode,
+        section_rule=section_rule,
+    )
+
     return lines
+
+
+def _append_findings_with_trails_section(
+    *,
+    lines: list[str],
+    snapshot: dict[str, object],
+    limit: int,
+    use_ansi: bool,
+    use_unicode: bool,
+    section_rule: str,
+) -> None:
+    """Append the PR #13 trail section to ``lines`` if any trails exist.
+
+    Mutates ``lines`` in place to mirror the rest of the snapshot
+    builder's append-only style. No-op when the snapshot does not carry
+    any trail-bearing findings, keeping the additive-only invariant.
+    """
+    findings_with_trails_any = snapshot.get("findings_with_trails")
+    findings_with_trails = (
+        cast(list[dict[str, object]], findings_with_trails_any)
+        if isinstance(findings_with_trails_any, list)
+        else []
+    )
+    if not findings_with_trails:
+        return
+    lines.append("")
+    lines.append(
+        _ansi(
+            "Findings with Reasoning Trail",
+            _ANSI_BOLD,
+            _ANSI_MAGENTA,
+            enabled=use_ansi,
+        )
+    )
+    lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
+    lines.append(f"({len(findings_with_trails)} finding(s) with LLM debate steps)")
+    for finding_any in findings_with_trails[: min(limit, len(findings_with_trails))]:
+        if not isinstance(finding_any, dict):
+            continue
+        finding = cast(dict[str, object], finding_any)
+        for line in render_finding_detail_with_trail(finding, use_unicode=use_unicode):
+            lines.append(line)
 
 
 def _safe_curses_addstr(

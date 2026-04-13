@@ -12,6 +12,7 @@ from typing import Callable, cast
 from zoneinfo import ZoneInfo
 
 from .exploit_tiering import is_valid_exploitability_tier
+from .reasoning_trail import format_trail_for_markdown
 from .schema import (
     ANALYST_DIGEST_AGGREGATION_RULE,
     ANALYST_DIGEST_REASON_CODES,
@@ -747,9 +748,9 @@ def collect_overview_artifact_statuses(
                     "ref": ref_norm,
                     "required": bool(required),
                     "status": "invalid",
-                    "reason": invalid_reason
-                    if invalid_reason is not None
-                    else "invalid",
+                    "reason": (
+                        invalid_reason if invalid_reason is not None else "invalid"
+                    ),
                 }
             )
             continue
@@ -1109,9 +1110,9 @@ def build_analyst_overview(
         "endpoints": endpoints_value if endpoints_value is not None else "unknown",
         "surfaces": surfaces_value if surfaces_value is not None else "unknown",
         "unknowns": unknowns_value if unknowns_value is not None else "unknown",
-        "non_promoted": non_promoted_value
-        if non_promoted_value is not None
-        else "unknown",
+        "non_promoted": (
+            non_promoted_value if non_promoted_value is not None else "unknown"
+        ),
     }
     known_attack_surface_values = sum(
         1
@@ -1300,15 +1301,19 @@ def build_analyst_overview(
                 "next_actions": cast(list[JsonValue], cast(list[object], next_actions)),
                 "report_completeness": cast(
                     JsonValue,
-                    report_completeness_snapshot
-                    if report_completeness_snapshot is not None
-                    else {"status": "unknown", "gate_passed": "unknown"},
+                    (
+                        report_completeness_snapshot
+                        if report_completeness_snapshot is not None
+                        else {"status": "unknown", "gate_passed": "unknown"}
+                    ),
                 ),
                 "run_completion": cast(
                     JsonValue,
-                    run_completion_snapshot
-                    if run_completion_snapshot is not None
-                    else {"status": "unknown"},
+                    (
+                        run_completion_snapshot
+                        if run_completion_snapshot is not None
+                        else {"status": "unknown"}
+                    ),
                 ),
             },
         },
@@ -1511,15 +1516,21 @@ def build_analyst_digest(
     digest: dict[str, JsonValue] = {
         "schema_version": ANALYST_DIGEST_SCHEMA_VERSION,
         "run": {
-            "run_id": run_id_any
-            if isinstance(run_id_any, str) and run_id_any
-            else "unknown-run",
-            "firmware_sha256": firmware_sha_any
-            if isinstance(firmware_sha_any, str) and firmware_sha_any
-            else "0" * 64,
-            "generated_at": generated_at_any
-            if isinstance(generated_at_any, str) and generated_at_any
-            else "unknown",
+            "run_id": (
+                run_id_any
+                if isinstance(run_id_any, str) and run_id_any
+                else "unknown-run"
+            ),
+            "firmware_sha256": (
+                firmware_sha_any
+                if isinstance(firmware_sha_any, str) and firmware_sha_any
+                else "0" * 64
+            ),
+            "generated_at": (
+                generated_at_any
+                if isinstance(generated_at_any, str) and generated_at_any
+                else "unknown"
+            ),
         },
         "top_risk_summary": {
             "total_findings": len(finding_verdicts),
@@ -1817,6 +1828,21 @@ def _normalize_v2_claim_from_finding(obj_any: object) -> dict[str, JsonValue] | 
     tier_any = obj.get("exploitability_tier")
     if is_valid_exploitability_tier(tier_any):
         out["exploitability_tier"] = cast(JsonValue, tier_any)
+    # PR #13: pass through reasoning_trail so the analyst report v2 / viewer /
+    # markdown can render the LLM debate steps. Mirrors PR #7a's category
+    # pass-through pattern: additive only, no schema bump, dropped when
+    # absent or malformed. The trail entries are already shape-validated
+    # by the findings stage (see findings.py PR #11 normalisation).
+    trail_any = obj.get("reasoning_trail")
+    if isinstance(trail_any, list) and trail_any:
+        clean_entries: list[JsonValue] = []
+        for entry_any in cast(list[object], trail_any):
+            if isinstance(entry_any, dict):
+                clean_entries.append(
+                    cast(JsonValue, dict(cast(dict[str, object], entry_any)))
+                )
+        if clean_entries:
+            out["reasoning_trail"] = cast(JsonValue, clean_entries)
     return out
 
 
@@ -1973,9 +1999,18 @@ def write_analyst_report_v2_md(report_dir: Path, report: dict[str, JsonValue]) -
                     f"### {i}. [{str(sev).upper()}] {str(ct)}",
                     f"- Confidence: {conf_value}",
                     f"- Primary Evidence: {first_ref if first_ref else '(none)'}",
-                    "",
                 ]
             )
+            # PR #13: render the LLM reasoning trail (if present) as a
+            # numbered subsection so analysts can audit advocate/critic
+            # debate steps without opening findings.json. Section is hidden
+            # entirely when the trail is missing or empty -- additive only.
+            trail_lines = format_trail_for_markdown(item.get("reasoning_trail"))
+            if trail_lines:
+                lines.append(f"- **Reasoning Trail** ({len(trail_lines)} steps)")
+                for trail_line in trail_lines:
+                    lines.append(f"  {trail_line}")
+            lines.append("")
 
     evidence_index_any = payload.get("evidence_index")
     evidence_index = (
@@ -1995,8 +2030,12 @@ def write_analyst_report_v2_md(report_dir: Path, report: dict[str, JsonValue]) -
 
 
 def _precompute_graph_layout(
-    nodes: list[dict[str, object]], edges: list[dict[str, object]],
-    *, width: int = 2000, height: int = 1400, iterations: int = 200,
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]],
+    *,
+    width: int = 2000,
+    height: int = 1400,
+    iterations: int = 200,
 ) -> list[dict[str, object]]:
     """Pre-compute force-directed graph layout in Python.
 
@@ -2162,22 +2201,64 @@ def write_analyst_report_v2_viewer(
                         # Step 2: Select top N nodes — IPC first, then most connected
                         ipc_max = min(30, _GRAPH_NODE_LIMIT // 5)
                         ipc_cands = sorted(
-                            [n for n in raw_nodes if isinstance(n, dict) and n.get("id") and n.get("type") == "ipc_channel"],
-                            key=lambda n: -(node_conn.get(n.get("id",""), 0)),
+                            [
+                                n
+                                for n in raw_nodes
+                                if isinstance(n, dict)
+                                and n.get("id")
+                                and n.get("type") == "ipc_channel"
+                            ],
+                            key=lambda n: -(node_conn.get(n.get("id", ""), 0)),
                         )[:ipc_max]
                         other_cands = sorted(
-                            [n for n in raw_nodes if isinstance(n, dict) and n.get("id") and n.get("type") != "ipc_channel"],
-                            key=lambda n: -(node_conn.get(n.get("id",""), 0)),
-                        )[:_GRAPH_NODE_LIMIT - len(ipc_cands)]
+                            [
+                                n
+                                for n in raw_nodes
+                                if isinstance(n, dict)
+                                and n.get("id")
+                                and n.get("type") != "ipc_channel"
+                            ],
+                            key=lambda n: -(node_conn.get(n.get("id", ""), 0)),
+                        )[: _GRAPH_NODE_LIMIT - len(ipc_cands)]
                         final_nodes = ipc_cands + other_cands
-                        final_ids = {str(n.get("id","")) for n in final_nodes}
+                        final_ids = {str(n.get("id", "")) for n in final_nodes}
                         # Step 3: Keep edges where BOTH endpoints are in selected nodes
-                        trimmed_edges = [e for e in raw_edges if isinstance(e, dict) and str(e.get("src","")) in final_ids and str(e.get("dst","")) in final_ids]
+                        trimmed_edges = [
+                            e
+                            for e in raw_edges
+                            if isinstance(e, dict)
+                            and str(e.get("src", "")) in final_ids
+                            and str(e.get("dst", "")) in final_ids
+                        ]
                         if len(trimmed_edges) > _GRAPH_EDGE_LIMIT:
-                            trimmed_edges = sorted(trimmed_edges, key=lambda x: -(x.get("confidence",0) if isinstance(x.get("confidence"),(int,float)) else 0))[:_GRAPH_EDGE_LIMIT]
+                            trimmed_edges = sorted(
+                                trimmed_edges,
+                                key=lambda x: -(
+                                    x.get("confidence", 0)
+                                    if isinstance(x.get("confidence"), (int, float))
+                                    else 0
+                                ),
+                            )[:_GRAPH_EDGE_LIMIT]
                         # Strip nodes/edges to viewer-essential fields + pre-compute layout
-                        slim_nodes = [{"id": n.get("id",""), "label": n.get("label", n.get("id","")), "type": n.get("type","")} for n in final_nodes if isinstance(n, dict)]
-                        slim_edges = [{"src": e.get("src",""), "dst": e.get("dst",""), "edge_type": e.get("edge_type",""), "confidence": e.get("confidence",0)} for e in trimmed_edges if isinstance(e, dict)]
+                        slim_nodes = [
+                            {
+                                "id": n.get("id", ""),
+                                "label": n.get("label", n.get("id", "")),
+                                "type": n.get("type", ""),
+                            }
+                            for n in final_nodes
+                            if isinstance(n, dict)
+                        ]
+                        slim_edges = [
+                            {
+                                "src": e.get("src", ""),
+                                "dst": e.get("dst", ""),
+                                "edge_type": e.get("edge_type", ""),
+                                "confidence": e.get("confidence", 0),
+                            }
+                            for e in trimmed_edges
+                            if isinstance(e, dict)
+                        ]
                         # Pre-compute force-directed layout in Python (no browser simulation needed)
                         slim_nodes = _precompute_graph_layout(slim_nodes, slim_edges)
                         gdict_trimmed: dict[str, JsonValue] = {
@@ -2188,9 +2269,13 @@ def write_analyst_report_v2_viewer(
                             "original_nodes": len(raw_nodes),
                             "original_edges": len(raw_edges),
                         }
-                        graph_payload[gname.replace(".json", "")] = cast(JsonValue, gdict_trimmed)
+                        graph_payload[gname.replace(".json", "")] = cast(
+                            JsonValue, gdict_trimmed
+                        )
                     else:
-                        graph_payload[gname.replace(".json", "")] = cast(JsonValue, gdict)
+                        graph_payload[gname.replace(".json", "")] = cast(
+                            JsonValue, gdict
+                        )
             except Exception:
                 pass
     graph_bootstrap = json.dumps(
@@ -2217,9 +2302,9 @@ def write_analyst_report_v2_viewer(
                     ipc_payload = cast(dict[str, JsonValue], ba_obj)
         except Exception:
             pass
-    ipc_bootstrap = json.dumps(
-        ipc_payload, sort_keys=True, ensure_ascii=True
-    ).replace("</", "<\\/")
+    ipc_bootstrap = json.dumps(ipc_payload, sort_keys=True, ensure_ascii=True).replace(
+        "</", "<\\/"
+    )
 
     # Source-sink graph bootstrap (trimmed to top 50 paths for viewer)
     ss_payload: dict[str, JsonValue] = {}
@@ -2240,9 +2325,9 @@ def write_analyst_report_v2_viewer(
                     ss_payload = cast(dict[str, JsonValue], ss_obj)
         except Exception:
             pass
-    ss_bootstrap = json.dumps(
-        ss_payload, sort_keys=True, ensure_ascii=True
-    ).replace("</", "<\\/")
+    ss_bootstrap = json.dumps(ss_payload, sort_keys=True, ensure_ascii=True).replace(
+        "</", "<\\/"
+    )
 
     # Credential mapping bootstrap
     cred_payload: dict[str, JsonValue] = {}
@@ -2276,7 +2361,9 @@ def write_analyst_report_v2_viewer(
                     sbom_payload = cast(dict[str, JsonValue], obj)
         except Exception:
             pass
-    sbom_bootstrap = json.dumps(sbom_payload, sort_keys=True, ensure_ascii=True).replace("</", "<\\/")
+    sbom_bootstrap = json.dumps(
+        sbom_payload, sort_keys=True, ensure_ascii=True
+    ).replace("</", "<\\/")
 
     # CVE matches bootstrap
     cve_payload: dict[str, JsonValue] = {}
@@ -2288,7 +2375,9 @@ def write_analyst_report_v2_viewer(
                 cve_payload = cast(dict[str, JsonValue], obj)
         except Exception:
             pass
-    cve_bootstrap = json.dumps(cve_payload, sort_keys=True, ensure_ascii=True).replace("</", "<\\/")
+    cve_bootstrap = json.dumps(cve_payload, sort_keys=True, ensure_ascii=True).replace(
+        "</", "<\\/"
+    )
 
     # Reachability bootstrap
     reach_payload: dict[str, JsonValue] = {}
@@ -2300,12 +2389,16 @@ def write_analyst_report_v2_viewer(
                 reach_payload = cast(dict[str, JsonValue], obj)
         except Exception:
             pass
-    reach_bootstrap = json.dumps(reach_payload, sort_keys=True, ensure_ascii=True).replace("</", "<\\/")
+    reach_bootstrap = json.dumps(
+        reach_payload, sort_keys=True, ensure_ascii=True
+    ).replace("</", "<\\/")
 
     # Security assessment bootstraps (cert, init, permissions)
     secassess_payload: dict[str, JsonValue] = {}
     for artifact_name, stage_subdir in [
-        ("cert_analysis", "inventory"), ("init_services", "inventory"), ("fs_permissions", "inventory"),
+        ("cert_analysis", "inventory"),
+        ("init_services", "inventory"),
+        ("fs_permissions", "inventory"),
     ]:
         apath = report_dir.parent / "stages" / stage_subdir / f"{artifact_name}.json"
         if apath.is_file():
@@ -2315,7 +2408,9 @@ def write_analyst_report_v2_viewer(
                     secassess_payload[artifact_name] = cast(JsonValue, obj)
             except Exception:
                 pass
-    secassess_bootstrap = json.dumps(secassess_payload, sort_keys=True, ensure_ascii=True).replace("</", "<\\/")
+    secassess_bootstrap = json.dumps(
+        secassess_payload, sort_keys=True, ensure_ascii=True
+    ).replace("</", "<\\/")
 
     # -- heatmap cell builder (safe: only static labels go into textContent) --
     _heatmap_cell_js = (
@@ -2338,7 +2433,6 @@ def write_analyst_report_v2_viewer(
             '  <meta charset="utf-8">',
             '  <meta name="viewport" content="width=device-width, initial-scale=1">',
             "  <title>SCOUT Analyst Report</title>",
-
             "  <style>",
             "    :root, [data-theme='dark'] {",
             "      --bg: #150f23;",
@@ -2506,6 +2600,24 @@ def write_analyst_report_v2_viewer(
             "    .warn { border-left: 3px solid var(--warning); padding: 12px; background: rgba(251,191,36,0.06); color: var(--warning); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 0.85rem; }",
             "    .risk { border: 1px solid rgba(255,255,255,0.06); border-left: 3px solid var(--accent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 14px 18px; margin-bottom: 10px; background: rgba(255,255,255,0.03); }",
             "    .risk:hover { background: rgba(255,255,255,0.06); }",
+            "    /* PR #13: reasoning trail collapsible panel inside .risk cards. */",
+            "    .reasoning-trail { margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 8px; }",
+            "    .reasoning-trail > summary { cursor: pointer; font-size: 0.78rem; font-weight: 600; color: var(--accent); padding: 4px 0; user-select: none; }",
+            "    .reasoning-trail > summary:hover { color: var(--ink); }",
+            "    .reasoning-trail-list { list-style: decimal; margin: 6px 0 4px 18px; padding: 0; }",
+            "    .reasoning-trail-step { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.03); font-size: 0.82rem; color: var(--ink-secondary); }",
+            "    .reasoning-trail-step:last-child { border-bottom: none; }",
+            "    .reasoning-trail-head { font-weight: 500; color: var(--ink); }",
+            "    .reasoning-trail-stage { color: var(--accent); font-weight: 600; }",
+            "    .reasoning-trail-step-name { color: var(--ink); }",
+            "    .reasoning-trail-arrow { color: var(--muted); }",
+            "    .reasoning-trail-verdict { color: var(--ink); font-weight: 600; }",
+            "    .reasoning-trail-delta { font-family: monospace; font-weight: 700; }",
+            "    .reasoning-trail-rationale { margin: 4px 0 0 0; color: var(--ink-secondary); font-size: 0.8rem; line-height: 1.4; }",
+            "    .reasoning-trail-ts { font-size: 0.7rem; margin-top: 2px; }",
+            "    .reasoning-trail-excerpt { margin-top: 4px; }",
+            "    .reasoning-trail-excerpt > summary { cursor: pointer; font-size: 0.7rem; padding: 2px 0; }",
+            "    .reasoning-trail-excerpt-pre { background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 4px; font-size: 0.72rem; white-space: pre-wrap; word-break: break-word; margin: 4px 0 0 0; max-height: 120px; overflow-y: auto; }",
             "    .table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); margin-top: 8px; }",
             "    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }",
             "    th { text-align: left; padding: 10px 14px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;",
@@ -4280,7 +4392,87 @@ def write_analyst_report_v2_viewer(
             "          var refsList = document.createElement('ul');",
             "          if (refs.length === 0) { addListItem(refsList, '(none)'); }",
             "          else { refs.forEach(function(ref) { addListItem(refsList, asText(ref)); }); }",
-            "          box.appendChild(refsList); risks.appendChild(box);",
+            "          box.appendChild(refsList);",
+            "          /* PR #13: collapsible reasoning trail panel. Hidden when */",
+            "          /* the finding has no trail (additive only). */",
+            "          var trailEntries = Array.isArray(item && item.reasoning_trail) ? item.reasoning_trail : [];",
+            "          if (trailEntries.length > 0) {",
+            "            var trailDetails = document.createElement('details');",
+            "            trailDetails.className = 'reasoning-trail';",
+            "            var trailSummary = document.createElement('summary');",
+            "            trailSummary.textContent = 'Reasoning Trail (' + trailEntries.length + ' steps)';",
+            "            trailDetails.appendChild(trailSummary);",
+            "            var trailList = document.createElement('ol');",
+            "            trailList.className = 'reasoning-trail-list';",
+            "            trailEntries.forEach(function(entry) {",
+            "              if (!entry || typeof entry !== 'object') return;",
+            "              var li = document.createElement('li'); li.className = 'reasoning-trail-step';",
+            "              var head = document.createElement('div'); head.className = 'reasoning-trail-head';",
+            "              var stage = asText(entry.stage || '');",
+            "              var step = asText(entry.step || '');",
+            "              var verdict = asText(entry.verdict || '');",
+            "              var llmModel = asText(entry.llm_model || '');",
+            "              var stageBadge = document.createElement('span'); stageBadge.className = 'reasoning-trail-stage'; stageBadge.textContent = '[' + (stage || '?') + ']';",
+            "              head.appendChild(stageBadge);",
+            "              var stepText = document.createElement('span'); stepText.className = 'reasoning-trail-step-name'; stepText.textContent = ' ' + (step || '?');",
+            "              head.appendChild(stepText);",
+            "              if (llmModel) {",
+            "                var modelBadge = document.createElement('span'); modelBadge.className = 'muted reasoning-trail-model'; modelBadge.textContent = ' via ' + llmModel;",
+            "                head.appendChild(modelBadge);",
+            "              }",
+            "              if (verdict) {",
+            "                var arrow = document.createElement('span'); arrow.className = 'reasoning-trail-arrow'; arrow.textContent = ' \\u2192 ';",
+            "                head.appendChild(arrow);",
+            "                var verdictText = document.createElement('span'); verdictText.className = 'reasoning-trail-verdict'; verdictText.textContent = verdict;",
+            "                head.appendChild(verdictText);",
+            "              }",
+            "              var deltaRaw = entry.delta;",
+            "              var deltaNum = (typeof deltaRaw === 'number' && !isNaN(deltaRaw)) ? deltaRaw : 0;",
+            "              if (deltaNum !== 0) {",
+            "                var deltaText = document.createElement('span'); deltaText.className = 'reasoning-trail-delta';",
+            "                var sign = deltaNum > 0 ? '+' : '';",
+            "                deltaText.textContent = ' ' + sign + deltaNum.toFixed(2);",
+            "                deltaText.style.color = deltaNum < 0 ? 'var(--warning)' : 'var(--success)';",
+            "                head.appendChild(deltaText);",
+            "              }",
+            "              li.appendChild(head);",
+            "              var rationale = asText(entry.rationale || '');",
+            "              if (rationale) {",
+            "                var rat = document.createElement('div'); rat.className = 'reasoning-trail-rationale'; rat.textContent = rationale;",
+            "                li.appendChild(rat);",
+            "              }",
+            "              var ts = asText(entry.timestamp || '');",
+            "              if (ts) {",
+            "                var tsLine = document.createElement('div'); tsLine.className = 'muted reasoning-trail-ts';",
+            "                /* Plain Date() best-effort -- gracefully degrade to raw string. */",
+            "                var formatted = ts;",
+            "                try {",
+            "                  var d = new Date(ts);",
+            "                  if (!isNaN(d.getTime())) {",
+            "                    var pad = function(n) { return (n < 10 ? '0' : '') + n; };",
+            "                    formatted = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) +",
+            "                      ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + ' UTC';",
+            "                  }",
+            "                } catch (_) {}",
+            "                tsLine.textContent = formatted;",
+            "                li.appendChild(tsLine);",
+            "              }",
+            "              var excerpt = asText(entry.raw_response_excerpt || '');",
+            "              if (excerpt) {",
+            "                var subDetails = document.createElement('details'); subDetails.className = 'reasoning-trail-excerpt';",
+            "                var subSummary = document.createElement('summary'); subSummary.textContent = 'raw response excerpt';",
+            "                subSummary.className = 'muted';",
+            "                subDetails.appendChild(subSummary);",
+            "                var pre = document.createElement('pre'); pre.className = 'reasoning-trail-excerpt-pre'; pre.textContent = excerpt;",
+            "                subDetails.appendChild(pre);",
+            "                li.appendChild(subDetails);",
+            "              }",
+            "              trailList.appendChild(li);",
+            "            });",
+            "            trailDetails.appendChild(trailList);",
+            "            box.appendChild(trailDetails);",
+            "          }",
+            "          risks.appendChild(box);",
             "        });",
             "      }",
             "    }",

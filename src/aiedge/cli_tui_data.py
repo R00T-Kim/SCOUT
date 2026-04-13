@@ -1236,6 +1236,51 @@ def _collect_tui_runtime_health(*, run_dir: Path) -> dict[str, object]:
     }
 
 
+def _collect_tui_findings_with_trails(
+    *, run_dir: Path, max_findings: int = 10
+) -> list[dict[str, object]]:
+    """Return findings that carry a non-empty ``reasoning_trail``.
+
+    PR #13 -- TUI surface for the LLM debate steps captured by PR #11.
+    Loads ``stages/findings/findings.json`` (fail-open: empty list on any
+    error) and returns the first ``max_findings`` entries that have a
+    non-empty trail. Each returned dict is shallow-copied with only the
+    fields the TUI cares about so the snapshot stays small.
+    """
+    findings_payload = _safe_load_json_object(
+        run_dir / "stages" / "findings" / "findings.json"
+    )
+    findings_any = findings_payload.get("findings")
+    if not isinstance(findings_any, list):
+        return []
+    out: list[dict[str, object]] = []
+    for finding_any in cast(list[object], findings_any):
+        if not isinstance(finding_any, dict):
+            continue
+        finding = cast(dict[str, object], finding_any)
+        trail_any = finding.get("reasoning_trail")
+        if not isinstance(trail_any, list) or not trail_any:
+            continue
+        clean_trail: list[dict[str, object]] = []
+        for entry_any in cast(list[object], trail_any):
+            if isinstance(entry_any, dict):
+                clean_trail.append(dict(cast(dict[str, object], entry_any)))
+        if not clean_trail:
+            continue
+        slim: dict[str, object] = {
+            "id": finding.get("id"),
+            "title": finding.get("title"),
+            "severity": finding.get("severity"),
+            "confidence": finding.get("confidence"),
+            "category": finding.get("category"),
+            "reasoning_trail": clean_trail,
+        }
+        out.append(slim)
+        if len(out) >= max_findings:
+            break
+    return out
+
+
 def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     manifest = _safe_load_json_object(run_dir / "manifest.json")
     report = _safe_load_json_object(run_dir / "report" / "report.json")
@@ -1304,6 +1349,7 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
     )
     threat_model = _collect_tui_threat_model(run_dir=run_dir)
     runtime_health = _collect_tui_runtime_health(run_dir=run_dir)
+    findings_with_trails = _collect_tui_findings_with_trails(run_dir=run_dir)
 
     return {
         "profile": profile,
@@ -1328,4 +1374,5 @@ def _build_tui_snapshot(*, run_dir: Path) -> dict[str, object]:
         "asset_inventory": asset_inventory,
         "threat_model": threat_model,
         "runtime_health": runtime_health,
+        "findings_with_trails": cast(list[object], findings_with_trails),
     }
