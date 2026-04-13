@@ -6,7 +6,6 @@ Timeouts are treated as `failed`.
 """
 
 import subprocess
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -122,62 +121,18 @@ def run_stages(
     *,
     on_progress: object | None = None,
 ) -> RunReport:
+    from .stage_executor import execute_single_stage
+
     results: list[StageResult] = []
     limitations: list[str] = []
+    total = len(stages)
 
     for idx, stage in enumerate(stages):
-        stage_name = getattr(stage, "name", stage.__class__.__name__)
-        if on_progress is not None and hasattr(on_progress, "on_start"):
-            on_progress.on_start(idx, len(stages), stage_name)
-
-        started_at = _iso_utc_now()
-        t0 = time.monotonic()
-        timed_out = False
-        error: str | None = None
-
-        try:
-            outcome = stage.run(ctx)
-            status = outcome.status
-            details = dict(outcome.details)
-            stage_limits = list(outcome.limitations)
-        except subprocess.TimeoutExpired as e:
-            timed_out = True
-            status = "failed"
-            details = cast(dict[str, JsonValue], {"timeout": True})
-            stage_limits = [f"Stage '{getattr(stage, 'name', '<unknown>')}' timed out"]
-            error = str(e)
-        except Exception as e:
-            status = "failed"
-            details = {}
-            stage_limits = [
-                f"Stage '{getattr(stage, 'name', '<unknown>')}' raised: {type(e).__name__}: {e}"
-            ]
-            error = f"{type(e).__name__}: {e}"
-
-        finished_at = _iso_utc_now()
-        duration_s = max(0.0, time.monotonic() - t0)
-
-        if bool(details.get("timeout")) or any(
-            "timed out" in lim for lim in stage_limits
-        ):
-            timed_out = True
-
-        res = StageResult(
-            stage=stage_name,
-            status=status,
-            started_at=started_at,
-            finished_at=finished_at,
-            duration_s=duration_s,
-            details=details,
-            limitations=stage_limits,
-            error=error,
-            timed_out=timed_out,
+        res = execute_single_stage(
+            stage, ctx, idx=idx, total=total, on_progress=on_progress
         )
         results.append(res)
-        limitations.extend(stage_limits)
-
-        if on_progress is not None and hasattr(on_progress, "on_end"):
-            on_progress.on_end(idx, len(stages), stage_name, res)
+        limitations.extend(res.limitations)
 
     overall = _combine_status([r.status for r in results])
     return RunReport(status=overall, stage_results=results, limitations=limitations)

@@ -25,14 +25,17 @@ from .findings import run_findings
 from .firmware_profile import FirmwareProfileStage
 from .functional_spec import FunctionalSpecStage
 from .graph import GraphStage
+from .handoff_writer import write_firmware_handoff
 from .inventory import InventoryStage
 from .llm_codex import run_codex_exec_summary
 from .llm_synthesis import LLMSynthesisStage
+from .normalize import normalize_evidence_list, normalize_limitations_list
 from .ota import OtaStage
 from .ota_payload import OtaPayloadStage
 from .policy import AIEdgePolicyViolation
 from .provenance import write_attestation as _write_attestation
 from .reachability import make_reachability_stage
+from .report_assembler import finalize_report
 from .report_export import generate_executive_report as _generate_executive_report
 from .sarif_export import export_sarif as _export_sarif
 from .sbom import SbomStage
@@ -41,7 +44,6 @@ from .schema import (
     TERMINAL_STAGE_STATUSES,
     JsonValue,
     empty_report,
-    validate_handoff,
 )
 from .stage import RunReport, Stage, StageContext, StageResult, run_stages
 from .stage_registry import stage_factories
@@ -59,7 +61,6 @@ DEFAULT_EGRESS_ALLOWLIST: tuple[str, ...] = (
 
 STAGE_MANIFEST_CONTRACT_VERSION = "1.0"
 STAGE_ARTIFACT_HASH_CAP_BYTES = 64 * 1024 * 1024
-HANDOFF_SCHEMA_VERSION = 1
 
 
 def _read_report_stage_status(report: dict[str, JsonValue], stage_name: str) -> str:
@@ -737,124 +738,13 @@ def _write_findings_manifest(
         "stage_identity": f"findings@{_AIEDGE_ENGINE_VERSION}",
         "attempt": 1,
         "status": findings_status,
-        "limitations": cast(list[JsonValue], cast(list[object], list(findings_limitations))),
+        "limitations": cast(
+            list[JsonValue], cast(list[object], list(findings_limitations))
+        ),
         "artifacts": cast(list[JsonValue], cast(list[object], artifacts)),
     }
     payload = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
     (stage_dir / "stage.json").write_text(payload, encoding="utf-8")
-
-
-def _manifest_artifact_paths(
-    *,
-    manifest: dict[str, object],
-    run_dir: Path,
-) -> list[str]:
-    artifacts_any = manifest.get("artifacts")
-    if not isinstance(artifacts_any, list):
-        return []
-    out: list[str] = []
-    run_resolved = run_dir.resolve()
-    for item_any in cast(list[object], artifacts_any):
-        if not isinstance(item_any, dict):
-            continue
-        path_any = cast(dict[str, object], item_any).get("path")
-        if not isinstance(path_any, str) or not path_any:
-            continue
-        rel_path = Path(path_any)
-        if rel_path.is_absolute():
-            continue
-        candidate = (run_dir / rel_path).resolve()
-        if not candidate.exists():
-            continue
-        try:
-            _ = candidate.relative_to(run_resolved)
-        except ValueError:
-            continue
-        rel = _try_run_relative(candidate, run_dir)
-        if rel is not None:
-            out.append(rel)
-    return sorted(set(out))
-
-
-def _collect_handoff_bundles(run_dir: Path) -> list[dict[str, JsonValue]]:
-    bundles: list[dict[str, JsonValue]] = []
-    stages_dir = run_dir / "stages"
-    if not stages_dir.is_dir():
-        return bundles
-
-    for stage_dir in sorted(
-        [p for p in stages_dir.iterdir() if p.is_dir()],
-        key=lambda p: p.name,
-    ):
-        stage_name = stage_dir.name
-        attempts_dir = stage_dir / "attempts"
-        attempt_manifests: list[Path] = []
-        if attempts_dir.is_dir():
-            attempt_manifests = sorted(
-                [
-                    p / "stage.json"
-                    for p in attempts_dir.iterdir()
-                    if p.is_dir() and (p / "stage.json").is_file()
-                ],
-                key=lambda p: p.parent.name,
-            )
-        latest_manifest = stage_dir / "stage.json"
-        if latest_manifest.is_file() and latest_manifest not in attempt_manifests:
-            attempt_manifests.append(latest_manifest)
-
-        for manifest_path in attempt_manifests:
-            manifest_obj = _read_json_object(manifest_path)
-            if manifest_obj is None:
-                continue
-            manifest = cast(dict[str, object], manifest_obj)
-            attempt_any = manifest.get("attempt")
-            attempt = int(attempt_any) if isinstance(attempt_any, int) else 0
-            status_any = manifest.get("status")
-            status = status_any if isinstance(status_any, str) else "unknown"
-            artifacts = _manifest_artifact_paths(manifest=manifest, run_dir=run_dir)
-            manifest_rel = _try_run_relative(manifest_path, run_dir)
-            if manifest_rel is not None:
-                artifacts = sorted(set([manifest_rel, *artifacts]))
-            if not artifacts:
-                continue
-            bundle_id = f"{stage_name}-attempt-{attempt if attempt > 0 else 'latest'}"
-            bundles.append(
-                {
-                    "id": bundle_id,
-                    "stage": stage_name,
-                    "attempt": attempt,
-                    "status": status,
-                    "artifacts": cast(
-                        list[JsonValue], cast(list[object], artifacts)
-                    ),
-                }
-            )
-
-    findings_dir = run_dir / "stages" / "findings"
-    if findings_dir.is_dir():
-        findings_paths = sorted(
-            [
-                rel
-                for p in findings_dir.rglob("*")
-                if p.is_file()
-                for rel in [_try_run_relative(p, run_dir)]
-                if isinstance(rel, str) and bool(rel)
-            ]
-        )
-        if findings_paths:
-            bundles.append(
-                {
-                    "id": "findings-artifacts",
-                    "stage": "findings",
-                    "attempt": 1,
-                    "status": "ok",
-                    "artifacts": cast(
-                        list[JsonValue], cast(list[object], findings_paths)
-                    ),
-                }
-            )
-
-    return bundles
 
 
 def _write_post_pipeline_artifacts(run_dir: Path, report: dict[str, JsonValue]) -> None:
@@ -905,138 +795,6 @@ def _write_post_pipeline_artifacts(run_dir: Path, report: dict[str, JsonValue]) 
         rc = report.get("report_completeness")
         if isinstance(rc, dict):
             rc["gate_passed"] = False
-
-
-def _write_firmware_handoff(
-    *,
-    info: RunInfo,
-    profile: str,
-    max_wallclock_per_run: int,
-) -> None:
-    manifest_obj = _read_json_object(info.manifest_path) or {}
-    exploit_gate_any = manifest_obj.get("exploit_gate")
-    exploit_gate = (
-        cast(dict[str, JsonValue], cast(dict[str, object], exploit_gate_any))
-        if isinstance(exploit_gate_any, dict)
-        else None
-    )
-
-    bundles = _collect_handoff_bundles(info.run_dir)
-    if not bundles:
-        fallback_artifacts: list[str] = []
-        report_json_rel = _try_run_relative(info.report_json_path, info.run_dir)
-        if report_json_rel is not None and info.report_json_path.is_file():
-            fallback_artifacts.append(report_json_rel)
-        manifest_rel = _try_run_relative(info.manifest_path, info.run_dir)
-        if manifest_rel is not None and info.manifest_path.is_file():
-            fallback_artifacts.append(manifest_rel)
-        if fallback_artifacts:
-            bundles = [
-                {
-                    "id": "run-metadata",
-                    "stage": "run",
-                    "attempt": 1,
-                    "status": "ok",
-                    "artifacts": cast(
-                        list[JsonValue], cast(list[object], sorted(fallback_artifacts))
-                    ),
-                }
-            ]
-
-    handoff: dict[str, JsonValue] = {
-        "schema_version": HANDOFF_SCHEMA_VERSION,
-        "generated_at": _iso_utc_now(),
-        "profile": profile,
-        "policy": {
-            "max_reruns_per_stage": 3,
-            "max_total_stage_attempts": 64,
-            "max_wallclock_per_run": int(max(1, max_wallclock_per_run)),
-        },
-        "aiedge": {
-            "run_id": info.run_id,
-            "run_dir": str(info.run_dir.resolve()),
-            "report_json": _try_run_relative(info.report_json_path, info.run_dir)
-            or "report/report.json",
-            "report_html": _try_run_relative(info.report_html_path, info.run_dir)
-            or "report/report.html",
-        },
-        "bundles": cast(list[JsonValue], cast(list[object], bundles)),
-    }
-
-    # --- Adversarial triage schema reference for downstream consumers ---
-    _adv_stage_json = info.run_dir / "stages" / "adversarial_triage" / "triaged_findings.json"
-    if _adv_stage_json.is_file():
-        try:
-            _adv_data = json.loads(_adv_stage_json.read_text(encoding="utf-8"))
-            _adv_summary = _adv_data.get("summary", {})
-            handoff["adversarial_triage"] = {
-                "artifact": "stages/adversarial_triage/triaged_findings.json",
-                "schema": {
-                    "version": _adv_data.get("schema_version", "adversarial-triage-v1"),
-                    "findings_key": "triaged_findings",
-                    "verdict_field": "triage_outcome",
-                    "verdict_values": ["maintained", "downgraded", "below_threshold"],
-                    "key_fields": [
-                        "source_binary", "sink_symbol", "source_api", "confidence",
-                        "original_confidence", "fp_verdict", "fp_pattern", "fp_rationale",
-                        "no_xref_path", "source_address", "web_server", "method",
-                        "path_description", "advocate_argument", "critic_rebuttal",
-                        "triage_outcome", "trace_refs",
-                    ],
-                },
-                "summary": cast(dict[str, JsonValue], _adv_summary) if isinstance(_adv_summary, dict) else {},
-            }
-        except Exception:
-            pass  # fail-open
-
-    if profile == "exploit" and exploit_gate is not None:
-        handoff["exploit_gate"] = exploit_gate
-
-    # --- Terminator feedback request ---
-    try:
-        from .terminator_feedback import generate_feedback_request as _gen_fb_req
-
-        _candidates_for_fb: list[dict[str, JsonValue]] = []
-        for bundle in bundles:
-            if not isinstance(bundle, dict):
-                continue
-            stage_any = bundle.get("stage")
-            if stage_any == "findings":
-                artifacts_any = bundle.get("artifacts")
-                if isinstance(artifacts_any, list):
-                    for art_rel in artifacts_any:
-                        if not isinstance(art_rel, str):
-                            continue
-                        if "exploit_candidates" in art_rel:
-                            _ec_path = info.run_dir / art_rel
-                            if _ec_path.is_file():
-                                try:
-                                    _ec_raw = json.loads(
-                                        _ec_path.read_text(encoding="utf-8")
-                                    )
-                                    if isinstance(_ec_raw, dict):
-                                        _ec_cands = _ec_raw.get("candidates")
-                                        if isinstance(_ec_cands, list):
-                                            _candidates_for_fb = cast(
-                                                list[dict[str, JsonValue]],
-                                                cast(list[object], _ec_cands),
-                                            )
-                                except Exception:
-                                    pass
-        handoff["feedback_request"] = _gen_fb_req(_candidates_for_fb)
-    except Exception:
-        pass  # fail-open: feedback request generation is best-effort
-
-    handoff_errors = validate_handoff(handoff)
-    if handoff_errors:
-        import sys
-        sys.stderr.write(f"[AIEDGE] WARNING: handoff validation errors: {handoff_errors}\n")
-
-    handoff_path = info.run_dir / "firmware_handoff.json"
-    _ = handoff_path.write_text(
-        json.dumps(handoff, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _utc_run_id(input_sha256: str, *, prefix_len: int = 12) -> str:
@@ -1370,7 +1128,9 @@ def _load_manifest_scan_limits(path: Path) -> tuple[int | None, int | None]:
     scan_limits = cast(dict[str, object], scan_limits_any)
     max_files_any = scan_limits.get("max_files")
     max_matches_any = scan_limits.get("max_matches")
-    max_files = max_files_any if isinstance(max_files_any, int) and max_files_any > 0 else None
+    max_files = (
+        max_files_any if isinstance(max_files_any, int) and max_files_any > 0 else None
+    )
     max_matches = (
         max_matches_any
         if isinstance(max_matches_any, int) and max_matches_any > 0
@@ -1500,43 +1260,6 @@ def _apply_llm_exec_step(
     return llm_obj
 
 
-def normalize_evidence_list(
-    evidence_any: object, *, fallback: list[dict[str, JsonValue]]
-) -> list[dict[str, JsonValue]]:
-    if not isinstance(evidence_any, list):
-        return list(fallback)
-    out: list[dict[str, JsonValue]] = []
-    for item in cast(list[object], evidence_any):
-        if isinstance(item, dict):
-            obj = cast(dict[str, object], item)
-            path_s = obj.get("path")
-            if isinstance(path_s, str) and path_s:
-                ev: dict[str, JsonValue] = {"path": path_s}
-                note_any = obj.get("note")
-                if isinstance(note_any, str) and note_any:
-                    ev["note"] = note_any
-                snippet_any = obj.get("snippet")
-                if isinstance(snippet_any, str) and snippet_any:
-                    ev["snippet"] = snippet_any
-                snippet_sha_any = obj.get("snippet_sha256")
-                if isinstance(snippet_sha_any, str) and snippet_sha_any:
-                    ev["snippet_sha256"] = snippet_sha_any
-                out.append(ev)
-        elif isinstance(item, str) and item:
-            out.append({"path": item})
-    return out if out else list(fallback)
-
-
-def normalize_limitations_list(limits_any: object) -> list[str]:
-    if not isinstance(limits_any, list):
-        return []
-    out: list[str] = []
-    for x in cast(list[object], limits_any):
-        if isinstance(x, str) and x:
-            out.append(x)
-    return out
-
-
 def _write_analyst_report_artifacts(
     report_dir: Path, report: dict[str, JsonValue]
 ) -> None:
@@ -1569,53 +1292,6 @@ def _mark_report_incomplete_due_to_digest(
     if reason not in limits:
         limits.append(reason)
     report["limitations"] = cast(list[JsonValue], cast(list[object], limits))
-
-
-def _finalize_report(
-    *,
-    report: dict[str, JsonValue],
-    info: RunInfo,
-    no_llm: bool,
-    manifest_profile: str,
-    budget_s: float,
-) -> None:
-    """Shared finalization: LLM exec, completion, integrity, reports, handoff."""
-    report["llm"] = _apply_llm_exec_step(info=info, report=report, no_llm=no_llm)
-    _set_report_completion(
-        report,
-        is_final=True,
-        reason="full analyze_run completed",
-        findings_executed=True,
-    )
-    _refresh_integrity_and_completeness(report, info, findings_executed=True)
-
-    report_dir = info.run_dir / "report"
-    _ = reporting.write_report_json(report_dir, report)
-    _ = reporting.write_report_html(report_dir, report)
-    try:
-        _write_analyst_report_artifacts(report_dir, report)
-    except Exception as exc:
-        _mark_report_incomplete_due_to_digest(report=report, info=info, err=exc)
-        _ = reporting.write_report_json(report_dir, report)
-        _ = reporting.write_report_html(report_dir, report)
-        raise
-    try:
-        _write_firmware_handoff(
-            info=info,
-            profile=manifest_profile,
-            max_wallclock_per_run=int(max(1, budget_s)),
-        )
-    except Exception as exc:
-        limits = normalize_limitations_list(report.get("limitations"))
-        tag = f"firmware_handoff_write_failed:{type(exc).__name__}"
-        if tag not in limits:
-            limits.append(tag)
-            report["limitations"] = cast(
-                list[JsonValue], cast(list[object], limits)
-            )
-            _ = reporting.write_report_json(report_dir, report)
-            _ = reporting.write_report_html(report_dir, report)
-    _write_post_pipeline_artifacts(info.run_dir, report)
 
 
 def _apply_duplicate_gate_to_findings(
@@ -1833,7 +1509,9 @@ def _apply_stage_result_to_report(
                 "time_budget_s": int(budget_s),
                 "extraction_timeout_s": float(extraction_timeout),
                 "extraction_mode": str(details.get("extraction_mode", "binwalk")),
-                "manual_rootfs_requested": bool(details.get("manual_rootfs_requested", False)),
+                "manual_rootfs_requested": bool(
+                    details.get("manual_rootfs_requested", False)
+                ),
             },
             "evidence": cast(list[JsonValue], cast(list[object], evidence)),
             "reasons": reasons,
@@ -2457,13 +2135,11 @@ def run_subset(
         err_tag = f"subset_report_artifacts_failed:{type(exc).__name__}"
         if err_tag not in limits:
             limits.append(err_tag)
-            report["limitations"] = cast(
-                list[JsonValue], cast(list[object], limits)
-            )
+            report["limitations"] = cast(list[JsonValue], cast(list[object], limits))
             _ = reporting.write_report_json(report_dir, report)
             _ = reporting.write_report_html(report_dir, report)
     try:
-        _write_firmware_handoff(
+        write_firmware_handoff(
             info=info,
             profile=manifest_profile,
             max_wallclock_per_run=int(max(1, budget_s)),
@@ -2473,9 +2149,7 @@ def run_subset(
         err_tag = f"firmware_handoff_write_failed:{type(exc).__name__}"
         if err_tag not in limits:
             limits.append(err_tag)
-            report["limitations"] = cast(
-                list[JsonValue], cast(list[object], limits)
-            )
+            report["limitations"] = cast(list[JsonValue], cast(list[object], limits))
             _ = reporting.write_report_json(report_dir, report)
             _ = reporting.write_report_html(report_dir, report)
     return rep
@@ -2531,41 +2205,6 @@ def analyze_run(
         if any(s in ("failed", "partial") for s in sts):
             return "partial"
         return "ok"
-
-    def normalize_evidence_list(
-        evidence_any: object, *, fallback: list[dict[str, JsonValue]]
-    ) -> list[dict[str, JsonValue]]:
-        if not isinstance(evidence_any, list):
-            return list(fallback)
-        out: list[dict[str, JsonValue]] = []
-        for item in cast(list[object], evidence_any):
-            if isinstance(item, dict):
-                obj = cast(dict[str, object], item)
-                path_s = obj.get("path")
-                if isinstance(path_s, str) and path_s:
-                    ev: dict[str, JsonValue] = {"path": path_s}
-                    note_any = obj.get("note")
-                    if isinstance(note_any, str) and note_any:
-                        ev["note"] = note_any
-                    snippet_any = obj.get("snippet")
-                    if isinstance(snippet_any, str) and snippet_any:
-                        ev["snippet"] = snippet_any
-                    snippet_sha_any = obj.get("snippet_sha256")
-                    if isinstance(snippet_sha_any, str) and snippet_sha_any:
-                        ev["snippet_sha256"] = snippet_sha_any
-                    out.append(ev)
-            elif isinstance(item, str) and item:
-                out.append({"path": item})
-        return out if out else list(fallback)
-
-    def normalize_limitations_list(limits_any: object) -> list[str]:
-        if not isinstance(limits_any, list):
-            return []
-        out: list[str] = []
-        for x in cast(list[object], limits_any):
-            if isinstance(x, str) and x:
-                out.append(x)
-        return out
 
     def make_emulation_stage() -> Stage:
         mod = importlib.import_module("aiedge.emulation")
@@ -2709,15 +2348,20 @@ def analyze_run(
             make_emulation_stage(),
         ]
         if on_progress is not None and hasattr(on_progress, "register_batch"):
-            on_progress.register_batch("Early stages (budget exhausted)", len(early_stages))
+            on_progress.register_batch(
+                "Early stages (budget exhausted)", len(early_stages)
+            )
         inv_rep = run_stages(early_stages, ctx, on_progress=on_progress)
         _write_stage_manifests(ctx=ctx, stages=early_stages, report=inv_rep)
 
         # Apply results for v2.0 stages that lack dedicated handlers
         _v2_stage_names = {
-            "enhanced_source", "csource_identification",
-            "semantic_classification", "taint_propagation",
-            "fp_verification", "adversarial_triage",
+            "enhanced_source",
+            "csource_identification",
+            "semantic_classification",
+            "taint_propagation",
+            "fp_verification",
+            "adversarial_triage",
         }
         for _sr in inv_rep.stage_results:
             if _sr.stage in _v2_stage_names:
@@ -3413,14 +3057,18 @@ def analyze_run(
             from .llm_triage import LLMTriageStage
 
             _llm_triage_stage_early: Stage = LLMTriageStage(no_llm=no_llm)
-            _llm_triage_rep_early = run_stages([_llm_triage_stage_early], ctx, on_progress=on_progress)
+            _llm_triage_rep_early = run_stages(
+                [_llm_triage_stage_early], ctx, on_progress=on_progress
+            )
             _write_stage_manifests(
                 ctx=ctx,
                 stages=[_llm_triage_stage_early],
                 report=_llm_triage_rep_early,
             )
             for _triage_sr_early in _llm_triage_rep_early.stage_results:
-                _apply_stage_result_to_report(report, _triage_sr_early, budget_s=budget_s)
+                _apply_stage_result_to_report(
+                    report, _triage_sr_early, budget_s=budget_s
+                )
             if _llm_triage_rep_early.limitations:
                 _existing_lims_triage_early = normalize_limitations_list(
                     report.get("limitations")
@@ -3455,10 +3103,9 @@ def analyze_run(
             )
             report["limitations"] = cast(
                 list[JsonValue],
-                list(existing_limits_post_llm_early)
-                + list(llm_synthesis_limits_early),
+                list(existing_limits_post_llm_early) + list(llm_synthesis_limits_early),
             )
-        _finalize_report(
+        finalize_report(
             report=report,
             info=info,
             no_llm=no_llm,
@@ -3534,17 +3181,27 @@ def analyze_run(
     _import_limitations: list[str] = []
     try:
         from .firmware_lineage import FirmwareLineageStage
+
         # Insert after extraction (index of StructureStage - 1)
-        _ext_idx = next((i for i, s in enumerate(stages) if s.name == "structure"), len(stages))
+        _ext_idx = next(
+            (i for i, s in enumerate(stages) if s.name == "structure"), len(stages)
+        )
         stages.insert(_ext_idx, FirmwareLineageStage())
     except ImportError as exc:
         _import_limitations.append(f"firmware_lineage import failed: {exc}")
     try:
         from .ghidra_analysis import make_ghidra_analysis_stage
+
         # Insert ghidra BEFORE semantic_classification so decompiled functions
         # are available for both semantic_classification and taint_propagation
-        _taint_idx = next((i for i, s in enumerate(stages) if s.name == "semantic_classification"), len(stages))
-        stages.insert(_taint_idx, make_ghidra_analysis_stage(info, source_input_path, remaining_s, no_llm))
+        _taint_idx = next(
+            (i for i, s in enumerate(stages) if s.name == "semantic_classification"),
+            len(stages),
+        )
+        stages.insert(
+            _taint_idx,
+            make_ghidra_analysis_stage(info, source_input_path, remaining_s, no_llm),
+        )
     except ImportError as exc:
         _import_limitations.append(f"ghidra_analysis import failed: {exc}")
     try:
@@ -3576,7 +3233,9 @@ def analyze_run(
     if manifest_profile == "exploit" and DynamicValidationStage is not None:
         stages.append(DynamicValidationStage())
     if manifest_profile == "exploit" and _make_fuzz_campaign_stage is not None:
-        stages.append(_make_fuzz_campaign_stage(info, source_input_path, remaining_s, no_llm))
+        stages.append(
+            _make_fuzz_campaign_stage(info, source_input_path, remaining_s, no_llm)
+        )
     stages.append(_make_poc_refinement(no_llm))
     stages.append(_make_chain_constructor(no_llm))
     if ExploitGateStage is not None:
@@ -3594,7 +3253,9 @@ def analyze_run(
     if _import_limitations:
         _existing_lims = normalize_limitations_list(report.get("limitations"))
         _existing_lims.extend(_import_limitations)
-        report["limitations"] = cast(list[JsonValue], cast(list[object], _existing_lims))
+        report["limitations"] = cast(
+            list[JsonValue], cast(list[object], _existing_lims)
+        )
 
     extraction_res = next(
         (r for r in rep.stage_results if r.stage == "extraction"), None
@@ -4345,15 +4006,16 @@ def analyze_run(
             (r for r in rep.stage_results if r.stage == exploit_stage_name), None
         )
         if exploit_stage_res is not None:
-            _apply_stage_result_to_report(
-                report, exploit_stage_res, budget_s=budget_s
-            )
+            _apply_stage_result_to_report(report, exploit_stage_res, budget_s=budget_s)
 
     # Apply results for v2.0 stages that lack dedicated handlers
     _v2_stage_names_main = {
-        "enhanced_source", "csource_identification",
-        "semantic_classification", "taint_propagation",
-        "fp_verification", "adversarial_triage",
+        "enhanced_source",
+        "csource_identification",
+        "semantic_classification",
+        "taint_propagation",
+        "fp_verification",
+        "adversarial_triage",
     }
     for _sr2 in rep.stage_results:
         if _sr2.stage in _v2_stage_names_main:
@@ -4419,7 +4081,9 @@ def analyze_run(
         on_progress=on_progress,
     )
     if llm_synthesis_limits:
-        existing_limits_after_llm = normalize_limitations_list(report.get("limitations"))
+        existing_limits_after_llm = normalize_limitations_list(
+            report.get("limitations")
+        )
         report["limitations"] = cast(
             list[JsonValue],
             list(existing_limits_after_llm) + list(llm_synthesis_limits),
@@ -4462,7 +4126,7 @@ def analyze_run(
     report["exploit_assessment"] = _build_exploit_assessment(
         profile=manifest_profile, report=report, run_dir=info.run_dir
     )
-    _finalize_report(
+    finalize_report(
         report=report,
         info=info,
         no_llm=no_llm,
