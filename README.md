@@ -251,11 +251,12 @@ _This section records post-release real-firmware validation runs, distinct from 
 
 | Metric | v2.6.0 |
 |---|---|
-| total findings | *run pending* |
-| `reasoning_trail_count` | *run pending* |
-| findings with `priority_score` | *run pending* |
-| category distribution | *run pending* |
-| notable caveats | *run pending* |
+| total findings | **3** |
+| `reasoning_trail_count` | **0** _(no-llm: adversarial_triage and fp_verification are LLM-gated; trail is populated only when LLM stages run)_ |
+| findings with `priority_score` | **3 / 3** _(100% — additive priority annotation succeeded for all findings)_ |
+| `priority_bucket_counts` | `{critical: 0, high: 0, medium: 3, low: 0}` |
+| category distribution | `{vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}` _(PR #7a 3-category ontology, 0% unclassified rate)_ |
+| notable caveats | OpenWrt is `squashfs` ext4 root; binwalk extracted cleanly; `--no-llm` path skipped reasoning_trail generation as expected. Run completed end-to-end through `findings` stage. |
 
 See [`CHANGELOG.md`](CHANGELOG.md) for full version history and [`docs/scoring_calibration.md`](docs/scoring_calibration.md) for the two-score contract.
 

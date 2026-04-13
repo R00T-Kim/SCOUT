@@ -251,11 +251,12 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 
 | 지표 | v2.6.0 |
 |---|---|
-| 총 findings | *런 대기* |
-| `reasoning_trail_count` | *런 대기* |
-| `priority_score` 보유 finding 수 | *런 대기* |
-| category 분포 | *런 대기* |
-| 특이사항 | *런 대기* |
+| 총 findings | **3** |
+| `reasoning_trail_count` | **0** _(no-llm 모드는 adversarial_triage / fp_verification이 LLM-gated이므로 trail 미생성. 정상 동작)_ |
+| `priority_score` 보유 finding 수 | **3 / 3** _(100% — additive priority annotation 성공)_ |
+| `priority_bucket_counts` | `{critical: 0, high: 0, medium: 3, low: 0}` |
+| category 분포 | `{vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}` _(PR #7a 3-category ontology, 0% unclassified)_ |
+| 특이사항 | squashfs ext4 루트 정상 추출. `--no-llm` 모드라서 reasoning_trail 미생성 (예상). `findings` stage까지 end-to-end 완주 |
 
 전체 버전 히스토리는 [`CHANGELOG.md`](CHANGELOG.md), 두 score 계약은 [`docs/scoring_calibration.md`](docs/scoring_calibration.md)를 참조하세요.
 
