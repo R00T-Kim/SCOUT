@@ -246,10 +246,12 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 | `priority_score` 보유 finding 수 | N/A | **3/3** (100% additive priority annotation) |
 | `priority_bucket_counts` | N/A | `{critical: 0, high: 0, medium: 3, low: 0}` |
 | category 분포 | N/A | `{vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}` |
-| `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — 이 펌웨어 빌드의 squashfs 추출 실패로 `sbom`이 partial) |
+| `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — `sbom`이 partial이라 `cve_scan`/`reachability`가 upstream 의존성 실패로 skip ²) |
 | `--experimental-parallel 4` wall-clock | N/A | **약 170분** 파이프라인 end-to-end (`fp_verification`이 113분으로 dominant. 순차 실행 baseline 없어서 델타 미산정) |
 
 ¹ **v2.6.0 → v2.6.1 후속 수정 (커밋 `7b36274`)**: 기존에는 top-level synthesis finding(`web.exec_sink_overlap`)이 그 아래에서 debate된 per-alert trail을 상속받지 못했습니다. 후속 패치는 `fp_verification`의 TP/FP 카운트 + `adversarial_triage`의 downgrade/maintain 집계를 `synthesis_inherit` 항목으로 synthesis finding에 부착합니다. 위 R7000 런은 v2.6.0 배포본 동작이며, 패치 적용 후 재실행하면 top-level `reasoning_trail_count`는 **1/3**이 됩니다.
+
+² **v2.6.0 → v2.6.1 후속 수정 (커밋 `8e0bb82`)**: R7000의 extraction 자체는 정상 성공 (1,664개 파일 + 2,412개 바이너리가 `squashfs-root` 아래에 존재). 그런데 SBOM 스테이지가 0 components를 반환한 진짜 이유는 조용한 스키마 불일치였습니다 — `_collect_so_files_from_inventory`가 deprecated된 `inventory.file_list`를 읽었고 (`roots`만 노출되는 현재 스키마), `_detect_from_binary_analysis`가 엔트리별 `string_hits`를 기대했으나 현재는 `matched_symbols`만 방출. OpenWrt는 opkg 데이터베이스 한 군데서만 100+ 컴포넌트가 나와서 이 버그가 가려져 있었습니다. 수정: 두 헬퍼가 `inventory.roots`를 직접 walk하고, `_extract_ascii_runs` 신규 헬퍼로 바이너리 파일 앞 256KB를 읽어 printable run 추출로 폴백. 이 R7000 런에 `SbomStage`만 재실행하면 component 수가 **0 → 4**로 증가 (`curl 7.36.0`은 `/usr/bin/curl` 직접 읽어서 탐지, `openssl 1.0.0` / `libz 1` / `libpthread 0`은 `.so*` walking). 전체 파이프라인 재실행 시 downstream `cve_scan` / `reachability`가 실제 CVE + EPSS 수치를 생성.
 
 #### 검증 대상 2 — OpenWrt Archer C7 v5 (TP-Link, `--no-llm`)
 

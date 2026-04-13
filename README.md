@@ -246,10 +246,12 @@ _This section records post-release real-firmware validation runs, distinct from 
 | findings with `priority_score` | N/A | **3/3** (100% additive priority annotation) |
 | `priority_bucket_counts` | N/A | `{critical: 0, high: 0, medium: 3, low: 0}` |
 | category distribution | N/A | `{vulnerability: 1, pipeline_artifact: 2, misconfiguration: 0, unclassified: 0}` |
-| `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — `sbom` partial due to squashfs extraction failure on this firmware build) |
+| `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — `sbom` landed partial and `cve_scan`/`reachability` skip on `sbom` dependency failure ²) |
 | `--experimental-parallel 4` wall-clock | N/A | **~170 minutes** end-to-end across the registered pipeline (`fp_verification` dominant at 113 min; no sequential baseline for delta) |
 
 ¹ **v2.6.0 → v2.6.1 follow-up (commit `7b36274`)**: the top-level synthesis finding (`web.exec_sink_overlap`) did not inherit the per-alert trails debated under it. A post-v2.6.0 fix adds synthesis-level `synthesis_inherit` entries that mirror the downstream aggregate outcome (`fp_verification` TP/FP counts + `adversarial_triage` downgrade/maintain split) onto the synthesis finding. This R7000 run reflects the v2.6.0 shipped behaviour; after the fix, `reasoning_trail_count` at the top level rises to **1/3** on re-run.
+
+² **v2.6.0 → v2.6.1 follow-up (commit `8e0bb82`)**: the R7000 extraction actually succeeded (1,664 files, 2,412 binaries scanned under `squashfs-root`), but the SBOM stage returned 0 components on this firmware due to a silent schema mismatch — `_collect_so_files_from_inventory` read `inventory.file_list` (a pre-v2.x key no longer emitted) and `_detect_from_binary_analysis` expected per-entry `string_hits` (replaced by `matched_symbols` in the current inventory schema). OpenWrt hid the bug because its opkg database alone contributes 100+ components. The fix makes both helpers walk `inventory.roots` directly and fall back to reading the binary file contents via a new `_extract_ascii_runs` helper. A clean re-run of just `SbomStage` on this R7000 run raises the component count from **0 to 4** (`curl 7.36.0` via binary read, plus `openssl 1.0.0` / `libz 1` / `libpthread 0` via `.so*` walking). Downstream `cve_scan` / `reachability` would then produce real CVE + EPSS numbers on a full pipeline re-run.
 
 #### Validation target 2 — OpenWrt Archer C7 v5 (TP-Link, `--no-llm`)
 
