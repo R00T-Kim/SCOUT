@@ -1,0 +1,44 @@
+{
+  "validation": "single-firmware",
+  "firmware": "R7000",
+  "vendor": "Netgear",
+  "model": "R7000",
+  "version": "V1.0.11.136_10.2.120",
+  "input_path": "aiedge-inputs/netgear/R7000-V1.0.11.136_10.2.120.chk",
+  "size_mb": 31,
+  "driver": "codex",
+  "scout_version": "v2.5.0",
+  "run_id": "aiedge-runs/2026-04-12_1320_sha256-b28bf08e9d2c",
+  "validation_date": "2026-04-13",
+  "metrics": {
+    "adversarial_triage": {
+      "debated": 100,
+      "parsed_ok": 100,
+      "parse_failures": 0,
+      "llm_call_failures": 0,
+      "downgraded": 99,
+      "maintained": 1
+    },
+    "fp_verification": {
+      "eligible_checked": 100,
+      "true_positives": 57,
+      "false_positives": 43,
+      "unverified": 0,
+      "parse_failures": 0,
+      "llm_call_failures": 0
+    },
+    "cve_scan": {
+      "total_cve_matches": 23,
+      "finding_candidates": 22,
+      "epss_enriched": 23,
+      "epss_api_calls": 1
+    }
+  },
+  "comparison_pre_v2.5.0": {
+    "adversarial_parse_failures": "100/100 -> 0/100",
+    "fp_unverified": "97/100 -> 0/100",
+    "epss_enriched": "0/23 -> 23/23"
+  },
+  "scope": "Single-firmware validation. Does NOT establish corpus-level precision/recall.",
+  "generalization_claim": false
+}

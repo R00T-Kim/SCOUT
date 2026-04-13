@@ -6,14 +6,14 @@
 
 ## Executive Summary
 
-SCOUT는 42-stage 결정론적 파이프라인, 해시 앵커링 증거 체인, adversarial LLM debate(99.3% FPR 감소)로 **펌웨어 증거 엔진** 분야에서 독보적 위치를 점유한다. 그러나 **precision 35-41%**, **68% LLM parse failure**, **순차 파이프라인 병목**이라는 3가지 핵심 과제가 다음 단계 도약을 가로막고 있다.
+SCOUT는 42-stage 결정론적 증거 패키징(deterministic evidence packaging), 해시 앵커링 증거 체인, adversarial LLM debate(99.3% FPR 감소, Tier 2 v2.3.0 baseline)로 **펌웨어 증거 엔진** 분야에서 독보적 위치를 점유한다. 그러나 **precision 35-41%**, **68% LLM parse failure**, **순차 파이프라인 병목**이라는 3가지 핵심 과제가 다음 단계 도약을 가로막고 있다.
 
 이 보고서는 4개 병렬 연구 스트림(학술 논문, 업계 동향, LLM 프론티어, 코드 갭 분석)과 Theori Xint 심층 분석을 종합하여, SCOUT의 **3-Phase 전략 로드맵**을 제안한다.
 
 ### 핵심 결론
 
 1. **가장 빠른 ROI**: LLM structured output + system prompt 도입 (2-3일 작업, parse failure 68%→<10%)
-2. **가장 큰 전략적 기회**: EU CRA 2026/09 보고 의무 시작 전 "CRA-ready firmware audit" 포지셔닝
+2. **가장 큰 전략적 기회**: EU CRA 2026/09 보고 의무 시작 전 "EU CRA Annex I 호환 펌웨어 감사 출력" 포지셔닝
 3. **가장 위협적인 경쟁자**: Theori Xint (multi-agent 오케스트레이션, DARPA AIxCC 3위) + FirmAgent (precision 91%, NDSS 2026)
 4. **가장 유망한 기술**: LATTE Code Slicing (taint 정확도 즉시 향상) + Multi-Agent exploit chain (VulnSage 패턴)
 5. **근본적 돌파구**: 동적 검증 경로 완성 (extraction → emulation → dynamic confirmation)
@@ -166,7 +166,7 @@ Xint는 SCOUT와 직접 경쟁하지는 않지만(소스코드/웹 중심 vs 펌
 | CI/CD 통합 | ⚠️ CLI + SARIF | GitHub Action 부재 |
 | SaaS/클라우드 | ❌ 온프레미스만 | 클라우드 서비스 미구현 |
 
-→ **기회**: 2026.09 CRA 보고 의무 시작 전 5개월 — "CRA-ready firmware audit" 포지셔닝의 최적 시기. SCOUT의 SARIF+CycloneDX+SLSA 출력은 이미 CRA 기술 요건을 충족.
+→ **기회**: 2026.09 CRA 보고 의무 시작 전 5개월 — "EU CRA Annex I 호환 펌웨어 감사 출력" 포지셔닝의 최적 시기. SCOUT의 SARIF+CycloneDX+SLSA 출력은 이미 CRA 기술 요건과 호환.
 
 ---
 
@@ -241,7 +241,7 @@ Xint는 SCOUT와 직접 경쟁하지는 않지만(소스코드/웹 중심 vs 펌
 | 1.6 | **LARA URI/키 시맨틱 소스 식별** | 1주 | HIGH | 소스 커버리지 확대, 245 0-day |
 | 1.7 | **EPSS 스코어 통합** | 2일 | MEDIUM | CVE 우선순위 정확도 향상 |
 | 1.8 | **GitHub Action 패키지** | 3일 | MEDIUM | CI/CD 통합, CRA 대응 |
-| 1.9 | **CRA 준수 매핑 문서** | 2일 | HIGH | 마케팅/포지셔닝 |
+| 1.9 | **CRA Annex I 호환성 매핑 문서** | 2일 | HIGH | 마케팅/포지셔닝 |
 
 **Phase 1 KPI**: adversarial_triage parse failure <10%, Tier 1 precision 50%+, GitHub Action 배포
 
@@ -324,7 +324,7 @@ Finite State(Shallow × Wide)와 Xint(Deep × Narrow, 소스코드)의 공백을
 
 | 단계 | 시기 | 모델 | 타겟 |
 |------|------|------|------|
-| **Phase 1** | 2026 하반기 | 오픈소스 + 컨설팅 | CRA 준수 감사 수요 |
+| **Phase 1** | 2026 하반기 | 오픈소스 + 컨설팅 | CRA Annex I 호환 감사 출력 수요 |
 | **Phase 2** | 2027 | Open Core (엔터프라이즈 확장) | OEM/의료기기/자동차 |
 | **Phase 3** | 2028 | SaaS API + 라이선스 | 중소 제조사, 보안 컨설팅 |
 

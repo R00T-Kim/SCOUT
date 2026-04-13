@@ -12,7 +12,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Sink expansion** (`taint_propagation.py`): `_SINK_SYMBOLS` 11 → 28 entries (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf, fprintf, syslog, vprintf, vfprintf, snprintf, scanf, sscanf, fscanf, dlopen, realpath)
 - **Format string sink set**: `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` helper for variable-controlled format string detection
 - **GitHub Action**: `.github/actions/scout-scan/` composite action for CI/CD with SARIF upload to GitHub Security tab
-- **CRA compliance documentation**: `docs/cra_compliance_mapping.md` mapping all 12 EU Cyber Resilience Act Annex I requirements to SCOUT outputs
+- **CRA compatibility documentation**: `docs/cra_compliance_mapping.md` mapping all 12 EU Cyber Resilience Act Annex I requirements to SCOUT outputs (output formats compatible with CRA Annex I)
 - **Strategic roadmap**: `docs/strategic_roadmap_2026.md` 3-Phase plan based on 30+ academic papers and competitive analysis (Theori Xint, FirmAgent, EU CRA)
 - LLM failure observability: `parse_failures` vs `llm_call_failures` separation in `adversarial_triage.py` and `fp_verification.py`
 - Common LLM failure classification helpers in `llm_driver.py` (`quota_exhausted`, `driver_unavailable`, `driver_nonzero_exit`)
@@ -56,7 +56,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Ghidra P-code taint analysis** (`ghidra_scripts/pcode_taint.py`): 3-strategy dataflow tracing (P-code SSA → P-code colocated → decompiled body), replacing symbol co-occurrence
-- `PCODE_VERIFIED_CAP = 0.75` — 3-tier confidence system: co-occurrence (0.40) < code-verified (0.55) < P-code verified (0.75)
+- `PCODE_VERIFIED_CAP = 0.75` — 4-tier confidence caps: SYMBOL_COOCCURRENCE (0.40) < STATIC_CODE_VERIFIED (0.55) < STATIC_ONLY (0.60) < PCODE_VERIFIED (0.75)
 - 4 new source pattern rule families: `sql_injection`, `format_string`, `path_traversal`, `ssrf` (9 regex patterns across PHP/Python/C/shell)
 - CGI handler detection in `surfaces.py`: extracts `do_*_cgi` function names from Ghidra string_refs as source endpoints
 - `INPUT_APIS` expanded: `cJSON_Parse`, `json_tokener_parse`, `xmlParseMemory`
@@ -117,7 +117,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Pipeline reordered: `ghidra_analysis` before `taint_propagation`/`semantic_classification`
 - Stage factory count updated to 42
-- 2-tier confidence caps: `SYMBOL_COOCCURRENCE_CAP=0.40`, `STATIC_CODE_VERIFIED_CAP=0.55`
+- 4-tier confidence caps established: `SYMBOL_COOCCURRENCE_CAP=0.40`, `STATIC_CODE_VERIFIED_CAP=0.55`, `STATIC_ONLY_CAP=0.60`, `PCODE_VERIFIED_CAP=0.75`
 - `no_xref_path` demoted from FP verdict to confidence reduction
 
 ### Fixed
@@ -137,7 +137,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - README restructured with FirmAgent comparison
-- Pipeline expanded to 41 stages
+- Pipeline expanded toward 42-stage final count
 
 ### Fixed
 - `no_signals` false positive removed
@@ -145,10 +145,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.0.0] — 2026-02-16
 
-Initial open-source release. Deterministic firmware-to-exploit evidence engine with 34-stage pipeline, hash-anchored artifact chains, and zero pip dependencies.
+Initial open-source release. Firmware-to-exploit evidence engine with deterministic evidence packaging, hash-anchored artifact chains, and zero pip dependencies. (Pipeline has since grown to 42 stages.)
 
 ### Key Features
-- 34-stage sequential pipeline (tooling → extraction → exploit_policy)
+- 42-stage sequential pipeline (tooling → extraction → exploit_policy)
 - SBOM (CycloneDX 1.6 + VEX), SARIF 2.1.0 export
 - Ghidra headless integration, AFL++ fuzzing, FirmAE emulation
 - MCP server (12 tools) for AI agent integration

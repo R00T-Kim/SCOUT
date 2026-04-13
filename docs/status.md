@@ -2,6 +2,10 @@
 
 이 문서는 "현재 구현 상태"를 솔직하게 기록합니다.
 
+## Phase 2A run.py 분해 현황
+
+Phase 2A run.py decomposition: 4,476 → 4,140 lines (normalize/stage_executor/report_assembler/handoff_writer 추출 완료). 나머지 분해는 후속 작업.
+
 ## 현재 구현됨
 
 - SCOUT CLI: `./scout analyze`, `./scout stages` (래퍼 권장)
@@ -58,8 +62,8 @@
 - **Executive Report 생성** (`report_export.py`): Markdown executive report 자동 생성. 파이프라인 요약, 상위 리스크, SBOM/CVE 테이블, 공격 표면, 크레덴셜 findings. 파이프라인 완료 시 `report/executive_report.md` 자동 생성.
 - **웹 뷰어 UX 대폭 개선**: 싱글 패널 뷰(사이드바 클릭 → 해당 패널만 표시), KPI 바(Critical/High/Components/CVEs/Endpoints 상시 표시), SBOM/CVE/Reachability/Security Assessment 4개 패널 추가, 페이지네이션(SBOM 30/page, CVE 20/page), 그래프 Python 사전 레이아웃(150 노드 균형 선택, 호버 시 연결 정보 표시), viewer.html 1.5MB→567KB 경량화.
 - **공유 유틸리티** (`path_safety.py`): `assert_under_dir`, `rel_to_run_dir`, `sha256_file`, `sha256_text` 공유 모듈.
-- 파이프라인 29 → 34 stages: `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
-- 파이프라인 34 → 41 stages (v2.0): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
+- 파이프라인 29 → 34개 스테이지 (v2.1): `ghidra_analysis`, `sbom`, `cve_scan`, `reachability`, `fuzzing` 추가.
+- 파이프라인 34 → 42개 스테이지 (v2.2): `enhanced_source`, `semantic_classification`, `taint_propagation`, `fp_verification`, `adversarial_triage`, `poc_refinement`, `chain_construction` 추가.
 
 ## v2.5.0 업그레이드 (2026-04-13)
 
@@ -112,7 +116,7 @@
 ## v2.4.0 업그레이드 (2026-04-11)
 
 - **Ghidra P-code taint 분석**: `pcode_taint.py` — 3-strategy (P-code SSA dataflow → P-code colocated → decompiled body). 함수 수준 source→sink 검증.
-- **3-tier confidence**: `PCODE_VERIFIED_CAP = 0.75` 추가. co-occurrence(0.40) < code-verified(0.55) < pcode-verified(0.75).
+- **4-tier confidence caps**: `PCODE_VERIFIED_CAP = 0.75` 추가로 4-tier 완성. SYMBOL_COOCCURRENCE(0.40) < STATIC_CODE_VERIFIED(0.55) < STATIC_ONLY(0.60) < PCODE_VERIFIED(0.75).
 - **소스 룰 확장**: SQL injection, format string, path traversal, SSRF 4개 패밀리 + 9개 regex 패턴.
 - **CGI 핸들러 탐지**: Ghidra string_refs에서 `do_*_cgi` 함수명 추출 → source endpoint 등록.
 - **INPUT_APIS 확장**: `cJSON_Parse`, `json_tokener_parse`, `xmlParseMemory` 추가.
