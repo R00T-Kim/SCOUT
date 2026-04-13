@@ -18,6 +18,7 @@ Environment variables:
     AIEDGE_GHIDRA_TIMEOUT_S      — per-binary Ghidra timeout in seconds
                                    (default 300, 30–1800)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,8 +48,20 @@ _STAGE_NAME = "ghidra_analysis"
 
 # Symbols that raise exploitation interest and drive binary prioritisation
 _RISKY_SYMBOLS: frozenset[str] = frozenset(
-    {"system", "popen", "execve", "execvp", "execl", "execle",
-     "execlp", "strcpy", "strcat", "sprintf", "vsprintf", "gets"}
+    {
+        "system",
+        "popen",
+        "execve",
+        "execvp",
+        "execl",
+        "execle",
+        "execlp",
+        "strcpy",
+        "strcat",
+        "sprintf",
+        "vsprintf",
+        "gets",
+    }
 )
 
 
@@ -146,7 +159,8 @@ _MAX_FUNCTIONS_PER_BINARY = 500
 def _pyghidra_available() -> bool:
     """Return True if pyghidra can be imported."""
     try:
-        import pyghidra as _pg  # noqa: F401
+        import pyghidra as _pg  # type: ignore[import-not-found]  # noqa: F401  # optional runtime dep
+
         return True
     except ImportError:
         return False
@@ -219,14 +233,20 @@ def _run_pyghidra_decompile(
                 (proc.stderr or proc.stdout)[:500],
             )
     except subprocess.TimeoutExpired:
-        _log.warning("pyghidra timed out for %s after %.0fs", binary_path.name, timeout_s)
+        _log.warning(
+            "pyghidra timed out for %s after %.0fs", binary_path.name, timeout_s
+        )
     except Exception as exc:
         _log.warning("pyghidra launch failed for %s: %s", binary_path.name, exc)
 
     duration = time.monotonic() - t0
 
     result_files: dict[str, str | None] = {}
-    for name, path in [("decompile_all.json", decompile_out), ("xref_graph.json", xref_out), ("pcode_taint.json", pcode_out)]:
+    for name, path in [
+        ("decompile_all.json", decompile_out),
+        ("xref_graph.json", xref_out),
+        ("pcode_taint.json", pcode_out),
+    ]:
         if path.is_file():
             try:
                 result_files[name] = str(path.relative_to(run_dir))
@@ -255,7 +275,7 @@ def _run_pyghidra_decompile(
 
 
 # Inline Python script executed in a subprocess for JVM isolation
-_PYGHIDRA_SCRIPT = r'''
+_PYGHIDRA_SCRIPT = r"""
 import json, sys, os
 
 binary_path = r"{binary_path}"
@@ -739,7 +759,7 @@ try:
 except Exception as e:
     print(f"pyghidra error: {{e}}", file=sys.stderr)
     sys.exit(1)
-'''
+"""
 
 
 def _aggregate_decompiled_functions(
@@ -776,12 +796,14 @@ def _aggregate_decompiled_functions(
             continue
         for entry in data:
             if isinstance(entry, dict):
-                all_functions.append({
-                    "name": str(entry.get("name", "")),
-                    "binary": binary_name,
-                    "address": str(entry.get("address", "")),
-                    "body": str(entry.get("body", "")),
-                })
+                all_functions.append(
+                    {
+                        "name": str(entry.get("name", "")),
+                        "binary": binary_name,
+                        "address": str(entry.get("address", "")),
+                        "body": str(entry.get("body", "")),
+                    }
+                )
 
     if not all_functions:
         return False
@@ -790,7 +812,8 @@ def _aggregate_decompiled_functions(
     try:
         assert_under_dir(run_dir, out_path)
         out_path.write_text(
-            json.dumps({"functions": all_functions}, ensure_ascii=False, indent=2) + "\n",
+            json.dumps({"functions": all_functions}, ensure_ascii=False, indent=2)
+            + "\n",
             encoding="utf-8",
         )
         return True
@@ -832,7 +855,9 @@ class GhidraAnalysisStage:
         if not _has_headless and not _has_pyghidra:
             return StageOutcome(
                 status="skipped",
-                details={"reason": "Neither analyzeHeadless nor pyghidra available; set AIEDGE_GHIDRA_HOME"},
+                details={
+                    "reason": "Neither analyzeHeadless nor pyghidra available; set AIEDGE_GHIDRA_HOME"
+                },
                 limitations=["ghidra_not_installed"],
             )
 
@@ -843,7 +868,9 @@ class GhidraAnalysisStage:
         if not inv_path.is_file():
             return StageOutcome(
                 status="skipped",
-                details={"reason": "binary_analysis.json missing; inventory stage required"},
+                details={
+                    "reason": "binary_analysis.json missing; inventory stage required"
+                },
                 limitations=["no_inventory"],
             )
 
@@ -865,7 +892,8 @@ class GhidraAnalysisStage:
 
         hits_raw: object = inv_raw.get("hits", [])
         hits: list[dict[str, object]] = [
-            h for h in (hits_raw if isinstance(hits_raw, list) else [])
+            h
+            for h in (hits_raw if isinstance(hits_raw, list) else [])
             if isinstance(h, dict) and h.get("path")
         ]
 
@@ -876,7 +904,9 @@ class GhidraAnalysisStage:
             "AIEDGE_GHIDRA_MAX_BINARIES", default=10, min_value=1, max_value=50
         )
         timeout_per = float(
-            env_int("AIEDGE_GHIDRA_TIMEOUT_S", default=300, min_value=30, max_value=1800)
+            env_int(
+                "AIEDGE_GHIDRA_TIMEOUT_S", default=300, min_value=30, max_value=1800
+            )
         )
 
         selected = sorted(hits, key=_binary_priority)[:max_binaries]
@@ -944,9 +974,7 @@ class GhidraAnalysisStage:
                 # Check if all result_files are null (analyzeHeadless failed)
                 rf = result.get("result_files", {})
                 all_null = (
-                    isinstance(rf, dict)
-                    and rf
-                    and all(v is None for v in rf.values())
+                    isinstance(rf, dict) and rf and all(v is None for v in rf.values())
                 )
                 if result.get("status") == "failed" or all_null:
                     if _has_pyghidra:
@@ -990,9 +1018,7 @@ class GhidraAnalysisStage:
         # ------------------------------------------------------------------
         # 6. Compute aggregate statistics
         # ------------------------------------------------------------------
-        binaries_succeeded = sum(
-            1 for r in analysis_results if r.get("status") == "ok"
-        )
+        binaries_succeeded = sum(1 for r in analysis_results if r.get("status") == "ok")
         binaries_partial = sum(
             1 for r in analysis_results if r.get("status") == "partial"
         )
@@ -1083,9 +1109,7 @@ def make_ghidra_analysis_stage(
     """Factory function for registration in _STAGE_FACTORIES."""
     firmware_dest_any = getattr(info, "firmware_dest", None)
     run_dir = (
-        firmware_dest_any.parent
-        if isinstance(firmware_dest_any, Path)
-        else Path(".")
+        firmware_dest_any.parent if isinstance(firmware_dest_any, Path) else Path(".")
     )
     return GhidraAnalysisStage(
         run_dir=run_dir,
