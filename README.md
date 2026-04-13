@@ -6,9 +6,9 @@
 
 ### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
 
-**Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, and a hash-anchored evidence chain -- in one command.**
+**Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, hash-anchored evidence, and analyst-ready reasoning trails -- in one command.**
 
-*Automated firmware vulnerability discovery with Ghidra P-code taint analysis, adversarial LLM debate, and zero pip dependencies.*
+*SCOUT is optimized for deep analysis of a single firmware image: it acts as an analyst copilot, not just a bulk scanner. Ghidra P-code taint, adversarial LLM debate, reasoning persistence across findings/reports/viewer/TUI, zero pip dependencies.*
 
 <br />
 
@@ -42,7 +42,15 @@
 ---
 
 > [!NOTE]
-> **Benchmark numbers in this README are carry-over baselines** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123 firmware · Tier 2: v2.3.0 claude-code driver, 2026-04-09, 36 firmware). Fresh v2.5.0 corpus re-validation is pending. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md) and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
+> **Benchmark numbers in this README are carry-over baselines** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123 firmware · Tier 2: v2.3.0 claude-code driver, 2026-04-09, 36 firmware). Fresh v2.6.0 corpus re-validation is pending. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md) and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
+
+> [!TIP]
+> **What's new in v2.6.0** ([PR #6](https://github.com/R00T-Kim/SCOUT/pull/6) · Phase 2B integration)
+> - **DAG-based parallel stage execution PoC** via `--experimental-parallel [N]` — opt-in level-wise parallelism over the 42-stage pipeline (15 levels / max-width 7), with out-of-order-safe progress rendering. Sequential path unchanged.
+> - **`reasoning_trail` persisted across findings, analyst reports, TUI, and web viewer** — `adversarial_triage` and `fp_verification` capture advocate / critic / decision / pattern-hit entries (with 200-char excerpt redaction) so reviewers can inspect *why* a finding was downgraded, upheld, or prioritized.
+> - **4 MCP analyst tools** for verdict override, hint injection, reasoning lookup, and category filtering. `adversarial_triage` advocate prompt reads analyst hints from `AIEDGE_FEEDBACK_DIR` on next run — closes the analyst-in-the-loop feedback cycle.
+> - **`priority_score` / `priority_inputs` separated from detection confidence** — `confidence` stays strictly at static-evidence cap; EPSS, reachability, backport, and CVSS feed a new ranking signal instead. Addresses reviewer critique that EPSS-additive confidence looked like a heuristic.
+> - **Extraction failure analyst guidance** — when unpacking fails, SCOUT now emits actionable next steps (vendor decrypt hints, `--rootfs` bypass, binwalk variants, issue template) instead of an opaque stage error.
 
 ---
 
@@ -56,6 +64,9 @@
 
 > **SARIF + CycloneDX VEX + SLSA provenance -- standard formats.**
 > GitHub Code Scanning, VS Code, CI/CD integration out of the box.
+
+> **Built for analyst-in-the-loop firmware review.**
+> SCOUT is strongest when used to start deep review on a single firmware image quickly, expose evidence paths, and preserve reasoning across triage and reporting surfaces. Analyst hints loop back into next-run LLM judgment via MCP.
 
 ---
 
@@ -123,6 +134,10 @@
 | :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint, P-code SSA dataflow, call chain visualization, 4-strategy fallback (P-code → colocated → decompiled → interprocedural) |
 | :robot: | **LLM Engine** | 4 backends (Codex CLI / Claude API / Claude Code CLI / Ollama) + centralized system prompts + structured JSON output + 5-stage parser (preamble/fence/raw/brace-counting/error-recovery) + temperature control |
 | :crossed_swords: | **Adversarial Debate** | Advocate/Critic LLM debate for FPR reduction (99.3% on Tier 2). Separate parse_failures vs llm_call_failures observability with quota_exhausted detection |
+| :compass: | **Analyst Copilot** *(v2.6.0)* | `reasoning_trail` persisted across findings, analyst Markdown, TUI, and web viewer — reviewers can inspect *why* a finding was downgraded, upheld, or prioritized. Advocate / critic / decision / pattern-hit entries with 200-char excerpt redaction |
+| :inbox_tray: | **MCP Analyst Tools** *(v2.6.0)* | 4 tools for reasoning lookup, hint injection, verdict override, category filtering. Hints loop back into next-run advocate prompt via `AIEDGE_FEEDBACK_DIR` (opt-in, `fcntl.flock`-safe) |
+| :triangular_ruler: | **Detection vs Priority Separation** *(v2.6.0)* | `confidence` stays evidence-bound (≤0.55 static cap); `priority_score` / `priority_inputs` capture EPSS, reachability, backport, and CVSS as ranking signals. See [`docs/scoring_calibration.md`](docs/scoring_calibration.md) |
+| :speedboat: | **Parallel DAG Execution** *(v2.6.0, PoC)* | `--experimental-parallel [N]` opt-in level-wise stage parallelism (ThreadPoolExecutor + Kahn topo levels). 15 levels / max-width 7 on the 42-stage pipeline. Sequential path unchanged |
 | :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping, hardcoded secret detection |
 | :test_tube: | **Fuzzing** *(optional)* | AFL++ with CMPLOG, persistent mode, NVRAM faker, harness generation, crash triage |
 | :bug: | **Emulation** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs inspection) + GDB remote debug |
@@ -217,15 +232,32 @@ _Baseline: v2.3.0, 2026-04-09, claude-code driver (carry-over; fresh v2.5.0 corp
 - `2,430` findings debated → `2,412` downgraded + `18` maintained
 - **FPR reduction: 99.3%** | **False negative rate: ≈ 0%**
 
-### v2.5.0 Single-Firmware Verification (Netgear R7000, codex driver)
-| Metric | Pre-v2.5 | v2.5.0 |
-|---|---|---|
-| `adversarial_triage` parse_failures | 100/100 | **0/100** |
-| `fp_verification` unverified | 97/100 | **0/100** |
-| `fp_verification` true_positives | 1 | **57** |
-| `cve_scan` EPSS enriched | 0/23 | **23/23** |
+### v2.6.0 Post-merge Real-Firmware Validation
 
-See [`CHANGELOG.md`](CHANGELOG.md) for full version history.
+_This section records post-release real-firmware validation runs, distinct from the carry-over corpus baselines above._
+
+#### Validation target 1 — Netgear R7000 (codex driver, `--experimental-parallel 4`)
+
+| Metric | v2.5.0 | v2.6.0 |
+|---|---|---|
+| `adversarial_triage` parse_failures | 0/100 | *run pending, update after post-merge validation* |
+| `fp_verification` unverified | 0/100 | *run pending* |
+| `reasoning_trail_count` (findings with trail) | N/A | *run pending* |
+| findings with `priority_score` | N/A | *run pending* |
+| `cve_scan` EPSS enriched | 23/23 | *run pending* |
+| `--experimental-parallel 4` wall-clock delta | N/A | *run pending* |
+
+#### Validation target 2 — OpenWrt Archer C7 v5 (TP-Link, `--no-llm`)
+
+| Metric | v2.6.0 |
+|---|---|
+| total findings | *run pending* |
+| `reasoning_trail_count` | *run pending* |
+| findings with `priority_score` | *run pending* |
+| category distribution | *run pending* |
+| notable caveats | *run pending* |
+
+See [`CHANGELOG.md`](CHANGELOG.md) for full version history and [`docs/scoring_calibration.md`](docs/scoring_calibration.md) for the two-score contract.
 
 ---
 

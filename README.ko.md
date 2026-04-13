@@ -6,9 +6,9 @@
 
 ### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
 
-**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인이 나옵니다 -- 명령어 하나로.**
+**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인 + analyst-ready reasoning trail이 나옵니다 -- 명령어 하나로.**
 
-*Ghidra P-code taint 분석, adversarial LLM 토론, pip 의존성 제로로 펌웨어 취약점을 자동 탐지합니다.*
+*SCOUT는 대규모 벌크 스캐너보다는 단일 펌웨어를 깊게 파고드는 분석가 코파일럿으로 최적화되어 있습니다. Ghidra P-code taint 분석, adversarial LLM 토론, finding/report/viewer/TUI 전반 reasoning persistence, pip 의존성 제로.*
 
 <br />
 
@@ -42,7 +42,15 @@
 ---
 
 > [!NOTE]
-> **README의 벤치마크 수치는 모두 carry-over baseline입니다** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123개 펌웨어 · Tier 2: v2.3.0 claude-code 드라이버, 2026-04-09, 36개 펌웨어). v2.5.0 기준 fresh corpus 재검증은 대기 중입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md) 와 [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
+> **README의 벤치마크 수치는 모두 carry-over baseline입니다** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123개 펌웨어 · Tier 2: v2.3.0 claude-code 드라이버, 2026-04-09, 36개 펌웨어). v2.6.0 기준 fresh corpus 재검증은 대기 중입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md) 와 [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
+
+> [!TIP]
+> **v2.6.0 핵심 변화** ([PR #6](https://github.com/R00T-Kim/SCOUT/pull/6) · Phase 2B 통합)
+> - **DAG 기반 병렬 stage 실행 PoC**: `--experimental-parallel [N]`로 42-stage 파이프라인을 level-wise 병렬 실행 (15 level / max-width 7). out-of-order 안전 progress 출력. 기존 순차 경로 무수정.
+> - **`reasoning_trail` finding / analyst report / TUI / 웹 뷰어 전면 노출**: `adversarial_triage`와 `fp_verification`이 advocate / critic / decision / pattern-hit 엔트리를 기록 (raw response 200자 redaction). 분석가가 왜 downgrade/uphold/priority 결정이 났는지 바로 추적 가능.
+> - **MCP analyst tools 4종**: verdict override, hint injection, reasoning 조회, category filter. `adversarial_triage` advocate 프롬프트가 다음 런에서 `AIEDGE_FEEDBACK_DIR`의 분석가 hint를 읽어 prefix — analyst-in-the-loop 피드백 루프 완성.
+> - **`priority_score` / `priority_inputs`를 detection confidence와 분리**: `confidence`는 static-evidence cap에 엄격 유지. EPSS / reachability / backport / CVSS는 별도 ranking 신호로 이동. "EPSS-additive confidence가 heuristic으로 보인다"는 리뷰어 비판 직접 응답.
+> - **extraction 실패 시 analyst guidance**: 언패킹 실패 시 opaque error 대신 vendor decrypt 힌트, `--rootfs` 우회, binwalk variants, 이슈 템플릿 등 실무 가이드 제공.
 
 ---
 
@@ -56,6 +64,9 @@
 
 > **SARIF + CycloneDX VEX + SLSA -- 표준 포맷.**
 > GitHub Code Scanning, VS Code, CI/CD 즉시 연동.
+
+> **Analyst-in-the-loop 펌웨어 리뷰용으로 설계됨.**
+> SCOUT는 단일 펌웨어 이미지를 빠르게 깊이 파고들고, evidence 경로를 드러내며, triage와 reporting 표면 전반에 reasoning을 보존할 때 가장 강합니다. MCP를 통해 분석가 hint가 다음 런의 LLM 판단에 피드백됩니다.
 
 ---
 
@@ -123,6 +134,10 @@
 | :brain: | **테인트 분석** | HTTP-aware 프로시저 간 테인트, P-code SSA dataflow, call chain 시각화, 4-strategy fallback (P-code → colocated → decompiled → interprocedural) |
 | :robot: | **LLM 엔진** | 4개 백엔드 (Codex CLI / Claude API / Claude Code CLI / Ollama) + 중앙 관리 시스템 프롬프트 + structured JSON 출력 + 5-stage 파서 (preamble/fence/raw/brace-counting/error-recovery) + temperature 제어 |
 | :crossed_swords: | **Adversarial Debate** | Advocate/Critic LLM 토론 기반 FPR 감소 (Tier 2 99.3%). parse_failures vs llm_call_failures 분리 + quota_exhausted 명시적 탐지 |
+| :compass: | **Analyst Copilot** *(v2.6.0)* | finding / analyst markdown / TUI / 웹 뷰어에 `reasoning_trail`을 보존해, 왜 downgrade/uphold/priority 결정이 났는지 바로 추적 가능. advocate / critic / decision / pattern-hit 엔트리, raw response 200자 redaction |
+| :inbox_tray: | **MCP Analyst Tools** *(v2.6.0)* | reasoning 조회, hint injection, verdict override, category filter 4개 tool. `AIEDGE_FEEDBACK_DIR` opt-in으로 hint가 다음 런 advocate 프롬프트에 주입됨 (`fcntl.flock` 기반 쓰기 안전) |
+| :triangular_ruler: | **Detection vs Priority 분리** *(v2.6.0)* | `confidence`는 증거 강도만 (≤0.55 static cap), `priority_score` / `priority_inputs`는 EPSS·reachability·backport·CVSS 기반 운영 우선순위 신호만 담당. [`docs/scoring_calibration.md`](docs/scoring_calibration.md) 참조 |
+| :speedboat: | **병렬 DAG 실행** *(v2.6.0, PoC)* | `--experimental-parallel [N]` 기반 opt-in level-wise stage 병렬 실행 (ThreadPoolExecutor + Kahn topo). 42-stage 기준 15 level / max-width 7. 기존 순차 경로 무수정 |
 | :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한, 자격 증명 매핑, hardcoded secret 탐지 |
 | :test_tube: | **퍼징** *(선택)* | AFL++ CMPLOG, persistent mode, NVRAM faker, 하니스 생성, crash triage |
 | :bug: | **에뮬레이션** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs 검사) + GDB 원격 디버깅 |
@@ -217,15 +232,32 @@ _기준 데이터: v2.3.0, 2026-04-09, claude-code 드라이버 (carry-over; v2.
 - `2,430` findings 토론 → `2,412` downgraded + `18` maintained
 - **FPR 감소율: 99.3%** | **False negative rate: ≈ 0%**
 
-### v2.5.0 단일 펌웨어 검증 (Netgear R7000, codex 드라이버)
-| 지표 | v2.5 이전 | v2.5.0 |
-|---|---|---|
-| `adversarial_triage` parse_failures | 100/100 | **0/100** |
-| `fp_verification` unverified | 97/100 | **0/100** |
-| `fp_verification` true_positives | 1 | **57** |
-| `cve_scan` EPSS enriched | 0/23 | **23/23** |
+### v2.6.0 post-merge 실펌웨어 검증
 
-전체 버전 히스토리는 [`CHANGELOG.md`](CHANGELOG.md)를 참조하세요.
+_이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌웨어 검증 결과를 기록합니다._
+
+#### 검증 대상 1 — Netgear R7000 (codex 드라이버, `--experimental-parallel 4`)
+
+| 지표 | v2.5.0 | v2.6.0 |
+|---|---|---|
+| `adversarial_triage` parse_failures | 0/100 | *post-merge 검증 런 대기, 결과 반영 예정* |
+| `fp_verification` unverified | 0/100 | *런 대기* |
+| `reasoning_trail_count` (trail 보유 finding 수) | N/A | *런 대기* |
+| `priority_score` 보유 finding 수 | N/A | *런 대기* |
+| `cve_scan` EPSS enriched | 23/23 | *런 대기* |
+| `--experimental-parallel 4` wall-clock 차이 | N/A | *런 대기* |
+
+#### 검증 대상 2 — OpenWrt Archer C7 v5 (TP-Link, `--no-llm`)
+
+| 지표 | v2.6.0 |
+|---|---|
+| 총 findings | *런 대기* |
+| `reasoning_trail_count` | *런 대기* |
+| `priority_score` 보유 finding 수 | *런 대기* |
+| category 분포 | *런 대기* |
+| 특이사항 | *런 대기* |
+
+전체 버전 히스토리는 [`CHANGELOG.md`](CHANGELOG.md), 두 score 계약은 [`docs/scoring_calibration.md`](docs/scoring_calibration.md)를 참조하세요.
 
 ---
 
