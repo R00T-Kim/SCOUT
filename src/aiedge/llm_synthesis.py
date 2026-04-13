@@ -92,7 +92,9 @@ def _safe_float01(value: object, default: float = 0.6) -> float:
     return out
 
 
-def _env_float(name: str, *, default: float, min_value: float, max_value: float) -> float:
+def _env_float(
+    name: str, *, default: float, min_value: float, max_value: float
+) -> float:
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -105,8 +107,6 @@ def _env_float(name: str, *, default: float, min_value: float, max_value: float)
     if value > max_value:
         return max_value
     return value
-
-
 
 
 def _truncate_text(text: str, *, max_chars: int = 12000) -> str:
@@ -250,7 +250,9 @@ def _load_chain_input_threat_fallback_candidates(
         category = str(threat.get("category", "")).strip().lower()
         title = " ".join(str(threat.get("title", "")).split()).strip()
         description = " ".join(str(threat.get("description", "")).split()).strip()
-        hypothesis = description or title or "Threat-model derived abuse path hypothesis."
+        hypothesis = (
+            description or title or "Threat-model derived abuse path hypothesis."
+        )
         family = f"threat_model_{category}" if category else "threat_model_signal"
         summary = title or (
             hypothesis[:120] if len(hypothesis) <= 120 else hypothesis[:117] + "..."
@@ -325,21 +327,29 @@ def _build_chain_prompt_payload(
     for item in chain_candidates:
         refs_any = item.get("evidence_refs")
         refs = _safe_string_list(refs_any, max_items=6)
-        simple_candidates.append(
-            {
-                "candidate_id": str(item.get("candidate_id", "")),
-                "chain_id": str(item.get("chain_id", "")),
-                "score": _safe_float01(item.get("score"), default=0.0),
-                "priority": str(item.get("priority", "")),
-                "families": _safe_string_list(item.get("families"), max_items=6),
-                "path": str(item.get("path", "")),
-                "summary": str(item.get("summary", "")),
-                "attack_hypothesis": str(item.get("attack_hypothesis", "")),
-                "expected_impact": _safe_string_list(item.get("expected_impact"), max_items=4),
-                "validation_plan": _safe_string_list(item.get("validation_plan"), max_items=4),
-                "evidence_refs": cast(list[JsonValue], cast(list[object], refs)),
-            }
-        )
+        entry: dict[str, JsonValue] = {
+            "candidate_id": str(item.get("candidate_id", "")),
+            "chain_id": str(item.get("chain_id", "")),
+            "score": _safe_float01(item.get("score"), default=0.0),
+            "priority": str(item.get("priority", "")),
+            "families": cast(
+                list[JsonValue],
+                _safe_string_list(item.get("families"), max_items=6),
+            ),
+            "path": str(item.get("path", "")),
+            "summary": str(item.get("summary", "")),
+            "attack_hypothesis": str(item.get("attack_hypothesis", "")),
+            "expected_impact": cast(
+                list[JsonValue],
+                _safe_string_list(item.get("expected_impact"), max_items=4),
+            ),
+            "validation_plan": cast(
+                list[JsonValue],
+                _safe_string_list(item.get("validation_plan"), max_items=4),
+            ),
+            "evidence_refs": cast(list[JsonValue], cast(list[object], refs)),
+        }
+        simple_candidates.append(entry)
 
     attack_surface_summary_any = source_data.get("attack_surface", {}).get("summary")
     attack_surface_summary = (
@@ -359,7 +369,9 @@ def _build_chain_prompt_payload(
         "sources": cast(JsonValue, source_rel_paths),
         "attack_surface_summary": cast(JsonValue, attack_surface_summary),
         "threat_model_summary": cast(JsonValue, threat_summary),
-        "exploit_candidates": cast(list[JsonValue], cast(list[object], simple_candidates)),
+        "exploit_candidates": cast(
+            list[JsonValue], cast(list[object], simple_candidates)
+        ),
     }
 
 
@@ -369,10 +381,10 @@ def _build_chain_prompt(payload: dict[str, JsonValue]) -> str:
         "You are a firmware exploit-chain analyst.\n"
         "From the sanitized inputs, propose realistic exploit-chain claims.\n"
         "Output JSON only with this schema:\n"
-        "{ \"chains\": [ {\"chain_id\": string, \"hypothesis\": string, "
-        "\"preconditions\": [string], \"attack_steps\": [string], "
-        "\"impact\": string, \"confidence\": number(0..1), "
-        "\"evidence_refs\": [run_relative_path_string] } ] }\n"
+        '{ "chains": [ {"chain_id": string, "hypothesis": string, '
+        '"preconditions": [string], "attack_steps": [string], '
+        '"impact": string, "confidence": number(0..1), '
+        '"evidence_refs": [run_relative_path_string] } ] }\n'
         "Rules:\n"
         "- Use only provided evidence refs.\n"
         "- Do not fabricate files or endpoints.\n"
@@ -424,7 +436,9 @@ def _normalize_llm_chain_candidates(
             {
                 "chain_id": chain_id,
                 "hypothesis": hypothesis,
-                "preconditions": cast(list[JsonValue], cast(list[object], preconditions)),
+                "preconditions": cast(
+                    list[JsonValue], cast(list[object], preconditions)
+                ),
                 "attack_steps": cast(list[JsonValue], cast(list[object], attack_steps)),
                 "impact": impact,
                 "confidence": float(confidence),
@@ -440,9 +454,7 @@ def _normalize_llm_chain_candidates(
         ),
     )
     if len(normalized) > int(_LLM_CHAIN_MAX_OUTPUT_CHAINS):
-        limits.append(
-            f"llm_chain_builder_output_capped:{_LLM_CHAIN_MAX_OUTPUT_CHAINS}"
-        )
+        limits.append(f"llm_chain_builder_output_capped:{_LLM_CHAIN_MAX_OUTPUT_CHAINS}")
         normalized = normalized[: int(_LLM_CHAIN_MAX_OUTPUT_CHAINS)]
 
     return normalized, sorted(set(limits))
@@ -640,40 +652,59 @@ class LLMSynthesisStage:
                     payload=parsed_payload,
                     fallback_refs=fallback_refs,
                 )
-                llm_chain_raw = len(
-                    cast(list[object], parsed_payload.get("chains", []))
-                ) if isinstance(parsed_payload, dict) and isinstance(parsed_payload.get("chains"), list) else 0
+                llm_chain_raw = (
+                    len(cast(list[object], parsed_payload.get("chains", [])))
+                    if isinstance(parsed_payload, dict)
+                    and isinstance(parsed_payload.get("chains"), list)
+                    else 0
+                )
                 llm_chain_limits.extend(llm_norm_limits)
 
                 for chain in llm_chains:
                     chain_id = str(chain.get("chain_id", "llm-chain"))
                     chain_refs_any = chain.get("evidence_refs")
                     chain_refs = (
-                        [x for x in cast(list[object], chain_refs_any) if isinstance(x, str)]
+                        [
+                            x
+                            for x in cast(list[object], chain_refs_any)
+                            if isinstance(x, str)
+                        ]
                         if isinstance(chain_refs_any, list)
                         else []
                     )
                     chain_value: dict[str, JsonValue] = {
                         "chain_id": chain_id,
                         "hypothesis": cast(JsonValue, str(chain.get("hypothesis", ""))),
-                        "preconditions": cast(
-                            list[JsonValue],
+                        "preconditions": (
                             cast(
-                                list[object],
-                                list(cast(list[object], chain.get("preconditions", []))),
-                            ),
-                        )
-                        if isinstance(chain.get("preconditions"), list)
-                        else cast(list[JsonValue], cast(list[object], [])),
-                        "attack_steps": cast(
-                            list[JsonValue],
+                                list[JsonValue],
+                                cast(
+                                    list[object],
+                                    list(
+                                        cast(
+                                            list[object], chain.get("preconditions", [])
+                                        )
+                                    ),
+                                ),
+                            )
+                            if isinstance(chain.get("preconditions"), list)
+                            else cast(list[JsonValue], cast(list[object], []))
+                        ),
+                        "attack_steps": (
                             cast(
-                                list[object],
-                                list(cast(list[object], chain.get("attack_steps", []))),
-                            ),
-                        )
-                        if isinstance(chain.get("attack_steps"), list)
-                        else cast(list[JsonValue], cast(list[object], [])),
+                                list[JsonValue],
+                                cast(
+                                    list[object],
+                                    list(
+                                        cast(
+                                            list[object], chain.get("attack_steps", [])
+                                        )
+                                    ),
+                                ),
+                            )
+                            if isinstance(chain.get("attack_steps"), list)
+                            else cast(list[JsonValue], cast(list[object], []))
+                        ),
                         "impact": cast(JsonValue, str(chain.get("impact", ""))),
                         "source": "llm_chain_builder",
                     }
@@ -691,15 +722,22 @@ class LLMSynthesisStage:
                     "candidate_inputs": len(chain_candidates),
                     "raw_chain_count": int(llm_chain_raw),
                     "normalized_chain_count": int(llm_chain_added),
-                    "returncode": cast(JsonValue, exec_result.get("returncode", -1))
-                    if isinstance(exec_result.get("returncode"), int)
-                    else -1,
-                    "argv": cast(
-                        list[JsonValue],
-                        cast(list[object], list(cast(list[object], exec_result.get("argv", [])))),
-                    )
-                    if isinstance(exec_result.get("argv"), list)
-                    else cast(list[JsonValue], cast(list[object], [])),
+                    "returncode": (
+                        cast(JsonValue, exec_result.get("returncode", -1))
+                        if isinstance(exec_result.get("returncode"), int)
+                        else -1
+                    ),
+                    "argv": (
+                        cast(
+                            list[JsonValue],
+                            cast(
+                                list[object],
+                                list(cast(list[object], exec_result.get("argv", []))),
+                            ),
+                        )
+                        if isinstance(exec_result.get("argv"), list)
+                        else cast(list[JsonValue], cast(list[object], []))
+                    ),
                     "attempt_count": int(
                         len(cast(list[object], exec_result.get("attempts", [])))
                         if isinstance(exec_result.get("attempts"), list)
@@ -892,9 +930,7 @@ class LLMSynthesisStage:
 
         artifact_rel = _rel_to_run_dir(run_dir, out_json)
         evidence_paths = _sorted_unique_refs(
-            [artifact_rel]
-            + list(source_rel_paths.values())
-            + llm_chain_evidence_paths,
+            [artifact_rel] + list(source_rel_paths.values()) + llm_chain_evidence_paths,
             run_dir=run_dir,
         )
         details: dict[str, JsonValue] = {

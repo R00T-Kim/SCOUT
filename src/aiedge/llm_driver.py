@@ -419,11 +419,23 @@ class CodexCLIDriver:
             )
 
         status = "ok" if cp.returncode == 0 else "nonzero_exit"
+        last_argv: list[str]
+        if attempts:
+            last_argv_raw = attempts[-1]["argv"]
+            if isinstance(last_argv_raw, list):
+                # Coerce to ``list[str]`` to match LLMDriverResult.argv;
+                # attempts are emitted by this driver with string argv so
+                # the stringification is a no-op in practice.
+                last_argv = [str(item) for item in cast(list[object], last_argv_raw)]
+            else:
+                last_argv = []
+        else:
+            last_argv = list(argv)
         return LLMDriverResult(
             status=status,
             stdout=cp.stdout or "",
             stderr=cp.stderr or "",
-            argv=list(attempts[-1]["argv"]) if attempts else list(argv),
+            argv=last_argv,
             attempts=attempts,
             returncode=int(cp.returncode),
         )

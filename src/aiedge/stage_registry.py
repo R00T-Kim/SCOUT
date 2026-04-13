@@ -4,7 +4,7 @@ import importlib
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from .attack_surface import AttackSurfaceStage
 from .attribution import AttributionStage
@@ -70,7 +70,9 @@ def _load_manifest_scan_limits(
     if not isinstance(manifest_path, Path) or not manifest_path.is_file():
         return None, None
     try:
-        payload_any = cast(object, json.loads(manifest_path.read_text(encoding="utf-8")))
+        payload_any = cast(
+            object, json.loads(manifest_path.read_text(encoding="utf-8"))
+        )
     except Exception:
         return None, None
     if not isinstance(payload_any, dict):
@@ -83,7 +85,9 @@ def _load_manifest_scan_limits(
 
     max_files_any = scan_limits.get("max_files")
     max_matches_any = scan_limits.get("max_matches")
-    max_files = max_files_any if isinstance(max_files_any, int) and max_files_any > 0 else None
+    max_files = (
+        max_files_any if isinstance(max_files_any, int) and max_files_any > 0 else None
+    )
     max_matches = (
         max_matches_any
         if isinstance(max_matches_any, int) and max_matches_any > 0
@@ -121,7 +125,9 @@ def _load_manifest_rootfs_path(manifest_path: Path | None) -> Path | None:
     if not isinstance(manifest_path, Path) or not manifest_path.is_file():
         return None
     try:
-        payload_any = cast(object, json.loads(manifest_path.read_text(encoding="utf-8")))
+        payload_any = cast(
+            object, json.loads(manifest_path.read_text(encoding="utf-8"))
+        )
     except Exception:
         return None
     if not isinstance(payload_any, dict):
@@ -191,8 +197,11 @@ def _make_exploit_autopoc_stage(
 ) -> Stage:
     _ = info, source_input_path, remaining_s, no_llm
     mod = importlib.import_module("aiedge.exploit_autopoc")
-    cls = cast(type[Stage], getattr(mod, "ExploitAutoPoCStage"))
-    return cls(no_llm=no_llm)
+    # ``Stage`` Protocol does not declare ``__init__`` so ``type[Stage]``
+    # rejects keyword constructor arguments. Cast to ``Any`` to honour the
+    # actual runtime constructor while still returning a ``Stage``.
+    cls = cast(Any, getattr(mod, "ExploitAutoPoCStage"))
+    return cast(Stage, cls(no_llm=no_llm))
 
 
 def _make_exploit_policy_stage(

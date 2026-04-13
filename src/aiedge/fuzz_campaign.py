@@ -36,7 +36,6 @@ from .stage import StageContext, StageOutcome
 # ---------------------------------------------------------------------------
 
 
-
 def _afl_image() -> str:
     return os.environ.get("AIEDGE_AFLPP_IMAGE", "aflplusplus/aflplusplus")
 
@@ -52,6 +51,7 @@ def _max_targets() -> int:
 # ---------------------------------------------------------------------------
 # AFL++ performance environment variables
 # ---------------------------------------------------------------------------
+
 
 def _build_afl_perf_env(target: dict) -> dict[str, str]:
     """Build AFL++ environment variables for performance optimisation.
@@ -157,6 +157,7 @@ def _build_multi_instance_configs(
 # Docker availability check
 # ---------------------------------------------------------------------------
 
+
 def _docker_available() -> bool:
     """Return True if docker is on PATH and the daemon is responsive."""
     if not shutil.which("docker"):
@@ -164,7 +165,8 @@ def _docker_available() -> bool:
     try:
         cp = subprocess.run(
             ["docker", "info"],
-            capture_output=True, timeout=10,
+            capture_output=True,
+            timeout=10,
         )
         return cp.returncode == 0
     except Exception:
@@ -175,13 +177,16 @@ def _docker_available() -> bool:
 # fuzzer_stats parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_fuzzer_stats(stats_path: Path) -> dict[str, str]:
     """Parse an AFL++ ``fuzzer_stats`` file into a key→value dict."""
     result: dict[str, str] = {}
     if not stats_path.is_file():
         return result
     try:
-        for line in stats_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in stats_path.read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines():
             if ":" in line:
                 k, _, v = line.partition(":")
                 result[k.strip()] = v.strip()
@@ -196,7 +201,9 @@ def _collect_stats(output_dir: Path) -> dict[str, Any]:
     return {
         "execs_done": int(stats.get("execs_done", 0)),
         "paths_found": int(stats.get("paths_total", 0)),
-        "crashes_found": int(stats.get("saved_crashes", stats.get("unique_crashes", 0))),
+        "crashes_found": int(
+            stats.get("saved_crashes", stats.get("unique_crashes", 0))
+        ),
         "hangs_found": int(stats.get("saved_hangs", stats.get("unique_hangs", 0))),
         "execs_per_sec": float(stats.get("execs_per_sec", 0.0)),
         "afl_banner": stats.get("afl_banner", ""),
@@ -206,6 +213,7 @@ def _collect_stats(output_dir: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Campaign execution for a single target
 # ---------------------------------------------------------------------------
+
 
 def _run_campaign(
     target: dict,
@@ -321,11 +329,16 @@ def _run_campaign(
     env_vars = {**perf_env, **env_vars}  # harness env takes precedence
 
     docker_run_base: list[str] = [
-        "docker", "run", "--rm",
-        "--network", "none",
-        "--privileged",                        # needed for AFL++ fork server
-        "--ulimit", "core=0",
-        "-v", f"{run_dir}:{run_dir}",
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--privileged",  # needed for AFL++ fork server
+        "--ulimit",
+        "core=0",
+        "-v",
+        f"{run_dir}:{run_dir}",
     ]
     for k, v in env_vars.items():
         docker_run_base += ["-e", f"{k}={v}"]
@@ -333,13 +346,19 @@ def _run_campaign(
 
     afl_args: list[str] = [
         "afl-fuzz",
-        "-Q",                                  # QEMU mode
-        "-i", str(seeds_dir),
-        "-o", str(output_dir),
-        "-x", str(dict_path),
-        "-t", "1000+",                         # timeout per run (+: adaptive)
-        "-m", "256",                           # memory limit MB
-        "-V", str(actual_budget),              # time limit seconds
+        "-Q",  # QEMU mode
+        "-i",
+        str(seeds_dir),
+        "-o",
+        str(output_dir),
+        "-x",
+        str(dict_path),
+        "-t",
+        "1000+",  # timeout per run (+: adaptive)
+        "-m",
+        "256",  # memory limit MB
+        "-V",
+        str(actual_budget),  # time limit seconds
     ]
 
     # CMPLOG mode: dramatically improves coverage of magic-byte comparisons
@@ -364,7 +383,10 @@ def _run_campaign(
             capture_output=True,
             timeout=actual_budget + 30,  # grace period
         )
-        docker_rc = cp.rc if hasattr(cp, "rc") else cp.returncode
+        # ``CompletedProcess`` exposes ``returncode``; some legacy shims used
+        # ``rc``. Preserve the fallback via ``getattr`` which pyright can
+        # type-check (direct ``cp.rc`` access triggers reportAttributeAccessIssue).
+        docker_rc = getattr(cp, "rc", cp.returncode)
         docker_err = cp.stderr.decode("utf-8", errors="replace")[:2000]
     except subprocess.TimeoutExpired:
         docker_err = "timeout"
@@ -383,12 +405,14 @@ def _run_campaign(
     if crashes_dir.is_dir():
         for cf in sorted(crashes_dir.glob("id:*"))[:50]:
             try:
-                crash_files.append({
-                    "filename": cf.name,
-                    "size_bytes": cf.stat().st_size,
-                    "sha256": sha256_file(cf),
-                    "path": rel_to_run_dir(run_dir, cf),
-                })
+                crash_files.append(
+                    {
+                        "filename": cf.name,
+                        "size_bytes": cf.stat().st_size,
+                        "sha256": sha256_file(cf),
+                        "path": rel_to_run_dir(run_dir, cf),
+                    }
+                )
             except Exception:
                 pass
 
@@ -409,7 +433,9 @@ def _run_campaign(
         "docker_error_snippet": docker_err if docker_err else None,
         "stats": stats,
         "crashes": crash_files,
-        "crashes_dir": rel_to_run_dir(run_dir, crashes_dir) if crashes_dir.is_dir() else None,
+        "crashes_dir": (
+            rel_to_run_dir(run_dir, crashes_dir) if crashes_dir.is_dir() else None
+        ),
         "limitations": limitations,
         "skipped": False,
         # Performance optimisation metadata
@@ -427,6 +453,7 @@ def _run_campaign(
 # ---------------------------------------------------------------------------
 # Stage implementation
 # ---------------------------------------------------------------------------
+
 
 class FuzzCampaignStage:
     """Pipeline stage: run AFL++ campaigns against top firmware targets.
@@ -530,7 +557,9 @@ class FuzzCampaignStage:
 
         # --- per-target time slice ---------------------------------------
         fuzz_budget = _fuzz_budget_s()
-        per_target_budget = min(fuzz_budget, int(self._remaining_budget_s() // len(targets)))
+        per_target_budget = min(
+            fuzz_budget, int(self._remaining_budget_s() // len(targets))
+        )
 
         targets_attempted = 0
         targets_completed = 0
@@ -618,6 +647,7 @@ class FuzzCampaignStage:
 # Stage factory
 # ---------------------------------------------------------------------------
 
+
 def make_fuzz_campaign_stage(
     info: object,
     case_id: str | None,
@@ -639,9 +669,7 @@ def make_fuzz_campaign_stage(
     """
     firmware_dest_any = getattr(info, "firmware_dest", None)
     run_dir = (
-        firmware_dest_any.parent
-        if isinstance(firmware_dest_any, Path)
-        else Path(".")
+        firmware_dest_any.parent if isinstance(firmware_dest_any, Path) else Path(".")
     )
     return FuzzCampaignStage(
         run_dir=run_dir,

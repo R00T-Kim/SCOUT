@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from . import __version__ as _AIEDGE_ENGINE_VERSION
 from . import reporting
@@ -2102,7 +2102,7 @@ def run_subset(
     )
 
     if on_progress is not None and hasattr(on_progress, "register_batch"):
-        on_progress.register_batch("Pipeline", len(stages))
+        cast(Any, on_progress).register_batch("Pipeline", len(stages))
     rep = run_stages(stages, ctx, on_progress=on_progress)
     _write_stage_manifests(ctx=ctx, stages=stages, report=rep)
 
@@ -2228,43 +2228,43 @@ def analyze_run(
 
     def _make_enhanced_source(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.enhanced_source")
-        cls = cast(type[Stage], getattr(mod, "EnhancedSourceStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "EnhancedSourceStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_csource_identification(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.csource_identification")
-        cls = cast(type[Stage], getattr(mod, "CSourceIdentificationStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "CSourceIdentificationStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_semantic_classifier(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.semantic_classifier")
-        cls = cast(type[Stage], getattr(mod, "SemanticClassifierStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "SemanticClassifierStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_taint_propagation(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.taint_propagation")
-        cls = cast(type[Stage], getattr(mod, "TaintPropagationStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "TaintPropagationStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_fp_verification(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.fp_verification")
-        cls = cast(type[Stage], getattr(mod, "FPVerificationStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "FPVerificationStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_adversarial_triage(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.adversarial_triage")
-        cls = cast(type[Stage], getattr(mod, "AdversarialTriageStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "AdversarialTriageStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_poc_refinement(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.poc_refinement")
-        cls = cast(type[Stage], getattr(mod, "PoCRefinementStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "PoCRefinementStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     def _make_chain_constructor(no_llm: bool) -> Stage:
         mod = importlib.import_module("aiedge.chain_constructor")
-        cls = cast(type[Stage], getattr(mod, "ChainConstructorStage"))
-        return cls(no_llm=no_llm)
+        cls = cast(Any, getattr(mod, "ChainConstructorStage"))
+        return cast(Stage, cls(no_llm=no_llm))
 
     extraction_default_timeout_s = 600
     extraction_timeout_s: int | None
@@ -2348,7 +2348,7 @@ def analyze_run(
             make_emulation_stage(),
         ]
         if on_progress is not None and hasattr(on_progress, "register_batch"):
-            on_progress.register_batch(
+            cast(Any, on_progress).register_batch(
                 "Early stages (budget exhausted)", len(early_stages)
             )
         inv_rep = run_stages(early_stages, ctx, on_progress=on_progress)
@@ -3247,7 +3247,7 @@ def analyze_run(
     if ExploitEvidencePolicyStage is not None:
         stages.append(ExploitEvidencePolicyStage())
     if on_progress is not None and hasattr(on_progress, "register_batch"):
-        on_progress.register_batch("Pipeline", len(stages))
+        cast(Any, on_progress).register_batch("Pipeline", len(stages))
     rep = run_stages(stages, ctx, on_progress=on_progress)
     _write_stage_manifests(ctx=ctx, stages=stages, report=rep)
     if _import_limitations:

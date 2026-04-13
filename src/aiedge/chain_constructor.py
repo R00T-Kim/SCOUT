@@ -34,13 +34,15 @@ _RETRYABLE_TOKENS: tuple[str, ...] = (
     "429",
 )
 
-_IPC_EDGE_TYPES: frozenset[str] = frozenset({
-    "ipc_unix_socket",
-    "ipc_dbus",
-    "ipc_shm",
-    "ipc_pipe",
-    "ipc_exec_chain",
-})
+_IPC_EDGE_TYPES: frozenset[str] = frozenset(
+    {
+        "ipc_unix_socket",
+        "ipc_dbus",
+        "ipc_shm",
+        "ipc_pipe",
+        "ipc_exec_chain",
+    }
+)
 
 _MAX_CHAINS = 50
 
@@ -108,6 +110,7 @@ def _build_chain_prompt(
 
 def _parse_json_response(stdout: str) -> dict[str, object] | None:
     from .llm_driver import parse_json_from_llm_output
+
     return parse_json_from_llm_output(stdout)
 
 
@@ -175,9 +178,7 @@ class ChainConstructorStage:
                         if isinstance(ev_list, list) and ev_list:
                             first_ev = ev_list[0]
                             if isinstance(first_ev, dict):
-                                ev_path = cast(
-                                    dict[str, object], first_ev
-                                ).get("path")
+                                ev_path = cast(dict[str, object], first_ev).get("path")
                                 if isinstance(ev_path, str) and ev_path:
                                     ps_item["binary"] = ev_path
                     findings.append(ps_item)
@@ -201,9 +202,7 @@ class ChainConstructorStage:
 
         # Fallback 1: taint_propagation alerts
         if not findings:
-            taint_alerts_path = (
-                run_dir / "stages" / "taint_propagation" / "alerts.json"
-            )
+            taint_alerts_path = run_dir / "stages" / "taint_propagation" / "alerts.json"
             taint_alerts_data = _load_json_file(taint_alerts_path)
             if isinstance(taint_alerts_data, dict):
                 ta_any = cast(dict[str, object], taint_alerts_data).get("alerts")
@@ -258,46 +257,63 @@ class ChainConstructorStage:
                                 if isinstance(sn, str):
                                     syms.add(sn)
                     if syms:
-                        ba_binaries.append({
-                            "binary": str(hit.get("path", "")),
-                            "symbols": sorted(syms),
-                            "arch": str(hit.get("arch", "unknown")),
-                            "hardening": hit.get("hardening", {}),
-                        })
+                        ba_binaries.append(
+                            {
+                                "binary": str(hit.get("path", "")),
+                                "symbols": sorted(syms),
+                                "arch": str(hit.get("arch", "unknown")),
+                                "hardening": hit.get("hardening", {}),
+                            }
+                        )
 
         # Supplement findings from binary_analysis (always, not just fallback)
         if ba_binaries:
             existing_bins = {
-                str(f.get("binary", "") or f.get("source_binary", ""))
-                for f in findings
+                str(f.get("binary", "") or f.get("source_binary", "")) for f in findings
             }
             for bbin in ba_binaries:
                 bin_path = str(bbin.get("binary", ""))
-                bin_syms = set(
-                    cast(list[str], bbin.get("symbols", []))
-                )
+                bin_syms = set(cast(list[str], bbin.get("symbols", [])))
                 sink_syms = bin_syms & {
-                    "system", "popen", "execve", "strcpy", "sprintf",
-                    "strcat", "vsprintf", "gets",
+                    "system",
+                    "popen",
+                    "execve",
+                    "strcpy",
+                    "sprintf",
+                    "strcat",
+                    "vsprintf",
+                    "gets",
                 }
                 input_syms = bin_syms & {
-                    "recv", "recvfrom", "read", "fread", "fgets",
-                    "gets", "getenv", "scanf", "sscanf", "nvram_get",
-                    "websGetVar", "httpGetEnv", "cJSON_GetObjectItem",
+                    "recv",
+                    "recvfrom",
+                    "read",
+                    "fread",
+                    "fgets",
+                    "gets",
+                    "getenv",
+                    "scanf",
+                    "sscanf",
+                    "nvram_get",
+                    "websGetVar",
+                    "httpGetEnv",
+                    "cJSON_GetObjectItem",
                 }
                 if sink_syms and bin_path not in existing_bins:
-                    findings.append({
-                        "source_binary": bin_path,
-                        "binary": bin_path,
-                        "sink_symbol": sorted(sink_syms)[0],
-                        "source_api": sorted(input_syms)[0] if input_syms else "",
-                        "matched_symbols": sorted(bin_syms),
-                        "matched_input_apis": sorted(input_syms),
-                        "matched_sink_apis": sorted(sink_syms),
-                        "confidence": 0.40,
-                        "method": "binary_analysis",
-                        "hardening": bbin.get("hardening", {}),
-                    })
+                    findings.append(
+                        {
+                            "source_binary": bin_path,
+                            "binary": bin_path,
+                            "sink_symbol": sorted(sink_syms)[0],
+                            "source_api": sorted(input_syms)[0] if input_syms else "",
+                            "matched_symbols": sorted(bin_syms),
+                            "matched_input_apis": sorted(input_syms),
+                            "matched_sink_apis": sorted(sink_syms),
+                            "confidence": 0.40,
+                            "method": "binary_analysis",
+                            "hardening": bbin.get("hardening", {}),
+                        }
+                    )
                     existing_bins.add(bin_path)
 
         if not findings:
@@ -318,9 +334,7 @@ class ChainConstructorStage:
                     if edge_type.lower() in _IPC_EDGE_TYPES:
                         ipc_edges.append(edge_obj)
         if not ipc_edges:
-            limitations.append(
-                "No IPC edges found in communication graph"
-            )
+            limitations.append("No IPC edges found in communication graph")
 
         # --- Load source_sink_graph for additional path data ---
         ssg_chain_path = run_dir / "stages" / "surfaces" / "source_sink_graph.json"
@@ -345,9 +359,7 @@ class ChainConstructorStage:
                         taint_results.append(cast(dict[str, object], r))
 
         # Also use taint alerts as additional findings if available
-        taint_alerts_chain = (
-            run_dir / "stages" / "taint_propagation" / "alerts.json"
-        )
+        taint_alerts_chain = run_dir / "stages" / "taint_propagation" / "alerts.json"
         ta_chain_data = _load_json_file(taint_alerts_chain)
         if isinstance(ta_chain_data, dict):
             ta_items = cast(dict[str, object], ta_chain_data).get("alerts")
@@ -366,29 +378,69 @@ class ChainConstructorStage:
                             existing_bins.add(ta_bin)
 
         # Known dangerous sink symbols
-        _SINK_SYMBOLS: frozenset[str] = frozenset({
-            "system", "popen", "execve", "execv", "execl", "execlp",
-            "strcpy", "strcat", "sprintf", "vsprintf", "gets",
-            "doSystemCmd", "twsystem", "doSystem",
-        })
+        _SINK_SYMBOLS: frozenset[str] = frozenset(
+            {
+                "system",
+                "popen",
+                "execve",
+                "execv",
+                "execl",
+                "execlp",
+                "strcpy",
+                "strcat",
+                "sprintf",
+                "vsprintf",
+                "gets",
+                "doSystemCmd",
+                "twsystem",
+                "doSystem",
+            }
+        )
         # Known input source symbols
-        _INPUT_SYMBOLS: frozenset[str] = frozenset({
-            "recv", "recvfrom", "recvmsg", "read", "fread", "fgets",
-            "gets", "getenv", "scanf", "sscanf", "fscanf",
-            "websGetVar", "httpGetEnv", "nvram_get",
-            "acosNvramConfig_get", "json_object_get_string",
-            "cJSON_GetObjectItem", "getParameter", "wp_getVar",
-        })
+        _INPUT_SYMBOLS: frozenset[str] = frozenset(
+            {
+                "recv",
+                "recvfrom",
+                "recvmsg",
+                "read",
+                "fread",
+                "fgets",
+                "gets",
+                "getenv",
+                "scanf",
+                "sscanf",
+                "fscanf",
+                "websGetVar",
+                "httpGetEnv",
+                "nvram_get",
+                "acosNvramConfig_get",
+                "json_object_get_string",
+                "cJSON_GetObjectItem",
+                "getParameter",
+                "wp_getVar",
+            }
+        )
         # Finding families that indicate sink-like behavior
-        _SINK_FAMILIES: frozenset[str] = frozenset({
-            "cmd_exec_injection_risk", "buffer_overflow", "format_string",
-            "command_injection", "exec_sink", "unsafe_function",
-        })
+        _SINK_FAMILIES: frozenset[str] = frozenset(
+            {
+                "cmd_exec_injection_risk",
+                "buffer_overflow",
+                "format_string",
+                "command_injection",
+                "exec_sink",
+                "unsafe_function",
+            }
+        )
         # Finding families that indicate source-like behavior
-        _SOURCE_FAMILIES: frozenset[str] = frozenset({
-            "credential_material_exposure", "network_io", "input",
-            "source", "user_input",
-        })
+        _SOURCE_FAMILIES: frozenset[str] = frozenset(
+            {
+                "credential_material_exposure",
+                "network_io",
+                "input",
+                "source",
+                "user_input",
+            }
+        )
 
         def _is_source(f: dict[str, object]) -> bool:
             """Check if a finding represents an external input source."""
@@ -489,52 +541,74 @@ class ChainConstructorStage:
                         if chain_id >= _MAX_CHAINS:
                             break
                         chain_id += 1
+                        # Match pre-existing behaviour: string confidences
+                        # are treated as the default 0.5 baseline; numeric
+                        # types (int/float/bool) are converted via ``float``.
+                        # Fall through for dict/list/None -> also 0.5.
                         src_conf_raw = src.get("confidence", 0.5)
-                        src_conf = (
-                            0.5 if isinstance(src_conf_raw, str)
-                            else float(src_conf_raw)
-                        )
+                        if isinstance(src_conf_raw, (int, float, bool)):
+                            src_conf = float(src_conf_raw)
+                        else:
+                            src_conf = 0.5
                         sink_conf_raw = sink.get("confidence", 0.5)
-                        sink_conf = (
-                            0.5 if isinstance(sink_conf_raw, str)
-                            else float(sink_conf_raw)
-                        )
-                        combined = _clamp01(
-                            (src_conf + sink_conf) / 2.0 * 0.8
-                        )
+                        if isinstance(sink_conf_raw, (int, float, bool)):
+                            sink_conf = float(sink_conf_raw)
+                        else:
+                            sink_conf = 0.5
+                        combined = _clamp01((src_conf + sink_conf) / 2.0 * 0.8)
                         src_label = _finding_label(src, "source")
                         sink_label = _finding_label(sink, "sink")
-                        static_chains.append({
-                            "id": f"chain_{chain_id:03d}",
-                            "description": (
-                                f"Same-binary chain in {binary}: "
-                                f"{src_label} -> {sink_label}"
-                            ),
-                            "binary": binary,
-                            "chain_type": "same_binary",
-                            "steps": cast(list[JsonValue], cast(list[object], [
-                                {
-                                    "finding_id": _finding_id(src),
-                                    "primitive": "external_input",
-                                    "evidence": str(
-                                        src.get("path_description", "static_reference")
+                        static_chains.append(
+                            {
+                                "id": f"chain_{chain_id:03d}",
+                                "description": (
+                                    f"Same-binary chain in {binary}: "
+                                    f"{src_label} -> {sink_label}"
+                                ),
+                                "binary": binary,
+                                "chain_type": "same_binary",
+                                "steps": cast(
+                                    list[JsonValue],
+                                    cast(
+                                        list[object],
+                                        [
+                                            {
+                                                "finding_id": _finding_id(src),
+                                                "primitive": "external_input",
+                                                "evidence": str(
+                                                    src.get(
+                                                        "path_description",
+                                                        "static_reference",
+                                                    )
+                                                ),
+                                            },
+                                            {
+                                                "finding_id": _finding_id(sink),
+                                                "primitive": sink_label,
+                                                "evidence": str(
+                                                    sink.get(
+                                                        "path_description",
+                                                        "static_reference",
+                                                    )
+                                                ),
+                                            },
+                                        ],
                                     ),
-                                },
-                                {
-                                    "finding_id": _finding_id(sink),
-                                    "primitive": sink_label,
-                                    "evidence": str(
-                                        sink.get("path_description", "static_reference")
+                                ),
+                                "confidence": combined,
+                                "missing_evidence": cast(
+                                    list[JsonValue],
+                                    cast(
+                                        list[object],
+                                        [
+                                            "Dynamic validation of data flow",
+                                            "Runtime confirmation of exploitability",
+                                        ],
                                     ),
-                                },
-                            ])),
-                            "confidence": combined,
-                            "missing_evidence": cast(list[JsonValue], cast(list[object], [
-                                "Dynamic validation of data flow",
-                                "Runtime confirmation of exploitability",
-                            ])),
-                            "method": "static",
-                        })
+                                ),
+                                "method": "static",
+                            }
+                        )
 
             # Build sink-only chains: vuln + weak hardening = exploitable
             elif sinks and not sources and len(sinks) >= 1:
@@ -563,13 +637,17 @@ class ChainConstructorStage:
                     if no_canary:
                         weakness_parts.append("no canary")
                     weakness_desc = (
-                        " + ".join(weakness_parts) if weakness_parts
+                        " + ".join(weakness_parts)
+                        if weakness_parts
                         else "default hardening"
                     )
+                    # Match pre-existing behaviour: string -> 0.4 fallback;
+                    # numeric -> float(); dict/list/None -> 0.4.
                     conf_raw = sink.get("confidence", 0.4)
-                    base_conf = (
-                        0.4 if isinstance(conf_raw, str) else float(conf_raw)
-                    )
+                    if isinstance(conf_raw, (int, float, bool)):
+                        base_conf = float(conf_raw)
+                    else:
+                        base_conf = 0.4
                     # Boost confidence for weak hardening
                     if no_pie and no_canary:
                         base_conf = min(base_conf + 0.10, 0.55)
@@ -586,30 +664,38 @@ class ChainConstructorStage:
                         },
                     ]
                     if weakness_parts:
-                        steps.append({
-                            "finding_id": f"hardening_{binary}",
-                            "primitive": f"weak_hardening ({weakness_desc})",
-                            "evidence": f"Binary hardening: {hardening}",
-                        })
+                        steps.append(
+                            {
+                                "finding_id": f"hardening_{binary}",
+                                "primitive": f"weak_hardening ({weakness_desc})",
+                                "evidence": f"Binary hardening: {hardening}",
+                            }
+                        )
 
-                    static_chains.append({
-                        "id": f"chain_{chain_id:03d}",
-                        "description": (
-                            f"Sink+hardening chain in {binary}: "
-                            f"{sink_label} + {weakness_desc}"
-                        ),
-                        "binary": binary,
-                        "chain_type": "same_binary_sink_hardening",
-                        "steps": cast(
-                            list[JsonValue], cast(list[object], steps)
-                        ),
-                        "confidence": _clamp01(base_conf),
-                        "missing_evidence": cast(list[JsonValue], cast(list[object], [
-                            "Input source identification",
-                            "Dynamic data flow confirmation",
-                        ])),
-                        "method": "static_hardening",
-                    })
+                    static_chains.append(
+                        {
+                            "id": f"chain_{chain_id:03d}",
+                            "description": (
+                                f"Sink+hardening chain in {binary}: "
+                                f"{sink_label} + {weakness_desc}"
+                            ),
+                            "binary": binary,
+                            "chain_type": "same_binary_sink_hardening",
+                            "steps": cast(list[JsonValue], cast(list[object], steps)),
+                            "confidence": _clamp01(base_conf),
+                            "missing_evidence": cast(
+                                list[JsonValue],
+                                cast(
+                                    list[object],
+                                    [
+                                        "Input source identification",
+                                        "Dynamic data flow confirmation",
+                                    ],
+                                ),
+                            ),
+                            "method": "static_hardening",
+                        }
+                    )
 
         # --- Step 2: Cross-binary chains via IPC ---
         cross_binary_chains: list[dict[str, JsonValue]] = []
@@ -634,45 +720,63 @@ class ChainConstructorStage:
                     if src_findings and dst_findings:
                         chain_id += 1
                         ipc_type = str(edge.get("type", "ipc"))
-                        cross_binary_chains.append({
-                            "id": f"chain_{chain_id:03d}",
-                            "description": (
-                                f"Cross-binary chain: {src_binary} "
-                                f"--[{ipc_type}]--> {dst_binary}"
-                            ),
-                            "chain_type": "cross_binary",
-                            "ipc_type": ipc_type,
-                            "steps": cast(list[JsonValue], cast(list[object], [
-                                {
-                                    "finding_id": str(
-                                        src_findings[0].get("id", "src_finding")
+                        cross_binary_chains.append(
+                            {
+                                "id": f"chain_{chain_id:03d}",
+                                "description": (
+                                    f"Cross-binary chain: {src_binary} "
+                                    f"--[{ipc_type}]--> {dst_binary}"
+                                ),
+                                "chain_type": "cross_binary",
+                                "ipc_type": ipc_type,
+                                "steps": cast(
+                                    list[JsonValue],
+                                    cast(
+                                        list[object],
+                                        [
+                                            {
+                                                "finding_id": str(
+                                                    src_findings[0].get(
+                                                        "id", "src_finding"
+                                                    )
+                                                ),
+                                                "primitive": "initial_access",
+                                                "evidence": f"finding in {src_binary}",
+                                            },
+                                            {
+                                                "finding_id": f"ipc_{ipc_type}",
+                                                "primitive": f"lateral_movement_via_{ipc_type}",
+                                                "evidence": (
+                                                    f"IPC edge: {src_binary} -> {dst_binary}"
+                                                ),
+                                            },
+                                            {
+                                                "finding_id": str(
+                                                    dst_findings[0].get(
+                                                        "id", "dst_finding"
+                                                    )
+                                                ),
+                                                "primitive": "code_execution",
+                                                "evidence": f"finding in {dst_binary}",
+                                            },
+                                        ],
                                     ),
-                                    "primitive": "initial_access",
-                                    "evidence": f"finding in {src_binary}",
-                                },
-                                {
-                                    "finding_id": f"ipc_{ipc_type}",
-                                    "primitive": f"lateral_movement_via_{ipc_type}",
-                                    "evidence": (
-                                        f"IPC edge: {src_binary} -> {dst_binary}"
+                                ),
+                                "confidence": _clamp01(0.4),
+                                "missing_evidence": cast(
+                                    list[JsonValue],
+                                    cast(
+                                        list[object],
+                                        [
+                                            "IPC message format verification",
+                                            "Cross-process data flow confirmation",
+                                            "Dynamic validation",
+                                        ],
                                     ),
-                                },
-                                {
-                                    "finding_id": str(
-                                        dst_findings[0].get("id", "dst_finding")
-                                    ),
-                                    "primitive": "code_execution",
-                                    "evidence": f"finding in {dst_binary}",
-                                },
-                            ])),
-                            "confidence": _clamp01(0.4),
-                            "missing_evidence": cast(list[JsonValue], cast(list[object], [
-                                "IPC message format verification",
-                                "Cross-process data flow confirmation",
-                                "Dynamic validation",
-                            ])),
-                            "method": "static_ipc",
-                        })
+                                ),
+                                "method": "static_ipc",
+                            }
+                        )
                         if chain_id >= _MAX_CHAINS:
                             break
 
@@ -699,19 +803,31 @@ class ChainConstructorStage:
         }
 
         # Known IPC pattern detectors
-        _NVRAM_SYMS: frozenset[str] = frozenset({
-            "nvram_get", "nvram_set", "nvram_safe_get",
-            "nvram_bufget", "nvram_bufset",
-            "acosNvramConfig_get", "acosNvramConfig_set",
-        })
+        _NVRAM_SYMS: frozenset[str] = frozenset(
+            {
+                "nvram_get",
+                "nvram_set",
+                "nvram_safe_get",
+                "nvram_bufget",
+                "nvram_bufset",
+                "acosNvramConfig_get",
+                "acosNvramConfig_set",
+            }
+        )
         _SOCKET_PATH_PREFIXES: tuple[str, ...] = (
-            "/tmp/", "/var/run/", "/dev/",
+            "/tmp/",
+            "/var/run/",
+            "/dev/",
         )
         _FILE_IPC_PREFIXES: tuple[str, ...] = (
-            "/tmp/", "/var/tmp/", "/dev/shm/",
+            "/tmp/",
+            "/var/tmp/",
+            "/dev/shm/",
         )
         _DBUS_PREFIXES: tuple[str, ...] = (
-            "org.freedesktop.", "com.", "net.",
+            "org.freedesktop.",
+            "com.",
+            "net.",
         )
 
         def _detect_ipc_mechanism(
@@ -744,9 +860,14 @@ class ChainConstructorStage:
 
             # Shared config keys that look like IPC
             if sym_lower in {
-                "admin_pass", "admin_password", "http_passwd",
-                "login_passwd", "wan_ipaddr", "lan_ipaddr",
-                "wl_ssid", "wps_pin",
+                "admin_pass",
+                "admin_password",
+                "http_passwd",
+                "login_passwd",
+                "wan_ipaddr",
+                "lan_ipaddr",
+                "wl_ssid",
+                "wps_pin",
             }:
                 return ("nvram_shared", shared_sym)
 
@@ -788,11 +909,12 @@ class ChainConstructorStage:
             for i, bin_a in enumerate(bins):
                 if chain_id >= _MAX_CHAINS:
                     break
-                for bin_b in bins[i + 1:]:
+                for bin_b in bins[i + 1 :]:
                     if chain_id >= _MAX_CHAINS:
                         break
                     pair_key = (
-                        min(bin_a, bin_b), max(bin_a, bin_b),
+                        min(bin_a, bin_b),
+                        max(bin_a, bin_b),
                     )
                     if pair_key in seen_pairs:
                         continue
@@ -821,46 +943,40 @@ class ChainConstructorStage:
                         src_bin, dst_bin = bin_a, bin_b
                         src_f, dst_f = findings_a, findings_b
 
-                    src_label = (
-                        _finding_label(src_f[0], "source") if src_f
-                        else "input"
-                    )
-                    dst_label = (
-                        _finding_label(dst_f[0], "sink") if dst_f
-                        else "sink"
-                    )
+                    src_label = _finding_label(src_f[0], "source") if src_f else "input"
+                    dst_label = _finding_label(dst_f[0], "sink") if dst_f else "sink"
 
                     steps: list[dict[str, object]] = []
                     if src_f:
-                        steps.append({
-                            "finding_id": _finding_id(src_f[0]),
-                            "binary": src_bin,
-                            "primitive": f"input_via_{src_label}",
+                        steps.append(
+                            {
+                                "finding_id": _finding_id(src_f[0]),
+                                "binary": src_bin,
+                                "primitive": f"input_via_{src_label}",
+                                "evidence": (f"Source finding in {src_bin}"),
+                            }
+                        )
+                    steps.append(
+                        {
+                            "ipc": (f"{ipc_mechanism}('{shared_key}')"),
+                            "binary_a": src_bin,
+                            "binary_b": dst_bin,
+                            "primitive": f"ipc_via_{ipc_mechanism}",
                             "evidence": (
-                                f"Source finding in {src_bin}"
+                                f"Shared {ipc_mechanism} key "
+                                f"'{shared_key}' in both binaries"
                             ),
-                        })
-                    steps.append({
-                        "ipc": (
-                            f"{ipc_mechanism}('{shared_key}')"
-                        ),
-                        "binary_a": src_bin,
-                        "binary_b": dst_bin,
-                        "primitive": f"ipc_via_{ipc_mechanism}",
-                        "evidence": (
-                            f"Shared {ipc_mechanism} key "
-                            f"'{shared_key}' in both binaries"
-                        ),
-                    })
+                        }
+                    )
                     if dst_f:
-                        steps.append({
-                            "finding_id": _finding_id(dst_f[0]),
-                            "binary": dst_bin,
-                            "primitive": f"sink_via_{dst_label}",
-                            "evidence": (
-                                f"Sink finding in {dst_bin}"
-                            ),
-                        })
+                        steps.append(
+                            {
+                                "finding_id": _finding_id(dst_f[0]),
+                                "binary": dst_bin,
+                                "primitive": f"sink_via_{dst_label}",
+                                "evidence": (f"Sink finding in {dst_bin}"),
+                            }
+                        )
 
                     # Higher confidence when both source and sink
                     # are confirmed
@@ -870,33 +986,38 @@ class ChainConstructorStage:
                     if a_has_source and b_has_sink:
                         conf = 0.50
 
-                    cross_binary_ipc_chains.append({
-                        "id": f"chain_{chain_id:03d}",
-                        "description": (
-                            f"Cross-binary IPC chain: "
-                            f"{src_bin} --[{ipc_mechanism}: "
-                            f"{shared_key}]--> {dst_bin}"
-                        ),
-                        "chain_type": "cross_binary_ipc",
-                        "binary_a": src_bin,
-                        "binary_b": dst_bin,
-                        "ipc_mechanism": ipc_mechanism,
-                        "shared_key": shared_key,
-                        "steps": cast(
-                            list[JsonValue],
-                            cast(list[object], steps),
-                        ),
-                        "confidence": _clamp01(conf),
-                        "missing_evidence": cast(
-                            list[JsonValue],
-                            cast(list[object], [
-                                "IPC data flow dynamic verification",
-                                "Cross-process taint confirmation",
-                                "Runtime IPC channel monitoring",
-                            ]),
-                        ),
-                        "method": "shared_string_ipc",
-                    })
+                    cross_binary_ipc_chains.append(
+                        {
+                            "id": f"chain_{chain_id:03d}",
+                            "description": (
+                                f"Cross-binary IPC chain: "
+                                f"{src_bin} --[{ipc_mechanism}: "
+                                f"{shared_key}]--> {dst_bin}"
+                            ),
+                            "chain_type": "cross_binary_ipc",
+                            "binary_a": src_bin,
+                            "binary_b": dst_bin,
+                            "ipc_mechanism": ipc_mechanism,
+                            "shared_key": shared_key,
+                            "steps": cast(
+                                list[JsonValue],
+                                cast(list[object], steps),
+                            ),
+                            "confidence": _clamp01(conf),
+                            "missing_evidence": cast(
+                                list[JsonValue],
+                                cast(
+                                    list[object],
+                                    [
+                                        "IPC data flow dynamic verification",
+                                        "Cross-process taint confirmation",
+                                        "Runtime IPC channel monitoring",
+                                    ],
+                                ),
+                            ),
+                            "method": "shared_string_ipc",
+                        }
+                    )
 
         # Strategy 2: Detect nvram IPC across binaries that both
         # import nvram_get/nvram_set even without shared .rodata keys
@@ -906,8 +1027,7 @@ class ChainConstructorStage:
             bsyms = bbin.get("symbols")
             if isinstance(bsyms, list):
                 sym_set = {
-                    str(s) for s in cast(list[object], bsyms)
-                    if isinstance(s, str)
+                    str(s) for s in cast(list[object], bsyms) if isinstance(s, str)
                 }
                 if sym_set & _NVRAM_SYMS:
                     nvram_bins.append(bin_name)
@@ -934,7 +1054,7 @@ class ChainConstructorStage:
                 a_input = bool(syms_a & _INPUT_SYMBOLS)
                 a_sink = bool(syms_a & _SINK_SYMBOLS)
 
-                for nv_b in nvram_bins[i + 1:]:
+                for nv_b in nvram_bins[i + 1 :]:
                     if chain_id >= _MAX_CHAINS:
                         break
                     pair_key = (min(nv_a, nv_b), max(nv_a, nv_b))
@@ -967,57 +1087,65 @@ class ChainConstructorStage:
                         else:
                             src_bin, dst_bin = nv_b, nv_a
 
-                        cross_binary_ipc_chains.append({
-                            "id": f"chain_{chain_id:03d}",
-                            "description": (
-                                f"Cross-binary nvram chain: "
-                                f"{src_bin} --[nvram]--> {dst_bin}"
-                            ),
-                            "chain_type": "cross_binary_ipc",
-                            "binary_a": src_bin,
-                            "binary_b": dst_bin,
-                            "ipc_mechanism": "nvram_shared",
-                            "shared_key": "nvram_api",
-                            "steps": cast(
-                                list[JsonValue],
-                                cast(list[object], [
-                                    {
-                                        "primitive": "input_capture",
-                                        "binary": src_bin,
-                                        "evidence": (
-                                            f"{src_bin} imports input "
-                                            f"APIs + nvram_set"
-                                        ),
-                                    },
-                                    {
-                                        "ipc": "nvram_set → nvram_get",
-                                        "primitive": "nvram_ipc",
-                                        "evidence": (
-                                            "Both binaries import "
-                                            "nvram get/set APIs"
-                                        ),
-                                    },
-                                    {
-                                        "primitive": "sink_execution",
-                                        "binary": dst_bin,
-                                        "evidence": (
-                                            f"{dst_bin} imports sink "
-                                            f"APIs + nvram_get"
-                                        ),
-                                    },
-                                ]),
-                            ),
-                            "confidence": _clamp01(0.40),
-                            "missing_evidence": cast(
-                                list[JsonValue],
-                                cast(list[object], [
-                                    "Specific nvram key identification",
-                                    "Data flow from input to nvram_set",
-                                    "Data flow from nvram_get to sink",
-                                ]),
-                            ),
-                            "method": "nvram_api_ipc",
-                        })
+                        cross_binary_ipc_chains.append(
+                            {
+                                "id": f"chain_{chain_id:03d}",
+                                "description": (
+                                    f"Cross-binary nvram chain: "
+                                    f"{src_bin} --[nvram]--> {dst_bin}"
+                                ),
+                                "chain_type": "cross_binary_ipc",
+                                "binary_a": src_bin,
+                                "binary_b": dst_bin,
+                                "ipc_mechanism": "nvram_shared",
+                                "shared_key": "nvram_api",
+                                "steps": cast(
+                                    list[JsonValue],
+                                    cast(
+                                        list[object],
+                                        [
+                                            {
+                                                "primitive": "input_capture",
+                                                "binary": src_bin,
+                                                "evidence": (
+                                                    f"{src_bin} imports input "
+                                                    f"APIs + nvram_set"
+                                                ),
+                                            },
+                                            {
+                                                "ipc": "nvram_set → nvram_get",
+                                                "primitive": "nvram_ipc",
+                                                "evidence": (
+                                                    "Both binaries import "
+                                                    "nvram get/set APIs"
+                                                ),
+                                            },
+                                            {
+                                                "primitive": "sink_execution",
+                                                "binary": dst_bin,
+                                                "evidence": (
+                                                    f"{dst_bin} imports sink "
+                                                    f"APIs + nvram_get"
+                                                ),
+                                            },
+                                        ],
+                                    ),
+                                ),
+                                "confidence": _clamp01(0.40),
+                                "missing_evidence": cast(
+                                    list[JsonValue],
+                                    cast(
+                                        list[object],
+                                        [
+                                            "Specific nvram key identification",
+                                            "Data flow from input to nvram_set",
+                                            "Data flow from nvram_get to sink",
+                                        ],
+                                    ),
+                                ),
+                                "method": "nvram_api_ipc",
+                            }
+                        )
 
         if not cross_binary_ipc_chains and not cross_binary_chains:
             limitations.append(
@@ -1025,16 +1153,12 @@ class ChainConstructorStage:
                 "(graph IPC edges: 0, shared-string IPC: 0)"
             )
 
-        all_chains = (
-            static_chains + cross_binary_chains + cross_binary_ipc_chains
-        )
+        all_chains = static_chains + cross_binary_chains + cross_binary_ipc_chains
 
         # Collect cross_strings for LLM prompt
         cross_strings_for_prompt: dict[str, list[str]] = {}
         if cross_strings:
-            cross_strings_for_prompt = dict(
-                list(cross_strings.items())[:10]
-            )
+            cross_strings_for_prompt = dict(list(cross_strings.items())[:10])
 
         # --- Step 3: LLM chain reasoning (opus) ---
         llm_chains: list[dict[str, JsonValue]] = []
@@ -1076,9 +1200,7 @@ class ChainConstructorStage:
                         f"LLM chain construction call failed: {result.status}"
                     )
             else:
-                limitations.append(
-                    "LLM driver not available for chain reasoning"
-                )
+                limitations.append("LLM driver not available for chain reasoning")
         elif self.no_llm:
             limitations.append("LLM chain reasoning skipped (no_llm mode)")
 
@@ -1096,9 +1218,7 @@ class ChainConstructorStage:
         payload: dict[str, JsonValue] = {
             "schema_version": _SCHEMA_VERSION,
             "status": status,
-            "chains": cast(
-                list[JsonValue], cast(list[object], all_chains)
-            ),
+            "chains": cast(list[JsonValue], cast(list[object], all_chains)),
             "summary": {
                 "total_chains": len(all_chains),
                 "same_binary": len(static_chains),
@@ -1111,8 +1231,7 @@ class ChainConstructorStage:
             ),
         }
         out_json.write_text(
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             encoding="utf-8",
         )
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from .cli_common import (
     _ANSI_BLUE,
@@ -61,26 +61,32 @@ def _build_tui_snapshot_lines(
     medium = _as_int(snapshot.get("medium"))
     low = _as_int(snapshot.get("low"))
     max_bucket = _as_int(snapshot.get("max_bucket"), default=1)
-    schema_version = _short_text(snapshot.get("schema_version"), max_len=48) or "unknown"
-    verifier_artifacts = cast(
-        dict[str, object], snapshot.get("verifier_artifacts", {})
+    schema_version = (
+        _short_text(snapshot.get("schema_version"), max_len=48) or "unknown"
     )
-    chain_bundle_index = cast(
-        dict[str, str], snapshot.get("chain_bundle_index", {})
-    )
+    verifier_artifacts = cast(dict[str, object], snapshot.get("verifier_artifacts", {}))
+    chain_bundle_index = cast(dict[str, str], snapshot.get("chain_bundle_index", {}))
     dynamic_present = _as_int(
         len(cast(list[str], verifier_artifacts.get("dynamic_present_refs", [])))
     )
-    dynamic_missing_refs = cast(list[str], verifier_artifacts.get("dynamic_missing_refs", []))
+    dynamic_missing_refs = cast(
+        list[str], verifier_artifacts.get("dynamic_missing_refs", [])
+    )
     dynamic_total = dynamic_present + _as_int(len(dynamic_missing_refs))
-    exploit_bundle_refs = cast(list[str], verifier_artifacts.get("exploit_bundle_refs", []))
-    verified_chain_present = bool(verifier_artifacts.get("verified_chain_present", False))
+    exploit_bundle_refs = cast(
+        list[str], verifier_artifacts.get("exploit_bundle_refs", [])
+    )
+    verified_chain_present = bool(
+        verifier_artifacts.get("verified_chain_present", False)
+    )
 
     horizontal = "\u2500" if use_unicode else "-"
     section_rule = horizontal * 96
 
     lines: list[str] = []
-    lines.append(_ansi(f"SCOUT :: {run_dir}", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+    lines.append(
+        _ansi(f"SCOUT :: {run_dir}", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+    )
     lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(
         _ansi("Status", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
@@ -96,7 +102,9 @@ def _build_tui_snapshot_lines(
     if reason_codes:
         lines.append("reason_codes=" + ", ".join(reason_codes[:5]))
     lines.append("")
-    lines.append(_ansi("Exploit Candidate Map", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+    lines.append(
+        _ansi("Exploit Candidate Map", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+    )
     lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(
         f"candidate_count={candidate_count} | chain_backed={chain_backed} | schema={schema_version}"
@@ -108,11 +116,8 @@ def _build_tui_snapshot_lines(
     else:
         dynamic_status = (
             "present"
-            if dynamic_missing_refs == []
-            and dynamic_total > 0
-            else "partial"
-            if dynamic_missing_refs
-            else "not_started"
+            if dynamic_missing_refs == [] and dynamic_total > 0
+            else "partial" if dynamic_missing_refs else "not_started"
         )
         lines.append(
             "Verifier artifacts: "
@@ -130,24 +135,28 @@ def _build_tui_snapshot_lines(
         lines.append(
             "  exploit_bundles="
             + ", ".join(
-                _path_tail(x, max_segments=3, max_len=96) for x in exploit_bundle_refs[:2]
+                _path_tail(x, max_segments=3, max_len=96)
+                for x in exploit_bundle_refs[:2]
             )
             + (" ..." if len(exploit_bundle_refs) > 2 else "")
         )
     runtime_model = cast(dict[str, object], snapshot.get("runtime_model", {}))
     runtime_available = bool(runtime_model.get("available", False))
     if runtime_available:
-        runtime_summary = cast(
-            dict[str, object], runtime_model.get("summary", {})
-        )
+        runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
         rows = cast(list[object], runtime_model.get("rows", []))
         runtime_system_map_any = runtime_summary.get("runtime_system_map", [])
         (
-            [cast(dict[str, object], x) for x in cast(list[object], runtime_system_map_any)]
+            [
+                cast(dict[str, object], x)
+                for x in cast(list[object], runtime_system_map_any)
+            ]
             if isinstance(runtime_system_map_any, list)
             else []
         )
-        runtime_protocol_counts_any = runtime_summary.get("service_count_by_protocol", {})
+        runtime_protocol_counts_any = runtime_summary.get(
+            "service_count_by_protocol", {}
+        )
         runtime_protocol_counts = (
             cast(dict[str, int], runtime_protocol_counts_any)
             if isinstance(runtime_protocol_counts_any, dict)
@@ -171,7 +180,8 @@ def _build_tui_snapshot_lines(
         )
         if runtime_protocol_counts:
             protocol_text = ", ".join(
-                f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=4)
+                f"{k}:{v}"
+                for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=4)
             )
             if protocol_text:
                 lines.append(f"runtime_protocols: {protocol_text}")
@@ -200,7 +210,8 @@ def _build_tui_snapshot_lines(
                 if not isinstance(row_components, list):
                     row_components = []
                 components = ", ".join(
-                    _short_text(v, max_len=24) for v in cast(list[str], row_components[:2])
+                    _short_text(v, max_len=24)
+                    for v in cast(list[str], row_components[:2])
                 )
                 evidence_badge = (
                     _short_text(row.get("evidence_badge"), max_len=16) or "S"
@@ -211,7 +222,11 @@ def _build_tui_snapshot_lines(
                     f"/V{_as_int(row.get('verified_chain_evidence_count'))}"
                 )
                 dynamic_exploit = bool(row.get("dynamic_exploit_chain", False))
-                badge_style = (_ANSI_BOLD, _ANSI_RED) if dynamic_exploit else (_ANSI_BOLD, _ANSI_YELLOW)
+                badge_style = (
+                    (_ANSI_BOLD, _ANSI_RED)
+                    if dynamic_exploit
+                    else (_ANSI_BOLD, _ANSI_YELLOW)
+                )
                 rendered_badge = _ansi(
                     evidence_badge,
                     *badge_style,
@@ -239,14 +254,20 @@ def _build_tui_snapshot_lines(
                 "  legend: D=dynamic, E=exploit, V=verified_chain, S=static, D+E=D+E"
             )
         else:
-            lines.append("service_protocol_component map: (no mapped host->service rows)")
+            lines.append(
+                "service_protocol_component map: (no mapped host->service rows)"
+            )
     else:
         lines.append("Runtime Exposure Model: unavailable")
 
     threat_model = cast(dict[str, object], snapshot.get("threat_model", {}))
     if threat_model:
         lines.append("")
-        lines.append(_ansi("Threat Modeling Overview", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+        lines.append(
+            _ansi(
+                "Threat Modeling Overview", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi
+            )
+        )
         lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
         if bool(threat_model.get("available")):
             tm_status = _short_text(threat_model.get("status"), max_len=20) or "unknown"
@@ -255,7 +276,9 @@ def _build_tui_snapshot_lines(
             tm_mitigations = _as_int(threat_model.get("mitigation_count"))
             tm_assumptions = _as_int(threat_model.get("assumption_count"))
             tm_surface_items = _as_int(threat_model.get("attack_surface_items"))
-            tm_class = _short_text(threat_model.get("classification"), max_len=20) or "-"
+            tm_class = (
+                _short_text(threat_model.get("classification"), max_len=20) or "-"
+            )
             tm_obs = _short_text(threat_model.get("observation"), max_len=28) or "-"
             lines.append(
                 f"threat_model: status={tm_status} | threats={tm_threats} | unknowns={tm_unknowns} | "
@@ -269,9 +292,12 @@ def _build_tui_snapshot_lines(
                 if isinstance(category_counts_any, dict)
                 else {}
             )
-            category_text = ", ".join(
-                f"{k}={v}" for k, v in _sorted_count_pairs(category_counts, limit=4)
-            ) or "-"
+            category_text = (
+                ", ".join(
+                    f"{k}={v}" for k, v in _sorted_count_pairs(category_counts, limit=4)
+                )
+                or "-"
+            )
             lines.append(f"categories: {category_text}")
             top_threats_any = threat_model.get("top_threats")
             top_threats = (
@@ -316,17 +342,31 @@ def _build_tui_snapshot_lines(
         )
 
         state = _short_text(runtime_health.get("state"), max_len=20) or "unknown"
-        dyn_status = _short_text(runtime_health.get("dynamic_status"), max_len=20) or "unknown"
-        dyn_scope = _short_text(runtime_health.get("dynamic_scope"), max_len=28) or "unknown"
+        dyn_status = (
+            _short_text(runtime_health.get("dynamic_status"), max_len=20) or "unknown"
+        )
+        dyn_scope = (
+            _short_text(runtime_health.get("dynamic_scope"), max_len=28) or "unknown"
+        )
         target_ip = _short_text(runtime_health.get("target_ip"), max_len=40) or "-"
         boot_success = bool(runtime_health.get("boot_success"))
         boot_attempts = _as_int(runtime_health.get("boot_attempts"))
-        emu_status = _short_text(runtime_health.get("emulation_status"), max_len=20) or "unknown"
-        priv_mode = _short_text(runtime_health.get("privileged_mode"), max_len=20) or "-"
-        status_color = (_ANSI_BOLD, _ANSI_GREEN) if state == "healthy" else (_ANSI_BOLD, _ANSI_YELLOW)
+        emu_status = (
+            _short_text(runtime_health.get("emulation_status"), max_len=20) or "unknown"
+        )
+        priv_mode = (
+            _short_text(runtime_health.get("privileged_mode"), max_len=20) or "-"
+        )
+        status_color = (
+            (_ANSI_BOLD, _ANSI_GREEN)
+            if state == "healthy"
+            else (_ANSI_BOLD, _ANSI_YELLOW)
+        )
 
         lines.append("")
-        lines.append(_ansi("Runtime Reliability", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi))
+        lines.append(
+            _ansi("Runtime Reliability", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+        )
         lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
         lines.append(
             "state="
@@ -423,22 +463,39 @@ def _build_tui_snapshot_lines(
             else []
         )
 
-        kind_text = ", ".join(
-            f"{k}={v}" for k, v in _sorted_count_pairs(service_kinds, limit=4)
-        ) or "-"
-        endpoint_type_text = ", ".join(
-            f"{k}={v}" for k, v in _sorted_count_pairs(endpoint_types, limit=4)
-        ) or "-"
-        endpoint_protocol_text = ", ".join(
-            f"{k}={v}" for k, v in _sorted_count_pairs(endpoint_protocols, limit=4)
-        ) or "-"
-        dynamic_protocol_text = ", ".join(
-            f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_protocols, limit=3)
-        ) or "-"
-        dynamic_state_text = ", ".join(
-            f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_states, limit=4)
-        ) or "-"
-        scan_strategy = _short_text(asset_inventory.get("scan_strategy"), max_len=32) or "default"
+        kind_text = (
+            ", ".join(
+                f"{k}={v}" for k, v in _sorted_count_pairs(service_kinds, limit=4)
+            )
+            or "-"
+        )
+        endpoint_type_text = (
+            ", ".join(
+                f"{k}={v}" for k, v in _sorted_count_pairs(endpoint_types, limit=4)
+            )
+            or "-"
+        )
+        endpoint_protocol_text = (
+            ", ".join(
+                f"{k}={v}" for k, v in _sorted_count_pairs(endpoint_protocols, limit=4)
+            )
+            or "-"
+        )
+        dynamic_protocol_text = (
+            ", ".join(
+                f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_protocols, limit=3)
+            )
+            or "-"
+        )
+        dynamic_state_text = (
+            ", ".join(
+                f"{k}={v}" for k, v in _sorted_count_pairs(dynamic_states, limit=4)
+            )
+            or "-"
+        )
+        scan_strategy = (
+            _short_text(asset_inventory.get("scan_strategy"), max_len=32) or "default"
+        )
         scan_coverage = _as_float(asset_inventory.get("scan_coverage_pct"), default=0.0)
         scan_range_total = _as_int(asset_inventory.get("scan_range_total"))
         scan_budget_hit = bool(asset_inventory.get("scan_budget_hit", False))
@@ -446,7 +503,12 @@ def _build_tui_snapshot_lines(
 
         lines.append("")
         lines.append(
-            _ansi("Firmware Service & Protocol Inventory", _ANSI_BOLD, _ANSI_MAGENTA, enabled=use_ansi)
+            _ansi(
+                "Firmware Service & Protocol Inventory",
+                _ANSI_BOLD,
+                _ANSI_MAGENTA,
+                enabled=use_ansi,
+            )
         )
         lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
         lines.append(
@@ -462,7 +524,9 @@ def _build_tui_snapshot_lines(
         if service_paths:
             lines.append(
                 "daemon_evidence: "
-                + ", ".join(_path_tail(x, max_segments=6, max_len=96) for x in service_paths[:3])
+                + ", ".join(
+                    _path_tail(x, max_segments=6, max_len=96) for x in service_paths[:3]
+                )
             )
         lines.append(
             f"endpoints: total={_as_int(asset_inventory.get('endpoint_total'))} | types={endpoint_type_text}"
@@ -480,7 +544,9 @@ def _build_tui_snapshot_lines(
             port_line += f" | scan={scan_strategy}"
         lines.append(port_line)
         if scan_budget_hit:
-            lines.append("  scan_note=budget_hit (increase AIEDGE_PORTSCAN_BUDGET_S if needed)")
+            lines.append(
+                "  scan_note=budget_hit (increase AIEDGE_PORTSCAN_BUDGET_S if needed)"
+            )
         if open_ports:
             lines.append("  open_ports=" + ", ".join(open_ports[:6]))
         elif port_samples:
@@ -491,7 +557,11 @@ def _build_tui_snapshot_lines(
             lines.append("candidate_paths(top): " + ", ".join(candidate_paths[:4]))
 
     lines.append(
-        _ansi(_count_bar("HIGH", count=high, max_count=max_bucket), _ANSI_RED, enabled=use_ansi)
+        _ansi(
+            _count_bar("HIGH", count=high, max_count=max_bucket),
+            _ANSI_RED,
+            enabled=use_ansi,
+        )
     )
     lines.append(
         _ansi(
@@ -501,7 +571,11 @@ def _build_tui_snapshot_lines(
         )
     )
     lines.append(
-        _ansi(_count_bar("LOW", count=low, max_count=max_bucket), _ANSI_GREEN, enabled=use_ansi)
+        _ansi(
+            _count_bar("LOW", count=low, max_count=max_bucket),
+            _ANSI_GREEN,
+            enabled=use_ansi,
+        )
     )
 
     candidates = cast(list[dict[str, object]], snapshot.get("candidates", []))
@@ -522,10 +596,19 @@ def _build_tui_snapshot_lines(
     )
     lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     lines.append(f"Candidate groups: {len(candidate_groups)} unique")
-    lines.append(_ansi("ID  P   Score   Hits  Evidence  Family", _ANSI_BOLD, _ANSI_BLUE, enabled=use_ansi))
+    lines.append(
+        _ansi(
+            "ID  P   Score   Hits  Evidence  Family",
+            _ANSI_BOLD,
+            _ANSI_BLUE,
+            enabled=use_ansi,
+        )
+    )
     lines.append(_ansi(section_rule, _ANSI_DIM, enabled=use_ansi))
     previous_triplet: tuple[str, str, str] | None = None
-    for idx, group in enumerate(candidate_groups[: min(limit, len(candidate_groups))], start=1):
+    for idx, group in enumerate(
+        candidate_groups[: min(limit, len(candidate_groups))], start=1
+    ):
         priority = _short_text(group.get("priority"), max_len=12) or "unknown"
         priority_tag = priority[:1].upper() if priority else "?"
         family = _short_text(group.get("family"), max_len=42) or "unknown"
@@ -567,14 +650,18 @@ def _build_tui_snapshot_lines(
             priority_style = (_ANSI_BOLD, _ANSI_GREEN)
         lines.append(_ansi(header_line, *priority_style, enabled=use_ansi))
 
-        path_signature = _short_text(group.get("path_signature"), max_len=72) or "(unspecified)"
+        path_signature = (
+            _short_text(group.get("path_signature"), max_len=72) or "(unspecified)"
+        )
         lines.append(f"    path: {path_signature}")
         hypothesis = _short_text(group.get("hypothesis"), max_len=140)
         impact = _short_text(group.get("impact"), max_len=140)
         next_step = _short_text(group.get("next_step"), max_len=140)
         current_triplet = (hypothesis, impact, next_step)
         if previous_triplet is not None and current_triplet == previous_triplet:
-            lines.append("    note: same attack/impact/next as previous candidate group")
+            lines.append(
+                "    note: same attack/impact/next as previous candidate group"
+            )
         else:
             if hypothesis:
                 lines.append(f"    attack: {hypothesis}")
@@ -590,7 +677,9 @@ def _build_tui_snapshot_lines(
         if sample_paths:
             lines.append("    sample_paths:")
             for sample in sample_paths[:3]:
-                lines.append(f"      - {_path_tail(sample, max_segments=6, max_len=96)}")
+                lines.append(
+                    f"      - {_path_tail(sample, max_segments=6, max_len=96)}"
+                )
 
     return lines
 
@@ -603,7 +692,9 @@ def _safe_curses_addstr(
     text: str,
     attr: int = 0,
 ) -> None:
-    win = cast("curses._CursesWindow", window)  # noqa: F821
+    # ``curses._CursesWindow`` is a private attribute pyright cannot
+    # resolve; ``Any`` preserves runtime duck typing.
+    win = cast(Any, window)
     max_y, max_x = win.getmaxyx()
     if y < 0 or y >= max_y or x >= max_x:
         return
@@ -686,7 +777,8 @@ def _draw_interactive_tui_frame(
 ) -> None:
     import curses
 
-    win = cast("curses._CursesWindow", stdscr)
+    # ``curses._CursesWindow`` is a private attribute pyright cannot resolve.
+    win = cast(Any, stdscr)
     win.erase()
     max_y, max_x = win.getmaxyx()
     if max_y < 14 or max_x < 72:
@@ -723,17 +815,21 @@ def _draw_interactive_tui_frame(
     low = _as_int(snapshot.get("low"))
     chain_backed = _as_int(snapshot.get("chain_backed"))
     candidate_count = _as_int(snapshot.get("candidate_count"))
-    verifier_artifacts = cast(
-        dict[str, object], snapshot.get("verifier_artifacts", {})
+    verifier_artifacts = cast(dict[str, object], snapshot.get("verifier_artifacts", {}))
+    chain_bundle_index = cast(dict[str, str], snapshot.get("chain_bundle_index", {}))
+    dynamic_missing = cast(
+        list[str], verifier_artifacts.get("dynamic_missing_refs", [])
     )
-    chain_bundle_index = cast(
-        dict[str, str], snapshot.get("chain_bundle_index", {})
+    dynamic_total = len(
+        cast(list[str], verifier_artifacts.get("dynamic_required_refs", []))
     )
-    dynamic_missing = cast(list[str], verifier_artifacts.get("dynamic_missing_refs", []))
-    dynamic_total = len(cast(list[str], verifier_artifacts.get("dynamic_required_refs", [])))
     dynamic_present = max(0, dynamic_total - len(dynamic_missing))
-    exploit_bundle_refs = cast(list[str], verifier_artifacts.get("exploit_bundle_refs", []))
-    verified_chain_present = bool(verifier_artifacts.get("verified_chain_present", False))
+    exploit_bundle_refs = cast(
+        list[str], verifier_artifacts.get("exploit_bundle_refs", [])
+    )
+    verified_chain_present = bool(
+        verifier_artifacts.get("verified_chain_present", False)
+    )
     runtime_model = cast(dict[str, object], snapshot.get("runtime_model", {}))
     runtime_summary = cast(dict[str, object], runtime_model.get("summary", {}))
     runtime_available = bool(runtime_model.get("available"))
@@ -839,12 +935,18 @@ def _draw_interactive_tui_frame(
         ),
         attr=_attr("meta"),
     )
-    proto_text_runtime = ", ".join(
-        f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=4)
-    ) or "-"
-    map_text = ", ".join(
-        f"{k}->{v}" for k, v in _sorted_count_pairs(runtime_host_services, limit=4)
-    ) or "-"
+    proto_text_runtime = (
+        ", ".join(
+            f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=4)
+        )
+        or "-"
+    )
+    map_text = (
+        ", ".join(
+            f"{k}->{v}" for k, v in _sorted_count_pairs(runtime_host_services, limit=4)
+        )
+        or "-"
+    )
     if proto_text_runtime:
         _safe_curses_addstr(
             win,
@@ -873,9 +975,12 @@ def _draw_interactive_tui_frame(
         if isinstance(asset_open_ports_any, list)
         else []
     )
-    proto_text = ",".join(
-        f"{k}:{v}" for k, v in _sorted_count_pairs(asset_protocol_counts, limit=2)
-    ) or "-"
+    proto_text = (
+        ",".join(
+            f"{k}:{v}" for k, v in _sorted_count_pairs(asset_protocol_counts, limit=2)
+        )
+        or "-"
+    )
     asset_scan_cov = _as_float(asset_inventory.get("scan_coverage_pct"), default=0.0)
     blockers_any = runtime_health.get("blockers")
     blockers_count = (
@@ -923,9 +1028,10 @@ def _draw_interactive_tui_frame(
         if isinstance(tm_categories_any, dict)
         else {}
     )
-    tm_category_text = ",".join(
-        f"{k}:{v}" for k, v in _sorted_count_pairs(tm_categories, limit=2)
-    ) or "-"
+    tm_category_text = (
+        ",".join(f"{k}:{v}" for k, v in _sorted_count_pairs(tm_categories, limit=2))
+        or "-"
+    )
     tm_attr = _attr("success") if tm_available and tm_threats > 0 else _attr("warning")
     _safe_curses_addstr(
         win,
@@ -1082,7 +1188,11 @@ def _draw_interactive_tui_frame(
                 row_attr = _attr("success")
             else:
                 row_attr = _attr("meta")
-            attr = (row_attr | curses.A_REVERSE | curses.A_BOLD) if idx == selected_index else row_attr
+            attr = (
+                (row_attr | curses.A_REVERSE | curses.A_BOLD)
+                if idx == selected_index
+                else row_attr
+            )
             _safe_curses_addstr(win, y=list_top + row, x=0, text=line, attr=attr)
 
     details: list[str] = []
@@ -1157,10 +1267,13 @@ def _draw_interactive_tui_frame(
                 f"attack_surface_items={_as_int(tm.get('attack_surface_items'))}"
             )
             tm_cat_any = tm.get("category_counts")
-            tm_cat = cast(dict[str, int], tm_cat_any) if isinstance(tm_cat_any, dict) else {}
-            cat_text = ", ".join(
-                f"{k}:{v}" for k, v in _sorted_count_pairs(tm_cat, limit=4)
-            ) or "-"
+            tm_cat = (
+                cast(dict[str, int], tm_cat_any) if isinstance(tm_cat_any, dict) else {}
+            )
+            cat_text = (
+                ", ".join(f"{k}:{v}" for k, v in _sorted_count_pairs(tm_cat, limit=4))
+                or "-"
+            )
             details.extend(_wrap_detail("categories: " + cat_text))
             details.append("")
             tm_top_any = tm.get("top_threats")
@@ -1206,7 +1319,10 @@ def _draw_interactive_tui_frame(
         runtime_rows = cast(list[object], runtime_model.get("rows", []))
         runtime_system_map_local = runtime_summary.get("runtime_system_map", [])
         runtime_system_map_local_rows = (
-            [cast(dict[str, object], x) for x in cast(list[object], runtime_system_map_local)]
+            [
+                cast(dict[str, object], x)
+                for x in cast(list[object], runtime_system_map_local)
+            ]
             if isinstance(runtime_system_map_local, list)
             else []
         )
@@ -1224,7 +1340,9 @@ def _draw_interactive_tui_frame(
             f"V={_as_int(runtime_summary.get('rows_verified_chain'))}, "
             f"D+E={_as_int(runtime_summary.get('rows_dynamic_exploit'))}"
         )
-        runtime_protocol_counts_any = runtime_summary.get("service_count_by_protocol", {})
+        runtime_protocol_counts_any = runtime_summary.get(
+            "service_count_by_protocol", {}
+        )
         runtime_protocol_counts = (
             cast(dict[str, int], runtime_protocol_counts_any)
             if isinstance(runtime_protocol_counts_any, dict)
@@ -1234,13 +1352,16 @@ def _draw_interactive_tui_frame(
             details.append(
                 "protocols: "
                 + ", ".join(
-                    f"{k}:{v}" for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=6)
+                    f"{k}:{v}"
+                    for k, v in _sorted_count_pairs(runtime_protocol_counts, limit=6)
                 )
             )
         if runtime_system_map_local_rows:
             details.append("")
             details.append("system map:")
-            for row in runtime_system_map_local_rows[: max(3, min(6, right_width // 16))]:
+            for row in runtime_system_map_local_rows[
+                : max(3, min(6, right_width // 16))
+            ]:
                 host = _short_text(row.get("host"), max_len=24)
                 service_count = _as_int(row.get("service_count"))
                 component_count = _as_int(row.get("component_count"))
@@ -1262,12 +1383,16 @@ def _draw_interactive_tui_frame(
                 row_host = _short_text(row.get("host"), max_len=16)
                 row_service_host = _short_text(row.get("service_host"), max_len=16)
                 row_port = _as_int(row.get("port"))
-                row_protocol = (_short_text(row.get("protocol"), max_len=8) or "tcp").upper()
+                row_protocol = (
+                    _short_text(row.get("protocol"), max_len=8) or "tcp"
+                ).upper()
                 row_badge = _short_text(row.get("evidence_badge"), max_len=8) or "S"
                 row_components = row.get("components")
                 if not isinstance(row_components, list):
                     row_components = []
-                component_text = ", ".join(_short_text(v, max_len=20) for v in row_components[:2])
+                component_text = ", ".join(
+                    _short_text(v, max_len=20) for v in row_components[:2]
+                )
                 if not component_text:
                     component_text = "unmapped"
                 evidence_signals = row.get("evidence_signals")
@@ -1308,9 +1433,11 @@ def _draw_interactive_tui_frame(
         )
         kind_pairs = cast(
             dict[str, int],
-            asset_inventory.get("service_kind_counts", {})
-            if isinstance(asset_inventory.get("service_kind_counts"), dict)
-            else {},
+            (
+                asset_inventory.get("service_kind_counts", {})
+                if isinstance(asset_inventory.get("service_kind_counts"), dict)
+                else {}
+            ),
         )
         if kind_pairs:
             kind_text = ", ".join(
@@ -1338,8 +1465,7 @@ def _draw_interactive_tui_frame(
         )
         if proto_pairs:
             details.append(
-                "dynamic_proto="
-                + ", ".join(f"{k}:{v}" for k, v in proto_pairs)
+                "dynamic_proto=" + ", ".join(f"{k}:{v}" for k, v in proto_pairs)
             )
         state_pairs = _sorted_count_pairs(
             cast(
@@ -1350,8 +1476,7 @@ def _draw_interactive_tui_frame(
         )
         if state_pairs:
             details.append(
-                "dynamic_state="
-                + ", ".join(f"{k}:{v}" for k, v in state_pairs)
+                "dynamic_state=" + ", ".join(f"{k}:{v}" for k, v in state_pairs)
             )
         if interfaces:
             details.append("interfaces=" + ", ".join(interfaces[:5]))
@@ -1361,7 +1486,9 @@ def _draw_interactive_tui_frame(
         if daemon_paths:
             details.append(
                 "daemon_evidence="
-                + ", ".join(_path_tail(x, max_segments=5, max_len=96) for x in daemon_paths[:4])
+                + ", ".join(
+                    _path_tail(x, max_segments=5, max_len=96) for x in daemon_paths[:4]
+                )
             )
         if top_daemons:
             details.append("top_daemons=" + ", ".join(top_daemons[:6]))
@@ -1371,7 +1498,10 @@ def _draw_interactive_tui_frame(
         representative = None
         if representative_id:
             for item in candidates:
-                if _short_text(item.get("candidate_id"), max_len=120) == representative_id:
+                if (
+                    _short_text(item.get("candidate_id"), max_len=120)
+                    == representative_id
+                ):
                     representative = item
                     break
         path_signature = _short_text(selected.get("path_signature"), max_len=72)
@@ -1418,11 +1548,7 @@ def _draw_interactive_tui_frame(
             )
             details.append(
                 "signals: "
-                + (
-                    ",".join(selected_signals)
-                    if selected_signals
-                    else "static"
-                )
+                + (",".join(selected_signals) if selected_signals else "static")
                 + f" [{_candidate_signal_badge(selected_signals)}]"
             )
             details.append("")
@@ -1437,16 +1563,21 @@ def _draw_interactive_tui_frame(
             )
             details.extend(_wrap_detail("path: " + representative_path))
 
-            attack_text = _short_text(
-                representative.get("attack_hypothesis"),
-                max_len=max(24, right_width * 3),
-            ) or "(none)"
+            attack_text = (
+                _short_text(
+                    representative.get("attack_hypothesis"),
+                    max_len=max(24, right_width * 3),
+                )
+                or "(none)"
+            )
             details.append("attack:")
             details.extend(_wrap_detail(attack_text, prefix="  "))
 
             impacts_any = representative.get("expected_impact")
             if isinstance(impacts_any, list):
-                impacts = [x for x in cast(list[object], impacts_any) if isinstance(x, str)]
+                impacts = [
+                    x for x in cast(list[object], impacts_any) if isinstance(x, str)
+                ]
             else:
                 impacts = []
             impact_text = _short_text(
@@ -1482,7 +1613,9 @@ def _draw_interactive_tui_frame(
         details.append("No candidate groups available.")
 
     truncated_detail_lines = max(0, len(details) - list_height)
-    visible_detail_rows = list_height if truncated_detail_lines == 0 else max(1, list_height - 1)
+    visible_detail_rows = (
+        list_height if truncated_detail_lines == 0 else max(1, list_height - 1)
+    )
     for i, line in enumerate(details[:visible_detail_rows]):
         detail_attr = 0
         if line.startswith("attack:") or line.startswith("impact:"):

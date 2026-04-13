@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 # ---------------------------------------------------------------------------
 # Vendor alias map for cross-referencing CPE vendor fields
@@ -68,27 +69,42 @@ def load_nvd_db(nvd_dir: Path) -> list[dict[str, object]]:
 def extract_cpe_products(cve: dict[str, object]) -> list[dict[str, str]]:
     """Extract (vendor, product, version, version_end) from CPE match criteria."""
     products: list[dict[str, str]] = []
-    for config in cve.get("configurations", []):
+    configurations = cve.get("configurations", [])
+    if not isinstance(configurations, list):
+        return products
+    for config in configurations:
         if not isinstance(config, dict):
             continue
-        for node in config.get("nodes", []):
+        config_dict = cast(dict[str, object], config)
+        nodes = config_dict.get("nodes", [])
+        if not isinstance(nodes, list):
+            continue
+        for node in nodes:
             if not isinstance(node, dict):
                 continue
-            for match in node.get("cpeMatch", []):
+            node_dict = cast(dict[str, object], node)
+            cpe_matches = node_dict.get("cpeMatch", [])
+            if not isinstance(cpe_matches, list):
+                continue
+            for match in cpe_matches:
                 if not isinstance(match, dict) or not match.get("vulnerable"):
                     continue
                 cpe = str(match.get("criteria", ""))
                 parts = cpe.split(":")
                 if len(parts) >= 6:
-                    products.append({
-                        "vendor": parts[3].lower(),
-                        "product": parts[4].lower(),
-                        "version": parts[5] if len(parts) > 5 else "*",
-                        "version_end": str(
-                            match.get("versionEndExcluding",
-                                      match.get("versionEndIncluding", ""))
-                        ),
-                    })
+                    products.append(
+                        {
+                            "vendor": parts[3].lower(),
+                            "product": parts[4].lower(),
+                            "version": parts[5] if len(parts) > 5 else "*",
+                            "version_end": str(
+                                match.get(
+                                    "versionEndExcluding",
+                                    match.get("versionEndIncluding", ""),
+                                )
+                            ),
+                        }
+                    )
     return products
 
 
@@ -210,18 +226,20 @@ def match_nvd_local(
                     desc = str(d.get("value", ""))[:200]
                     break
 
-        matches.append({
-            "cve_id": cve_id,
-            "confidence": 0.70 if product_match else 0.40,
-            "cvss_v3_score": score,
-            "vuln_type": _classify_vuln_type(cve),
-            "description": desc,
-            "entry_point": "",
-            "match_type": "nvd_local",
-            "vendor_match": True,
-            "model_match": product_match,
-            "binary_match": False,
-            "sink_match": False,
-        })
+        matches.append(
+            {
+                "cve_id": cve_id,
+                "confidence": 0.70 if product_match else 0.40,
+                "cvss_v3_score": score,
+                "vuln_type": _classify_vuln_type(cve),
+                "description": desc,
+                "entry_point": "",
+                "match_type": "nvd_local",
+                "vendor_match": True,
+                "model_match": product_match,
+                "binary_match": False,
+                "sink_match": False,
+            }
+        )
 
     return matches

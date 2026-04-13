@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from ._typing_helpers import safe_float
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
@@ -229,7 +230,9 @@ class ThreatModelStage:
             else attack_surface_obj.get("attack_surface")
         )
         non_promoted_any = (
-            None if attack_surface_obj is None else attack_surface_obj.get("non_promoted")
+            None
+            if attack_surface_obj is None
+            else attack_surface_obj.get("non_promoted")
         )
         unknowns_any = (
             None if attack_surface_obj is None else attack_surface_obj.get("unknowns")
@@ -408,13 +411,10 @@ class ThreatModelStage:
             }
             unknowns_all.append(unknown_item)
 
-            if (
-                len(threats) < int(self.max_threats)
-                and _is_actionable_unknown(
-                    endpoint_type=endpoint_type_any,
-                    endpoint_value=endpoint_value_any,
-                    reason=reason,
-                )
+            if len(threats) < int(self.max_threats) and _is_actionable_unknown(
+                endpoint_type=endpoint_type_any,
+                endpoint_value=endpoint_value_any,
+                reason=reason,
             ):
                 category = _infer_category(
                     surface_type="unknown_surface",
@@ -461,9 +461,11 @@ class ThreatModelStage:
         unknowns_all = sorted(
             unknowns_all,
             key=lambda item: (
-                -float(item.get("risk_score", 0.0))
-                if isinstance(item.get("risk_score"), (int, float))
-                else 0.0,
+                (
+                    -safe_float(item.get("risk_score"), default=0.0)
+                    if isinstance(item.get("risk_score"), (int, float))
+                    else 0.0
+                ),
                 _unknown_sort_key(item),
             ),
         )
