@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import cast
 
 from ._typing_helpers import safe_float
+from .evidence_tier import annotate_findings_with_evidence_tiers
 from .llm_driver import (
     LLMDriver,
     ModelTier,
@@ -794,6 +795,13 @@ class FPVerificationStage:
             limitations.append("One or more FP verification LLM calls failed")
         if unverified_count > 0:
             limitations.append("FP verification left one or more alerts unverified")
+
+        try:
+            annotate_findings_with_evidence_tiers(
+                cast(list[dict[str, object]], cast(list[object], verified))
+            )
+        except Exception:
+            pass
 
         payload = {
             "schema_version": _SCHEMA_VERSION,

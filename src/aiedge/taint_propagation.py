@@ -21,6 +21,7 @@ from .confidence_caps import (
     STATIC_CODE_VERIFIED_CAP,
     SYMBOL_COOCCURRENCE_CAP,
 )
+from .evidence_tier import annotate_findings_with_evidence_tiers
 from .llm_driver import resolve_driver
 from .llm_prompts import TAINT_SYSTEM, TEMPERATURE_DETERMINISTIC
 from .path_safety import assert_under_dir
@@ -1102,6 +1103,16 @@ class TaintPropagationStage:
         if len(alerts) > _MAX_ALERTS:
             limitations.append(f"Alerts capped at {_MAX_ALERTS}")
             alerts = alerts[:_MAX_ALERTS]
+
+        try:
+            annotate_findings_with_evidence_tiers(
+                cast(list[dict[str, object]], cast(list[object], taint_results))
+            )
+            annotate_findings_with_evidence_tiers(
+                cast(list[dict[str, object]], cast(list[object], alerts))
+            )
+        except Exception:
+            pass
 
         _write_results(
             stage_dir,

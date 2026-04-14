@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import TypeAlias, cast
 
+from .evidence_tier import EVIDENCE_TIERS, is_valid_evidence_tier
 from .exploit_tiering import (
     TIER_EVIDENCE_MISSING,
     TIER_HIGH_SEVERITY_REQUIRES_T2,
@@ -272,6 +273,13 @@ def validate_report(report: object) -> list[str]:
             if not isinstance(disp, str) or disp not in _DISPOSITIONS:
                 errors.append(
                     f"findings[{i}].disposition must be one of {sorted(_DISPOSITIONS)}"
+                )
+            evidence_tier_any = item.get("evidence_tier")
+            if evidence_tier_any is not None and not is_valid_evidence_tier(
+                evidence_tier_any
+            ):
+                errors.append(
+                    f"findings[{i}].evidence_tier must be one of {sorted(EVIDENCE_TIERS)}"
                 )
             tier_any = item.get("exploitability_tier")
             if tier_any is not None and not is_valid_exploitability_tier(tier_any):

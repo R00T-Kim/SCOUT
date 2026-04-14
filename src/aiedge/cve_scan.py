@@ -29,6 +29,7 @@ from typing import cast
 
 from ._typing_helpers import safe_float
 from .confidence_caps import STATIC_CODE_VERIFIED_CAP
+from .evidence_tier import EvidenceTier
 from .path_safety import assert_under_dir, env_int, rel_to_run_dir, sha256_text
 from .scoring import PriorityInputs, compute_priority_score, priority_inputs_to_dict
 from .stage import StageContext, StageOutcome
@@ -1198,6 +1199,7 @@ class CveScanStage:
                     "confidence": round(detection_confidence, 6),
                     "priority_score": round(priority_score, 6),
                     "priority_inputs": priority_inputs_to_dict(priority_inputs),
+                    "evidence_tier": EvidenceTier.STATIC_COLOCATED.value,
                     "families": ["known_vulnerability", "cve_match"],
                     "disposition": "suspected",
                     "exploitability_tier": "suspected",

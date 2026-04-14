@@ -239,6 +239,10 @@ def _finding_to_result(finding: dict[str, Any]) -> dict[str, Any]:
     ):
         properties["scout_priority_score"] = float(priority_score)
 
+    evidence_tier = finding.get("evidence_tier")
+    if isinstance(evidence_tier, str) and evidence_tier:
+        properties["scout_evidence_tier"] = evidence_tier
+
     priority_inputs = finding.get("priority_inputs")
     if isinstance(priority_inputs, dict):
         properties["scout_priority_inputs"] = priority_inputs

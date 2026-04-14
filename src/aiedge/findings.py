@@ -11,6 +11,7 @@ from typing import cast
 
 from . import __version__ as AIEDGE_VERSION
 from ._typing_helpers import safe_float
+from .evidence_tier import annotate_findings_with_evidence_tiers
 from .exploit_tiering import (
     default_exploitability_tier,
     exploitability_tier_rank,
@@ -385,6 +386,52 @@ def _safe_load_json(path: Path) -> object | None:
 _SYNTH_TRIAGE_FINDING_IDS = frozenset({"aiedge.findings.web.exec_sink_overlap"})
 
 
+def _is_sha256_token(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(re.fullmatch(r"[0-9a-fA-F]{64}", value.strip()))
+
+
+def _normalize_run_relative_binary_path(run_dir: Path, value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw or _is_sha256_token(raw):
+        return None
+
+    path = Path(raw)
+    try:
+        resolved = path.resolve() if path.is_absolute() else (run_dir / path).resolve()
+        rel = resolved.relative_to(run_dir.resolve())
+        return rel.as_posix()
+    except Exception:
+        normalized = raw.replace("\\", "/")
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        if not normalized:
+            return None
+        if normalized.startswith("/"):
+            return Path(normalized).as_posix()
+        return Path(normalized).as_posix()
+
+
+def _stable_trail_dedup(
+    trail: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    deduped: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for entry in trail:
+        try:
+            key = json.dumps(entry, sort_keys=True, ensure_ascii=True)
+        except Exception:
+            key = str(entry)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
 def _inherit_synthesis_reasoning_trail(
     normalized: list[dict[str, JsonValue]], run_dir: Path
 ) -> None:
@@ -400,6 +447,12 @@ def _inherit_synthesis_reasoning_trail(
     stage-level aggregate outcome as synthesis-level ``ReasoningEntry``
     items so ``reasoning_trail_count`` reflects that LLM reasoning ran for
     the finding.
+
+    v2.6.1 follow-up: if the synthesis finding exposes ``affected_binaries``
+    we prefer a finding-level match against downstream alerts
+    (``source_binary`` path or sha256) and copy the representative trails
+    for the highest-confidence matching alerts. Aggregate summaries remain
+    as a fail-open fallback when no binary-level match exists.
 
     Best-effort and fail-open: missing artifacts, malformed summaries, or
     import errors leave findings untouched.
@@ -428,52 +481,180 @@ def _inherit_synthesis_reasoning_trail(
             return default
         return int(value)
 
+    def _entries(stage: str, artifact: str, key: str) -> list[dict[str, object]]:
+        path = run_dir / "stages" / stage / f"{artifact}.json"
+        if not path.exists():
+            return []
+        raw = _safe_load_json(path)
+        if not isinstance(raw, dict):
+            return []
+        entries_any = raw.get(key)
+        if not isinstance(entries_any, list):
+            return []
+        return [
+            cast(dict[str, object], entry)
+            for entry in cast(list[object], entries_any)
+            if isinstance(entry, dict)
+        ]
+
+    sha_cache: dict[str, str | None] = {}
+
+    def _sha256_for_run_relative(path_s: object) -> str | None:
+        rel = _normalize_run_relative_binary_path(run_dir, path_s)
+        if not rel:
+            return None
+        if rel in sha_cache:
+            return sha_cache[rel]
+        try:
+            path = (run_dir / rel).resolve()
+            path.relative_to(run_dir.resolve())
+            if not path.exists() or not path.is_file():
+                sha_cache[rel] = None
+                return None
+            digest = _sha256_file(path)
+            sha_cache[rel] = digest
+            return digest
+        except Exception:
+            sha_cache[rel] = None
+            return None
+
+    def _binary_match_keys(value: object) -> set[str]:
+        keys: set[str] = set()
+        path_fields = ("binary", "path", "source_binary")
+        hash_fields = (
+            "binary_sha256",
+            "source_binary_sha256",
+            "sample_sha256",
+            "sha256",
+            "file_sha256",
+            "hash",
+        )
+
+        def _add_key(item: object) -> None:
+            if not isinstance(item, str):
+                return
+            stripped = item.strip()
+            if not stripped:
+                return
+            if _is_sha256_token(stripped):
+                keys.add(f"sha256:{stripped.lower()}")
+                return
+            rel = _normalize_run_relative_binary_path(run_dir, stripped)
+            if rel:
+                keys.add(f"path:{rel}")
+                digest = _sha256_for_run_relative(rel)
+                if digest:
+                    keys.add(f"sha256:{digest.lower()}")
+
+        if isinstance(value, dict):
+            value_map = cast(dict[str, object], value)
+            for field in path_fields:
+                _add_key(value_map.get(field))
+            for field in hash_fields:
+                _add_key(value_map.get(field))
+        else:
+            _add_key(value)
+        return keys
+
+    def _matched_alerts(
+        affected: list[dict[str, object]], alerts: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
+        if not affected or not alerts:
+            return []
+        affected_keys: set[str] = set()
+        for item in affected:
+            affected_keys.update(_binary_match_keys(item))
+        if not affected_keys:
+            return []
+        matched: list[dict[str, object]] = []
+        for alert in alerts:
+            if affected_keys.intersection(_binary_match_keys(alert)):
+                matched.append(alert)
+        return matched
+
+    def _float(value: object, default: float = 0.0) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return default
+        return float(value)
+
+    def _alert_sort_key(alert: dict[str, object]) -> tuple[float, str, str, str]:
+        return (
+            -_float(alert.get("confidence"), 0.0),
+            str(alert.get("source_binary", "")),
+            str(alert.get("sink_symbol", "")),
+            str(alert.get("source_api", "")),
+        )
+
+    def _alert_label(alert: dict[str, object]) -> str:
+        src_api = str(alert.get("source_api", "") or "input")
+        sink = str(alert.get("sink_symbol", "") or "sink")
+        source_binary = str(alert.get("source_binary", "")).strip()
+        if _is_sha256_token(source_binary):
+            binary_label = source_binary[:12]
+        else:
+            rel = _normalize_run_relative_binary_path(run_dir, source_binary)
+            binary_label = rel.rsplit("/", 1)[-1] if rel else (
+                source_binary.rsplit("/", 1)[-1] if "/" in source_binary else source_binary
+            )
+        if binary_label:
+            return f"{src_api}->{sink}@{binary_label}"
+        return f"{src_api}->{sink}"
+
+    def _aggregate_fallback_entries(
+        fp_summary: dict[str, object], triage_summary: dict[str, object]
+    ) -> list[dict[str, object]]:
+        fallback_entries: list[dict[str, object]] = []
+        if fp_summary:
+            fallback_entries.append(
+                _asdict(
+                    ReasoningEntry(
+                        stage="fp_verification",
+                        step="synthesis_inherit",
+                        verdict="summary",
+                        rationale=(
+                            f"{_int(fp_summary.get('total_input'))} underlying "
+                            "taint alerts verified: "
+                            f"{_int(fp_summary.get('true_positives'))} TP, "
+                            f"{_int(fp_summary.get('false_positives'))} FP, "
+                            f"{_int(fp_summary.get('unverified'))} unverified, "
+                            f"{_int(fp_summary.get('parse_failures'))} parse failures"
+                        ),
+                        delta=0.0,
+                    )
+                )
+            )
+        if triage_summary:
+            fallback_entries.append(
+                _asdict(
+                    ReasoningEntry(
+                        stage="adversarial_triage",
+                        step="synthesis_inherit",
+                        verdict="summary",
+                        rationale=(
+                            f"{_int(triage_summary.get('debated'))} underlying "
+                            "taint alerts debated: "
+                            f"{_int(triage_summary.get('downgraded'))} downgraded, "
+                            f"{_int(triage_summary.get('maintained'))} maintained, "
+                            f"{_int(triage_summary.get('parse_failures'))} parse failures, "
+                            f"{_int(triage_summary.get('llm_call_failures'))} llm call failures"
+                        ),
+                        delta=0.0,
+                    )
+                )
+            )
+        return fallback_entries
+
     fp_summary = _summary("fp_verification", "verified_alerts")
     triage_summary = _summary("adversarial_triage", "triaged_findings")
     if not fp_summary and not triage_summary:
         return
 
-    inherited_entries: list[dict[str, object]] = []
-    if fp_summary:
-        inherited_entries.append(
-            _asdict(
-                ReasoningEntry(
-                    stage="fp_verification",
-                    step="synthesis_inherit",
-                    verdict="summary",
-                    rationale=(
-                        f"{_int(fp_summary.get('total_input'))} underlying "
-                        "taint alerts verified: "
-                        f"{_int(fp_summary.get('true_positives'))} TP, "
-                        f"{_int(fp_summary.get('false_positives'))} FP, "
-                        f"{_int(fp_summary.get('unverified'))} unverified, "
-                        f"{_int(fp_summary.get('parse_failures'))} parse failures"
-                    ),
-                    delta=0.0,
-                )
-            )
-        )
-    if triage_summary:
-        inherited_entries.append(
-            _asdict(
-                ReasoningEntry(
-                    stage="adversarial_triage",
-                    step="synthesis_inherit",
-                    verdict="summary",
-                    rationale=(
-                        f"{_int(triage_summary.get('debated'))} underlying "
-                        "taint alerts debated: "
-                        f"{_int(triage_summary.get('downgraded'))} downgraded, "
-                        f"{_int(triage_summary.get('maintained'))} maintained, "
-                        f"{_int(triage_summary.get('parse_failures'))} parse failures, "
-                        f"{_int(triage_summary.get('llm_call_failures'))} llm call failures"
-                    ),
-                    delta=0.0,
-                )
-            )
-        )
-
-    if not inherited_entries:
+    triaged_findings = _entries(
+        "adversarial_triage", "triaged_findings", "triaged_findings"
+    )
+    verified_alerts = _entries("fp_verification", "verified_alerts", "verified_alerts")
+    aggregate_entries = _aggregate_fallback_entries(fp_summary, triage_summary)
+    if not aggregate_entries and not triaged_findings and not verified_alerts:
         return
 
     for finding in normalized:
@@ -485,8 +666,49 @@ def _inherit_synthesis_reasoning_trail(
             for entry in cast(list[object], existing_any):
                 if isinstance(entry, dict):
                     merged.append(cast(dict[str, object], entry))
-        merged.extend(inherited_entries)
-        finding["reasoning_trail"] = cast(JsonValue, merged)
+        affected_any = finding.get("affected_binaries")
+        affected_binaries = [
+            cast(dict[str, object], item)
+            for item in cast(list[object], affected_any)
+            if isinstance(item, dict)
+        ] if isinstance(affected_any, list) else []
+        matched_triaged = _matched_alerts(affected_binaries, triaged_findings)
+        matched_verified = _matched_alerts(affected_binaries, verified_alerts)
+
+        sample_pool = matched_triaged or matched_verified
+        if sample_pool:
+            sampled = sorted(sample_pool, key=_alert_sort_key)[:3]
+            sample_labels = ", ".join(_alert_label(alert) for alert in sampled)
+            merged.append(
+                _asdict(
+                    ReasoningEntry(
+                        stage="findings",
+                        step="synthesis_match",
+                        verdict="matched_alerts",
+                        rationale=(
+                            f"Matched {len(sample_pool)} downstream alerts to "
+                            f"{len(affected_binaries)} affected binaries "
+                            f"({len(matched_triaged)} triaged, {len(matched_verified)} verified). "
+                            f"Sampled top {len(sampled)} alerts by confidence: "
+                            f"{sample_labels or 'none'}."
+                        ),
+                        delta=0.0,
+                    )
+                )
+            )
+            for alert in sampled:
+                trail_any = alert.get("reasoning_trail")
+                if not isinstance(trail_any, list):
+                    continue
+                for entry in cast(list[object], trail_any):
+                    if isinstance(entry, dict):
+                        merged.append(cast(dict[str, object], entry))
+        else:
+            merged.extend(aggregate_entries)
+
+        deduped = _stable_trail_dedup(merged)
+        if deduped:
+            finding["reasoning_trail"] = cast(JsonValue, deduped)
 
 
 def _load_inventory_roots(
@@ -4245,6 +4467,14 @@ def run_findings(
         elif _trail_any is not None:
             _f.pop("reasoning_trail", None)
 
+    # PR #16 / 2C.3 — additive evidence_tier annotation.
+    try:
+        _evidence_tier_counts = annotate_findings_with_evidence_tiers(
+            cast(list[dict[str, object]], cast(list[object], normalized))
+        )
+    except Exception:
+        _evidence_tier_counts = {}
+
     # PR #15 — additive priority_score annotation (optional field; consumers may ignore).
     # CVE findings already carry priority_score (set in cve_scan.py with full
     # PriorityInputs). For all other findings the only known input is
@@ -4309,6 +4539,7 @@ def run_findings(
         "extracted_file_count": int(extracted_files),
         "category_counts": cast(JsonValue, dict(_category_counts)),
         "reasoning_trail_count": _reasoning_trail_count,
+        "tier_counts": cast(JsonValue, dict(_evidence_tier_counts)),
         "priority_bucket_counts": cast(JsonValue, dict(_priority_bucket_counts)),
     }
 

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import terminator_feedback
+from .evidence_tier import EVIDENCE_TIERS, is_valid_evidence_tier
 from .finding_categories import FindingCategory
 from .path_safety import assert_under_dir
 from .policy import AIEdgePolicyViolation
@@ -100,7 +101,7 @@ TOOLS: list[dict[str, Any]] = [
         "name": "scout_list_findings",
         "description": (
             "List security findings from a run, "
-            "optionally filtered by severity and minimum confidence."
+            "optionally filtered by severity, evidence_tier, and minimum confidence."
         ),
         "inputSchema": {
             "type": "object",
@@ -114,6 +115,11 @@ TOOLS: list[dict[str, Any]] = [
                 "min_confidence": {
                     "type": "number",
                     "description": "Minimum confidence score (0.0–1.0)",
+                },
+                "evidence_tier": {
+                    "type": "string",
+                    "enum": list(EVIDENCE_TIERS),
+                    "description": "Optional evidence tier filter",
                 },
             },
             "required": ["run_id"],
@@ -317,7 +323,7 @@ TOOLS: list[dict[str, Any]] = [
         "name": "scout_filter_by_category",
         "description": (
             "Filter findings by category (PR #7a taxonomy). Returns summarized "
-            "list with id, category, severity, confidence. Categories: "
+            "list with id, category, severity, confidence, and evidence_tier. Categories: "
             "vulnerability, misconfiguration, pipeline_artifact."
         ),
         "inputSchema": {
@@ -334,6 +340,24 @@ TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["run_id", "category"],
+        },
+    },
+    {
+        "name": "scout_filter_by_evidence_tier",
+        "description": (
+            "Filter findings by evidence_tier (2C.3 taxonomy). Returns summarized "
+            "list with id, evidence_tier, severity, confidence, and category."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "evidence_tier": {
+                    "type": "string",
+                    "enum": list(EVIDENCE_TIERS),
+                },
+            },
+            "required": ["run_id", "evidence_tier"],
         },
     },
 ]
@@ -533,6 +557,7 @@ def _tool_list_findings(args: dict[str, Any]) -> list[dict[str, str]]:
     run_id: str = args["run_id"]
     severity_filter: str | None = args.get("severity")
     min_confidence: float | None = args.get("min_confidence")
+    evidence_tier_filter: str | None = args.get("evidence_tier")
 
     run_dir = _resolve_run_dir(run_id)
 
@@ -579,12 +604,19 @@ def _tool_list_findings(args: dict[str, Any]) -> list[dict[str, str]]:
             for f in findings
             if isinstance(f, dict) and float(f.get("confidence", 0.0)) >= min_confidence
         ]
+    if evidence_tier_filter:
+        findings = [
+            f
+            for f in findings
+            if isinstance(f, dict) and f.get("evidence_tier") == evidence_tier_filter
+        ]
 
     summary = {
         "total": len(findings),
         "filters_applied": {
             "severity": severity_filter,
             "min_confidence": min_confidence,
+            "evidence_tier": evidence_tier_filter,
         },
         "findings": findings,
     }
@@ -958,6 +990,7 @@ def _tool_get_finding_reasoning(args: dict[str, Any]) -> list[dict[str, str]]:
         "original_confidence": finding.get("original_confidence"),
         "current_confidence": finding.get("confidence"),
         "category": finding.get("category"),
+        "evidence_tier": finding.get("evidence_tier"),
         "fp_verdict": finding.get("fp_verdict"),
         "triage_outcome": finding.get("triage_outcome"),
     }
@@ -1126,6 +1159,7 @@ def _tool_filter_by_category(args: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "id": finding.get("id"),
                 "category": f_cat_any,
+                "evidence_tier": finding.get("evidence_tier"),
                 "severity": finding.get("severity"),
                 "confidence": finding.get("confidence"),
                 "source": finding.get("source"),
@@ -1135,6 +1169,57 @@ def _tool_filter_by_category(args: dict[str, Any]) -> list[dict[str, str]]:
     return _json_result(
         {
             "category": category,
+            "total": len(matched),
+            "findings": matched,
+        }
+    )
+
+
+def _tool_filter_by_evidence_tier(args: dict[str, Any]) -> list[dict[str, str]]:
+    run_id: str = args.get("run_id", "")
+    evidence_tier: str = args.get("evidence_tier", "")
+
+    if not is_valid_evidence_tier(evidence_tier):
+        return _json_result(
+            {
+                "success": False,
+                "error": "invalid_evidence_tier",
+                "message": (
+                    f"evidence_tier must be one of {sorted(EVIDENCE_TIERS)}, "
+                    f"got {evidence_tier!r}"
+                ),
+            }
+        )
+
+    run_dir = _resolve_run_dir(run_id)
+    findings = _load_findings_list(run_dir)
+    if findings is None:
+        return _text_result(
+            f"No findings artifact found in run {run_id!r}. "
+            "Ensure the findings stage has completed."
+        )
+
+    matched: list[dict[str, Any]] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        f_tier_any = finding.get("evidence_tier")
+        if not isinstance(f_tier_any, str) or f_tier_any != evidence_tier:
+            continue
+        matched.append(
+            {
+                "id": finding.get("id"),
+                "evidence_tier": f_tier_any,
+                "category": finding.get("category"),
+                "severity": finding.get("severity"),
+                "confidence": finding.get("confidence"),
+                "source": finding.get("source"),
+            }
+        )
+
+    return _json_result(
+        {
+            "evidence_tier": evidence_tier,
             "total": len(matched),
             "findings": matched,
         }
@@ -1163,6 +1248,7 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "scout_inject_hint": _tool_inject_hint,
     "scout_override_verdict": _tool_override_verdict,
     "scout_filter_by_category": _tool_filter_by_category,
+    "scout_filter_by_evidence_tier": _tool_filter_by_evidence_tier,
 }
 
 # ---------------------------------------------------------------------------
