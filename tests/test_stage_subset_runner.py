@@ -112,3 +112,24 @@ def test_run_subset_rejects_blank_stage_name(tmp_path: Path) -> None:
     info = _make_run(tmp_path)
     with pytest.raises(ValueError, match="non-empty"):
         _ = run_subset(info, ["   "], no_llm=True)
+
+
+def test_run_subset_parallel_updates_manifest_execution_provenance(
+    tmp_path: Path,
+) -> None:
+    info = _make_run(tmp_path)
+
+    _ = run_subset(
+        info,
+        ["tooling"],
+        time_budget_s=30,
+        no_llm=True,
+        experimental_parallel=4,
+    )
+
+    manifest = cast(
+        dict[str, object],
+        json.loads(info.manifest_path.read_text(encoding="utf-8")),
+    )
+    assert manifest["execution_mode"] == "parallel"
+    assert manifest["max_workers"] == 4

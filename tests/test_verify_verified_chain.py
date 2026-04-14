@@ -23,7 +23,13 @@ def _run_verifier(run_dir: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _write_verified_chain_fixture(tmp_path: Path) -> Path:
+def _write_verified_chain_fixture(
+    tmp_path: Path,
+    *,
+    include_execution: bool = False,
+    execution_mode: str = "parallel",
+    max_workers: int = 4,
+) -> Path:
     run_dir = tmp_path / "run"
     verified_dir = run_dir / "verified_chain"
     dynamic_dir = run_dir / "stages" / "dynamic_validation"
@@ -116,6 +122,12 @@ def _write_verified_chain_fixture(tmp_path: Path) -> Path:
         ],
     }
 
+    if include_execution:
+        contract["execution"] = {
+            "mode": execution_mode,
+            "max_workers": max_workers,
+        }
+
     _ = (verified_dir / "verified_chain.json").write_text(
         json.dumps(contract, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
@@ -125,6 +137,29 @@ def _write_verified_chain_fixture(tmp_path: Path) -> Path:
 
 def test_verify_verified_chain_ok(tmp_path: Path) -> None:
     run_dir = _write_verified_chain_fixture(tmp_path)
+    res = _run_verifier(run_dir)
+    assert res.returncode == 0
+    assert res.stdout.startswith("[OK] verified_chain contract verified:")
+
+
+def test_verify_verified_chain_accepts_legacy_contract_without_execution(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_verified_chain_fixture(tmp_path, include_execution=False)
+    res = _run_verifier(run_dir)
+    assert res.returncode == 0
+    assert res.stdout.startswith("[OK] verified_chain contract verified:")
+
+
+def test_verify_verified_chain_accepts_execution_provenance(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_verified_chain_fixture(
+        tmp_path,
+        include_execution=True,
+        execution_mode="parallel",
+        max_workers=4,
+    )
     res = _run_verifier(run_dir)
     assert res.returncode == 0
     assert res.stdout.startswith("[OK] verified_chain contract verified:")
@@ -163,3 +198,20 @@ def test_verify_verified_chain_fails_when_reason_codes_invalid_for_pass(
     assert res.returncode != 0
     assert "[FAIL] invalid_contract:" in res.stdout
     assert "pass verdict missing required reason codes" in res.stdout
+
+
+def test_verify_verified_chain_fails_when_execution_mode_invalid(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_verified_chain_fixture(
+        tmp_path,
+        include_execution=True,
+        execution_mode="threadstorm",
+        max_workers=0,
+    )
+
+    res = _run_verifier(run_dir)
+
+    assert res.returncode != 0
+    assert "[FAIL] invalid_contract:" in res.stdout
+    assert "verified_chain.execution.mode" in res.stdout

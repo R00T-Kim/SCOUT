@@ -94,6 +94,28 @@ def test_create_run_manifest_includes_default_network_policy(tmp_path: Path) -> 
     assert policy["warnings"] == []
 
 
+def test_create_run_manifest_includes_default_execution_provenance(
+    tmp_path: Path,
+) -> None:
+    fw = tmp_path / "fw.bin"
+    _ = fw.write_bytes(b"firmware")
+
+    info = create_run(
+        str(fw),
+        case_id="case-1",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+
+    manifest = cast(
+        dict[str, object],
+        json.loads(info.manifest_path.read_text(encoding="utf-8")),
+    )
+
+    assert manifest["execution_mode"] == "sequential"
+    assert manifest["max_workers"] == 1
+
+
 def test_create_run_manifest_includes_open_egress_override_warning(
     tmp_path: Path,
 ) -> None:
@@ -196,6 +218,34 @@ def test_analyze_run_without_binwalk_is_schema_valid(
         json.loads(info.report_json_path.read_text(encoding="utf-8")),
     )
     assert validate_report(rep) == []
+
+
+def test_analyze_run_parallel_updates_manifest_execution_provenance(
+    tmp_path: Path,
+) -> None:
+    fw = tmp_path / "fw.bin"
+    _ = fw.write_bytes(b"firmware")
+
+    info = create_run(
+        str(fw),
+        case_id="case-parallel-manifest",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+
+    _ = analyze_run(
+        info,
+        time_budget_s=0,
+        no_llm=True,
+        experimental_parallel=4,
+    )
+
+    manifest = cast(
+        dict[str, object],
+        json.loads(info.manifest_path.read_text(encoding="utf-8")),
+    )
+    assert manifest["execution_mode"] == "parallel"
+    assert manifest["max_workers"] == 4
 
 
 def test_validate_report_rejects_invalid_completeness_shape() -> None:

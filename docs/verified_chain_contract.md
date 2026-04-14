@@ -36,6 +36,9 @@ All linked paths must be run-relative and must resolve inside `run_dir`.
 - `timestamps`: object
   - `started_at`: ISO8601 timestamp
   - `finished_at`: ISO8601 timestamp
+- `execution`: object _(new in 2C.5; legacy contracts may omit and default to sequential provenance)_
+  - `mode`: `sequential|parallel`
+  - `max_workers`: positive int
 - `dynamic_validation`: object
   - `bundle_dir`: run-relative directory path (normally `stages/dynamic_validation`)
   - `isolation_verified`: bool
@@ -78,6 +81,20 @@ State rules:
   - must include at least one fail-class reason code
 - `inconclusive`
   - must include at least one inconclusive-class reason code
+
+## Execution Provenance
+
+- `build_verified_chain.py` should copy execution provenance from `manifest.json`:
+  - `manifest.execution_mode` -> `verified_chain.execution.mode`
+  - `manifest.max_workers` -> `verified_chain.execution.max_workers`
+- Backward-compatible defaults:
+  - if the run manifest omits both fields, builder should emit
+    `{"mode": "sequential", "max_workers": 1}`
+  - verifier should continue to accept legacy `verified_chain.json` files that
+    predate the `execution` object and treat them as the same default
+- Validation rules when `execution` is present:
+  - `mode` must be `sequential` or `parallel`
+  - `max_workers` must be a positive integer
 
 ## Verifier Output Contract
 

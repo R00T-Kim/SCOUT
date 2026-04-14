@@ -49,6 +49,7 @@ _INCONCLUSIVE_REASON_CODES = frozenset(
         "missing_required_artifact",
     }
 )
+_EXECUTION_MODES = frozenset({"sequential", "parallel"})
 
 
 class VerificationError(ValueError):
@@ -215,6 +216,30 @@ def _validate_reason_codes(state: str, reason_codes: list[str]) -> None:
             )
 
 
+def _validate_execution_obj(contract: dict[str, object]) -> dict[str, object]:
+    execution_any = contract.get("execution")
+    if execution_any is None:
+        return {"mode": "sequential", "max_workers": 1}
+
+    execution = _as_object(execution_any, path="verified_chain.execution")
+    mode = _require_str(execution, "mode", path="verified_chain.execution")
+    if mode not in _EXECUTION_MODES:
+        raise VerificationError(
+            "invalid_contract",
+            "verified_chain.execution.mode must be one of "
+            + ", ".join(sorted(_EXECUTION_MODES)),
+        )
+    max_workers = _require_int(
+        execution, "max_workers", path="verified_chain.execution"
+    )
+    if max_workers < 1:
+        raise VerificationError(
+            "invalid_contract",
+            "verified_chain.execution.max_workers must be positive integer",
+        )
+    return {"mode": mode, "max_workers": max_workers}
+
+
 def _verify_verified_chain(run_dir: Path) -> None:
     verified_dir = run_dir / "verified_chain"
     if not verified_dir.is_dir():
@@ -252,6 +277,7 @@ def _verify_verified_chain(run_dir: Path) -> None:
     _validate_iso8601(generated_at, field_path="verified_chain.generated_at")
 
     _ = _require_str(contract, "run_id", path="verified_chain")
+    _ = _validate_execution_obj(contract)
 
     firmware_any = contract.get("firmware")
     firmware = _as_object(firmware_any, path="verified_chain.firmware")

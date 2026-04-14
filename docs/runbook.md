@@ -208,6 +208,11 @@ python3 scripts/build_verified_chain.py --run-dir <run_dir>
 
 Expected output: `[OK] built verified_chain: ...` and file `<run_dir>/verified_chain/verified_chain.json`.
 
+`verified_chain.json` should also preserve run execution provenance from
+`manifest.json` (`execution_mode`, `max_workers`). Older manifests may omit
+both fields; in that case the builder/verifier contract defaults to
+`mode=sequential`, `max_workers=1`.
+
 ## 5) Verify analyst digest artifacts first (digest-first workflow)
 
 ```bash

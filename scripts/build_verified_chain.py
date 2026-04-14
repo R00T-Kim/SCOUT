@@ -340,6 +340,18 @@ def build_verified_chain(run_dir: Path) -> tuple[Path, str, list[str]]:
         and cast(str, manifest.get("profile"))
         else "unknown"
     )
+    execution_mode = (
+        cast(str, manifest.get("execution_mode"))
+        if isinstance(manifest.get("execution_mode"), str)
+        and cast(str, manifest.get("execution_mode")) in {"sequential", "parallel"}
+        else "sequential"
+    )
+    max_workers = (
+        int(cast(int, manifest.get("max_workers")))
+        if isinstance(manifest.get("max_workers"), int)
+        and cast(int, manifest.get("max_workers")) > 0
+        else 1
+    )
 
     versions_any = dynamic_summary.get("versions")
     versions = (
@@ -542,6 +554,10 @@ def build_verified_chain(run_dir: Path) -> tuple[Path, str, list[str]]:
         "timestamps": {
             "started_at": started_at,
             "finished_at": finished_at,
+        },
+        "execution": {
+            "mode": execution_mode,
+            "max_workers": max_workers,
         },
         "dynamic_validation": {
             "bundle_dir": dynamic_bundle_dir,

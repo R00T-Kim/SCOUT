@@ -165,6 +165,23 @@ def _read_json_object(path: Path) -> dict[str, object] | None:
     return cast(dict[str, object], data)
 
 
+def _write_manifest_execution_marker(
+    manifest_path: Path,
+    *,
+    execution_mode: str,
+    max_workers: int,
+) -> None:
+    manifest = _read_json_object(manifest_path)
+    if manifest is None:
+        raise ValueError("manifest.json is not an object")
+    manifest["execution_mode"] = execution_mode
+    manifest["max_workers"] = int(max_workers)
+    _ = manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _evidence_paths_from_obj(stage_obj: object) -> list[str]:
     if not isinstance(stage_obj, dict):
         return []
@@ -894,6 +911,7 @@ def create_run(
 
     if runs_root is None:
         runs_root = Path.cwd() / "aiedge-runs"
+    runs_root = runs_root.resolve()
 
     src_resolved = src.resolve()
     runs_root_resolved = runs_root.resolve()
@@ -984,6 +1002,8 @@ def create_run(
         "network_policy": network_policy,
         "ref_md_path": resolved_ref_md_path,
         "ref_md_sha256": ref_md_sha256,
+        "execution_mode": "sequential",
+        "max_workers": 1,
         "warnings": warnings,
     }
     _ = manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -2148,6 +2168,11 @@ def run_subset(
 
     if on_progress is not None and hasattr(on_progress, "register_batch"):
         cast(Any, on_progress).register_batch("Pipeline", len(stages))
+    _write_manifest_execution_marker(
+        info.manifest_path,
+        execution_mode="parallel" if experimental_parallel else "sequential",
+        max_workers=int(experimental_parallel) if experimental_parallel else 1,
+    )
     if experimental_parallel:
         rep = run_stages_parallel(
             stages,
@@ -2247,6 +2272,11 @@ def analyze_run(
     budget_s = int(time_budget_s)
     if budget_s < 0:
         budget_s = 0
+    _write_manifest_execution_marker(
+        info.manifest_path,
+        execution_mode="parallel" if experimental_parallel else "sequential",
+        max_workers=int(experimental_parallel) if experimental_parallel else 1,
+    )
     scan_max_files, scan_max_matches = _resolve_scan_limits_for_run(info)
 
     def remaining_s() -> float:

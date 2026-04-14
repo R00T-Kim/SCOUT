@@ -85,6 +85,8 @@ def _write_fixture(
     *,
     pcap_destinations: list[str],
     boot_flaky: bool,
+    execution_mode: str | None = None,
+    max_workers: int | None = None,
 ) -> Path:
     run_dir = tmp_path / "run"
     stage_dir = run_dir / "stages" / "dynamic_validation"
@@ -102,14 +104,20 @@ def _write_fixture(
     probes_dir.mkdir(parents=True, exist_ok=True)
     chain_dir.mkdir(parents=True, exist_ok=True)
 
+    manifest: dict[str, object] = {
+        "run_id": "fixture-run-id",
+        "profile": "exploit",
+        "analyzed_input_sha256": "a" * 64,
+        "created_at": "2026-02-17T00:00:00Z",
+    }
+    if execution_mode is not None:
+        manifest["execution_mode"] = execution_mode
+    if max_workers is not None:
+        manifest["max_workers"] = max_workers
+
     _ = (run_dir / "manifest.json").write_text(
         json.dumps(
-            {
-                "run_id": "fixture-run-id",
-                "profile": "exploit",
-                "analyzed_input_sha256": "a" * 64,
-                "created_at": "2026-02-17T00:00:00Z",
-            },
+            manifest,
             indent=2,
             sort_keys=True,
             ensure_ascii=True,
@@ -260,6 +268,8 @@ def test_build_verified_chain_pass_path(tmp_path: Path) -> None:
         tmp_path,
         pcap_destinations=["192.168.1.50", "10.0.0.8", "127.0.0.1"],
         boot_flaky=False,
+        execution_mode="parallel",
+        max_workers=6,
     )
 
     res = _run_builder(run_dir)
@@ -270,10 +280,29 @@ def test_build_verified_chain_pass_path(tmp_path: Path) -> None:
     verdict = cast(dict[str, object], contract["verdict"])
     assert verdict["state"] == "pass"
     assert verdict["reason_codes"] == ["isolation_verified", "repro_3_of_3"]
+    execution = cast(dict[str, object], contract["execution"])
+    assert execution == {"max_workers": 6, "mode": "parallel"}
 
     verify_res = _run_contract_verifier(run_dir)
     assert verify_res.returncode == 0
     assert verify_res.stdout.startswith("[OK] verified_chain contract verified:")
+
+
+def test_build_verified_chain_defaults_execution_provenance_for_legacy_manifest(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_fixture(
+        tmp_path,
+        pcap_destinations=["192.168.1.50"],
+        boot_flaky=False,
+    )
+
+    res = _run_builder(run_dir)
+    assert res.returncode == 0
+
+    contract = _load_contract(run_dir)
+    execution = cast(dict[str, object], contract["execution"])
+    assert execution == {"max_workers": 1, "mode": "sequential"}
 
 
 def test_build_verified_chain_inconclusive_boot_flaky(tmp_path: Path) -> None:
