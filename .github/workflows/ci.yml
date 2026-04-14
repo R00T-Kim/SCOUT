@@ -42,3 +42,35 @@ jobs:
       - run: pip install -e .
       - run: pip install 'pyright==1.1.398'
       - run: pyright src/
+
+  stage-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: pip install pytest
+      - run: pytest -q tests/test_stage_contracts.py
+      - name: validate sample run stage outputs
+        run: |
+          RUN_DIR=$(python - <<'PY'
+          from pathlib import Path
+          from aiedge.run import analyze_run, create_run
+
+          tmp = Path("tmp-stage-contract-ci")
+          tmp.mkdir(parents=True, exist_ok=True)
+          firmware = tmp / "tiny.bin"
+          firmware.write_bytes(b"STAGE-CONTRACT-CI")
+          info = create_run(
+              str(firmware),
+              case_id="ci-stage-contracts",
+              ack_authorization=True,
+              runs_root=tmp / "runs",
+          )
+          analyze_run(info, time_budget_s=1, no_llm=True)
+          print(info.run_dir)
+          PY
+          )
+          python3 scripts/validate_stage_outputs.py --run-dir "$RUN_DIR"
