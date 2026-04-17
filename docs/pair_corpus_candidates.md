@@ -64,19 +64,18 @@ eval lane에 넣기 위한 pair 자격 기준:
 
 ### Gap A: DIR-859 pre-1.06B01
 
-- 필요 버전: DIR-859 REVA firmware versions *before* 1.06B01 (e.g. 1.05, 1.04)
-- 수급 경로:
-  - D-Link legacy FTP archive
-  - Wayback Machine 캐시
-  - internetarchive.org 펌웨어 집합
+- 취약측 파일 확보 완료: `aiedge-inputs/external-gap/dlink/DIR-859_REVA_FIRMWARE_1.05B03.zip`
+- sha256: `cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0`
+- 패치측 파일: `aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_PATCH_1.06B01.zip` *(기존 pair gap 문서 기준)*
 - CVE 참고: CVE-2019-17621 — SOAPAction UPnP handler 명령 주입
-- **이 gap이 해소되어야** DIR-859 pair eval이 가능
+- 현재 상태: **artifact sourced, pair eval 미실행**
 
 ### Gap B: OpenWrt Archer C7 v5 pre-23.05.5
 
-- 필요 버전: OpenWrt 22.x 또는 21.x의 Archer C7 v5 build
-- 수급 경로: downloads.openwrt.org `archive/` 하위
-- 주의: OpenWrt CVE 매핑은 upstream Linux/dnsmasq/busybox 기반이라 R7000 등 vendor CVE와는 성격이 다름. baseline "CVE-less" 대조군으로 활용
+- baseline control 파일 확보 완료: `aiedge-inputs/external-gap/openwrt/openwrt-22.03.3-ath79-generic-tplink_archer-c7-v5-squashfs-factory.bin`
+- sha256: `71aa7b4a503dd8df157127166062fa5830162975536cddd2686b1d6fb6d9abbc`
+- 패치측/대조측 파일: 기존 `aiedge-inputs/openwrt/openwrt-23.05.5-ath79-generic-tplink_archer-c7-v5-squashfs-factory.bin`
+- 주의: OpenWrt는 vendor CVE pair가 아니라 baseline control 성격이 강하므로 reviewer [B-1]의 정식 recall/FP 숫자보다는 보조 비교군으로 해석
 
 ---
 

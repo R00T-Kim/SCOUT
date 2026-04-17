@@ -104,6 +104,12 @@ reviewer 항목 [B-1] + [C]는 **별도 evaluation lane**으로 묶는다.
 
 > seed 선정 원칙: 후보 버전은 모두 extraction-success runs에서만 골라야 한다. extraction이 실패한 firmware는 pair-labeled recall/FP와 tier ROC의 ground truth로 쓰지 않는다.
 
+### gap sourcing update
+
+- `DIR-859_REVA_FIRMWARE_1.05B03.zip` 다운로드 완료 (`aiedge-inputs/external-gap/dlink/`)
+- `openwrt-22.03.3-ath79-generic-tplink_archer-c7-v5-squashfs-factory.bin` 다운로드 완료 (`aiedge-inputs/external-gap/openwrt/`)
+- 둘 다 아직 pair-eval scoring에는 포함하지 않았고, 다음 단계에서 extraction-success 여부를 먼저 검증해야 한다.
+
 ## 현재 상태
 
 - 2C.6: **completed**
