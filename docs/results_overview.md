@@ -75,13 +75,13 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
 
 | Metric | Value |
 | --- | --- |
-| pair corpus size | `TBD` |
-| vuln targets | `TBD` |
-| patched targets | `TBD` |
-| recall | `TBD` |
-| false-positive rate | `TBD` |
-| label source | `TBD` |
-| exclusions | `TBD` |
+| pair corpus size | `4` |
+| vuln targets | `4` |
+| patched targets | `4` |
+| recall | `0.25` |
+| false-positive rate | `0.25` |
+| label source | `target cve_id present in stages/cve_scan/cve_matches.json` |
+| exclusions | `0` |
 
 ### Pair corpus notes
 
@@ -96,7 +96,7 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
   - OpenWrt Archer C7 v5 pre-23.05 (baseline control missing)
 - **Exclusions**: any pair whose vuln-side fails extraction (`partial` or worse) must be held back; only `extraction=ok` subset feeds the pair-labeled recall/FPR calculation. This aligns with the "pipeline capable ≠ value delivered" framing.
 - **Pair type**: all M0 pairs are **version-paired** within the same vendor model line. Patch-level pairs (minor build number diffs) are parked under §5 of `docs/pair_corpus_candidates.md` as P3 future expansion.
-- Actual recall / FPR numbers are **not** written here until the pair eval lane executes — this section stays TBD on the numeric fields until then.
+- **M0 actual numbers are now populated** from `benchmark-results/pair-eval/pair_eval_summary.json`. Expansion to additional local/gap pairs remains a follow-on step.
 
 ## 5) Calibration
 
@@ -104,19 +104,19 @@ This section is for the `[C]` lane.
 
 | Metric | Value |
 | --- | --- |
-| confidence threshold / cap | `TBD` |
-| ROC / PR source | `TBD` |
-| calibration subset | `TBD` |
-| TP | `TBD` |
-| FP | `TBD` |
-| TN | `TBD` |
-| FN | `TBD` |
+| confidence threshold / cap | `0.78` (single observed M0 point) |
+| ROC / PR source | `benchmark-results/pair-eval/pair_eval_summary.json` |
+| calibration subset | `4 pairs / 8 success runs` |
+| TP | `1` |
+| FP | `1` |
+| TN | `3` |
+| FN | `3` |
 
 ### Calibration notes
 
-- `TBD` — document the exact threshold sweep used for the curve.
-- `TBD` — document whether the curve is corpus-wide or pair-subset only.
-- `TBD` — call out any extraction-success filtering applied before scoring.
+- M0 produced a **degenerate single-threshold ROC point** because every pair-side resolved to the same top vulnerability finding (`web.exec_sink_overlap`, `confidence=0.78`, `evidence_tier=symbol_only`).
+- The current curve is **pair-subset only** (4 local pairs / 8 runs), not corpus-wide.
+- Only `extraction=ok` / `inventory=sufficient` runs were scored; no runs were excluded in M0.
 
 ## 6) E2E demo
 

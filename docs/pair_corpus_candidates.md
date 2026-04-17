@@ -129,6 +129,13 @@ gap 해소 전에도 시작할 수 있는 최소 eval set:
 
 **4 pair = 8 run**으로 M0 eval lane을 가동할 수 있다. 각 pair별로 SCOUT full analyze 시간은 R7000 기준 ~15~25분, 총 ~2~3시간 (순차 기준).
 
+**M0 실행 결과 (best-view baseline reuse):**
+- `netgear-r7000-cve-2017-5521` → vulnerable=`tp`, patched=`fp`
+- `dlink-dir868l-cve-2018-10970` → vulnerable=`fn`, patched=`tn`
+- `dlink-dir850l-cve-2019-20213` → vulnerable=`fn`, patched=`tn`
+- `tplink-archerc7v2-cve-2017-13772` → vulnerable=`fn`, patched=`tn`
+- aggregate: **recall 0.25 / false-positive rate 0.25**
+
 ---
 
 ## 8. 이 문서의 update cadence

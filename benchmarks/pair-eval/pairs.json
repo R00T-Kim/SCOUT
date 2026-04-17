@@ -1,0 +1,61 @@
+{
+  "schema_version": "pair-eval-v1",
+  "pairs": [
+    {
+      "pair_id": "netgear-r7000-cve-2017-5521",
+      "vendor": "netgear",
+      "model": "R7000",
+      "cve_id": "CVE-2017-5521",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.7.12_1.2.5.zip",
+        "sha256": "0865872b7a9bd132263092f8b32a7bdab2548d5402cfbb166c215e23250a7cd0"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.9.34_10.2.36.zip",
+        "sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e"
+      }
+    },
+    {
+      "pair_id": "dlink-dir868l-cve-2018-10970",
+      "vendor": "dlink",
+      "model": "DIR-868L",
+      "cve_id": "CVE-2018-10970",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR868LB1_FW200KR-K02.bin",
+        "sha256": "fedabcafcf778da1bcfb7b30a5b544c2ca760572477d947b52f74c6d237b7185"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR868LWB1_FW200KR-K04.bin",
+        "sha256": "903cdd1ce4c58c7478c348a06398118a212e7c5889130dcc8a6c9bcec7ad5ddf"
+      }
+    },
+    {
+      "pair_id": "dlink-dir850l-cve-2019-20213",
+      "vendor": "dlink",
+      "model": "DIR-850L",
+      "cve_id": "CVE-2019-20213",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR850L_FW105KRb03_d4oi_20130425.bin",
+        "sha256": "46d9202431eb9bec1538ba6201caae3c0c896b376af86f2131453365a8dc5500"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR850L_FW115KRb05.bin",
+        "sha256": "c607f7a90a482b365102242fa256e629708007403b2f7579a6dd1e27f1cf4c01"
+      }
+    },
+    {
+      "pair_id": "tplink-archerc7v2-cve-2017-13772",
+      "vendor": "tplink",
+      "model": "Archer C7 v2",
+      "cve_id": "CVE-2017-13772",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_V2_150311_KR.zip",
+        "sha256": "8dd10cc985de10e6c4c5a8f8fff737e3f8f9fd6d6e9f7038a06ba21eb1c4cf8f"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_KR__V2_160912_1474960467427z.zip",
+        "sha256": "9982f2318a093a394178638fc6fca8703ec741106696b88b1bc0b4ffad9df10d"
+      }
+    }
+  ]
+}
