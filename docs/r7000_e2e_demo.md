@@ -1,6 +1,6 @@
-# R7000 End-to-End Demo Skeleton (Reviewer Item B-2)
+# R7000 End-to-End Demo (Reviewer Item B-2)
 
-This document is a **reviewer-facing walkthrough skeleton**, not a claim of confirmed exploitability.
+This document is the **reviewer-facing walkthrough** for the Netgear R7000. It is intentionally honest: it shows a complete evidence path, but it does **not** overclaim confirmed exploitability where the bundle remains inconclusive.
 
 It is anchored to the existing **v2.6.0 post-merge validation artifacts** for the Netgear R7000 and uses the later SBOM follow-up only as a separate reference point when needed. Where a stage did not complete cleanly, this doc says so explicitly.
 
@@ -232,11 +232,16 @@ Suggested reviewer narrative:
 - It must not collapse `partial`, `skipped`, or `failed` stages into success.
 - It must not confuse the SBOM follow-up rerun with the exploit demo itself.
 
-## Placeholder slots for the final presentation deck
+## Recommended reviewer-facing framing
 
-- Screenshot 1: static finding from `report/analyst_report.md`
-- Screenshot 2: triage reasoning trail from `stages/adversarial_triage/triaged_findings.json`
-- Screenshot 3: emulation log excerpt from `stages/emulation/emulation.log`
-- Screenshot 4: fuzzing / PoC context from `stages/poc_validation/poc_validation.json`
-- Screenshot 5: final verdict excerpt from `verified_chain/verified_chain.json`
+- Slide 1: static finding from `report/analyst_report.md`
+- Slide 2: reasoning trail excerpt from `stages/adversarial_triage/triaged_findings.json` / `stages/findings/findings.json`
+- Slide 3: emulation + dynamic validation boundary from `stages/emulation/emulation.log` and `stages/dynamic_validation/dynamic_validation.json`
+- Slide 4: exploit-chain scaffolding from `stages/chain_construction/chains.json`
+- Slide 5: final honest verdict from `verified_chain/verified_chain.json` (`inconclusive`, `missing_exploit_bundle`)
 
+
+
+## Reviewer-facing claim boundary
+
+Use this demo to show that SCOUT can carry one firmware from static finding → LLM triage → runtime validation boundary → exploit-chain scaffolding under governance controls. Do **not** describe this bundle as a working exploit or a confirmed compromise; the correct final state is still `inconclusive`.

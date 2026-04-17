@@ -2,7 +2,7 @@
 
 This page is the single-entry reporting surface for the completed 2C.6 baseline refresh and the follow-on reviewer lanes.
 
-The Tier 1 corpus refresh is now complete; pair-eval / ROC / E2E sections remain intentionally `TBD` until those lanes execute.
+The Tier 1 corpus refresh and the first local-7 reviewer eval lane are now complete. Pair-eval expansion and dedicated rerun validation remain follow-on work.
 
 ## Source of truth
 
@@ -31,18 +31,18 @@ The Tier 1 corpus refresh is now complete; pair-eval / ROC / E2E sections remain
 
 | Vendor | Target | Corpus role | Notes |
 | --- | --- | --- | --- |
-| Netgear | R7000 | `TBD` | Known pilot reference |
-| TP-Link | Archer C7 v5 (OpenWrt) | `TBD` | Known pilot reference |
-| Tenda | AC10 | `TBD` | Known pilot reference |
-| Trendnet | TEW-827DRU v2.10 | `TBD` | Known pilot reference |
+| Netgear | R7000 | `pilot + pair-eval anchor` | SBOM pilot, pair-eval local-7, E2E demo anchor |
+| TP-Link | Archer C7 v5 (OpenWrt) | `pilot reference` | non-stock/OpenWrt pilot delta reference |
+| Tenda | AC10 | `pilot reference` | vendor-stock zero→nonzero SBOM recovery reference |
+| Trendnet | TEW-827DRU v2.10 | `pilot reference` | non-stock expansion pilot reference |
 
 ### Pair-eval candidate targets
 
 | Pair family | Vuln / patched label | Binary / archive source | Status |
 | --- | --- | --- | --- |
-| Netgear R7000 | `TBD` | `TBD` | Pair lane only |
-| TP-Link Archer C7 multi-version | `TBD` | `TBD` | Pair lane only |
-| D-Link DIR-859 | `TBD` | `TBD` | Pair lane only |
+| Netgear R7000 | `CVE-2017-5521` | `R7000-V1.0.7.12 -> V1.0.9.34` | local-7 complete |
+| TP-Link Archer C7 multi-version | `CVE-2017-13772`, `CVE-2019-17152` | `v2 2015->2016`, `v4 2017->2018` | local-7 complete |
+| D-Link DIR-859 | `CVE-2019-17621` | `pre-1.06B01 -> 1.06B01` | gap / not yet sourced |
 
 ## 2) Findings by category
 
@@ -50,10 +50,10 @@ Fill this table from the final rerun summary.
 
 | Category | Count | Share | Notes |
 | --- | --- | --- | --- |
-| vulnerability | `TBD` | `TBD` | `TBD` |
-| misconfiguration | `TBD` | `TBD` | `TBD` |
-| pipeline_artifact | `TBD` | `TBD` | `TBD` |
-| unclassified | `TBD` | `TBD` | `TBD` |
+| vulnerability | `1059` | `29.99%` | dominant real-vuln candidate family in the Tier 1 refresh |
+| misconfiguration | `19` | `0.54%` | rare, overshadowed by pipeline artifact outputs |
+| pipeline_artifact | `2453` | `69.47%` | includes secret material / inventory / exploit-plan artifacts |
+| unclassified | `0` | `0%` | ontology held across successful runs |
 
 ## 3) Tier distribution
 
@@ -61,12 +61,12 @@ Fill this table from the final `evidence_tier` summary.
 
 | Tier | Count | Share | Notes |
 | --- | --- | --- | --- |
-| symbol_only | `TBD` | `TBD` | `TBD` |
-| static_colocated | `TBD` | `TBD` | `TBD` |
-| static_interproc | `TBD` | `TBD` | `TBD` |
-| pcode_verified | `TBD` | `TBD` | `TBD` |
-| dynamic_verified | `TBD` | `TBD` | `TBD` |
-| unknown | `TBD` | `TBD` | `TBD` |
+| symbol_only | `1059` | `29.99%` | current vulnerability findings are overwhelmingly symbol/surface-driven |
+| static_colocated | `0` | `0%` | not observed in the final Tier 1 best-view corpus |
+| static_interproc | `0` | `0%` | not observed in the final Tier 1 best-view corpus |
+| pcode_verified | `0` | `0%` | not promoted in the final Tier 1 best-view corpus |
+| dynamic_verified | `0` | `0%` | dynamic confirmation remains a follow-on lane |
+| unknown | `2472` | `70.01%` | pipeline artifacts / non-vuln findings dominate this bucket |
 
 ## 4) Pair eval
 
