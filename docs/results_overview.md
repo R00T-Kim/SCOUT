@@ -75,28 +75,31 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
 
 | Metric | Value |
 | --- | --- |
-| pair corpus size | `4` |
-| vuln targets | `4` |
-| patched targets | `4` |
-| recall | `0.25` |
-| false-positive rate | `0.25` |
+| pair corpus size | `7` |
+| vuln targets | `7` |
+| patched targets | `7` |
+| recall | `0.142857` |
+| false-positive rate | `0.142857` |
 | label source | `target cve_id present in stages/cve_scan/cve_matches.json` |
 | exclusions | `0` |
 
 ### Pair corpus notes
 
 - Full candidate list and CVE mapping is in `docs/pair_corpus_candidates.md` (10 candidate pairs + 2 gaps documented).
-- **M0 minimum set** (local, no external sourcing needed — 4 pairs, 8 runs):
+- **Current local-7 set** (baseline-reuse, 7 pairs / 14 runs):
   - Netgear R7000 V1.0.7.12 → V1.0.9.34 (CVE-2017-5521)
   - D-Link DIR-868L K02 → K04 (CVE-2018-10970 ref)
   - D-Link DIR-850L FW105 → FW115 (CVE-2019-20213 / CVE-2019-6258 ref)
+  - D-Link DIR-825 B1 FW201 → FW202 (CVE-2017-6190 ref)
+  - D-Link DIR-825 C1 FW301 → FW304 (CVE-2019-6257 ref)
   - TP-Link Archer C7 v2 2015 → 2016 (CVE-2017-13772 ref)
+  - TP-Link Archer C7 v4 2017 → 2018 (CVE-2019-17152 ref)
 - **Gaps** requiring external sourcing (see `docs/benchmark_pair_gap.md`):
   - DIR-859 pre-1.06B01 (vuln-side missing locally)
   - OpenWrt Archer C7 v5 pre-23.05 (baseline control missing)
 - **Exclusions**: any pair whose vuln-side fails extraction (`partial` or worse) must be held back; only `extraction=ok` subset feeds the pair-labeled recall/FPR calculation. This aligns with the "pipeline capable ≠ value delivered" framing.
 - **Pair type**: all M0 pairs are **version-paired** within the same vendor model line. Patch-level pairs (minor build number diffs) are parked under §5 of `docs/pair_corpus_candidates.md` as P3 future expansion.
-- **M0 actual numbers are now populated** from `benchmark-results/pair-eval/pair_eval_summary.json`. Expansion to additional local/gap pairs remains a follow-on step.
+- **Local-7 actual numbers are now populated** from `benchmark-results/pair-eval/pair_eval_summary.json`. Gap pairs (e.g. DIR-859) remain a follow-on expansion step.
 
 ## 5) Calibration
 
@@ -104,18 +107,18 @@ This section is for the `[C]` lane.
 
 | Metric | Value |
 | --- | --- |
-| confidence threshold / cap | `0.78` (single observed M0 point) |
+| confidence threshold / cap | `0.78` (single observed local-7 point) |
 | ROC / PR source | `benchmark-results/pair-eval/pair_eval_summary.json` |
-| calibration subset | `4 pairs / 8 success runs` |
+| calibration subset | `7 pairs / 14 success runs` |
 | TP | `1` |
 | FP | `1` |
-| TN | `3` |
-| FN | `3` |
+| TN | `6` |
+| FN | `6` |
 
 ### Calibration notes
 
-- M0 produced a **degenerate single-threshold ROC point** because every pair-side resolved to the same top vulnerability finding (`web.exec_sink_overlap`, `confidence=0.78`, `evidence_tier=symbol_only`).
-- The current curve is **pair-subset only** (4 local pairs / 8 runs), not corpus-wide.
+- The local-7 run still produced a **degenerate single-threshold ROC point** because every pair-side resolved to the same top vulnerability finding (`web.exec_sink_overlap`, `confidence=0.78`, `evidence_tier=symbol_only`).
+- The current curve is **pair-subset only** (7 local pairs / 14 runs), not corpus-wide.
 - Only `extraction=ok` / `inventory=sufficient` runs were scored; no runs were excluded in M0.
 
 ## 6) E2E demo

@@ -169,20 +169,20 @@
 
 - 2C.6: completed
 - pair gap 문서: `docs/benchmark_pair_gap.md`
-- pair eval lane: **M0 completed (4 local pairs / 8 extraction-success runs reused from 2C.6)**
+- pair eval lane: **local-7 expansion completed (7 local pairs / 14 extraction-success runs reused from 2C.6)**
 
 ### M0 result snapshot
 
-- pair corpus size: **4**
-- resolved vulnerable runs: **4**
-- resolved patched runs: **4**
-- recall: **0.25**
-- false-positive rate: **0.25**
+- pair corpus size: **7**
+- resolved vulnerable runs: **7**
+- resolved patched runs: **7**
+- recall: **0.142857**
+- false-positive rate: **0.142857**
 - tier ROC snapshot: **symbol_only only** (`tp=1`, `fp=1`, `fn=3`, `tn=3`)
 
 Interpretation:
 - **R7000** hit the target CVE on both vulnerable and patched images (`tp` + `fp`)
-- **DIR-868L / DIR-850L / Archer C7 v2** stayed `fn` on vulnerable and `tn` on patched in this M0 lane
+- **DIR-868L / DIR-850L / DIR-825 B1 / DIR-825 C1 / Archer C7 v2 / Archer C7 v4** stayed `fn` on vulnerable and `tn` on patched in this local-7 lane
 - the current ROC is degenerate because every selected pair-side mapped to the same top vulnerability finding (`web.exec_sink_overlap`, `confidence=0.78`, `evidence_tier=symbol_only`)
 
 Generated outputs:
@@ -191,4 +191,4 @@ Generated outputs:
 - `benchmark-results/pair-eval/pair_eval_report.md`
 - `benchmark-results/pair-eval/pair_eval_findings.csv`
 
-즉, 이 문서는 더 이상 초안만이 아니라 **M0 실행 결과를 가진 운영 문서**다.
+즉, 이 문서는 더 이상 초안만이 아니라 **local-7 실행 결과를 가진 운영 문서**다.

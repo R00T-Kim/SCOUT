@@ -107,13 +107,13 @@ reviewer 항목 [B-1] + [C]는 **별도 evaluation lane**으로 묶는다.
 ## 현재 상태
 
 - 2C.6: **completed**
-- pair eval lane: **M0 completed (4 local pairs / 8 runs)**
+- pair eval lane: **local-7 completed (7 local pairs / 14 runs)**
 
 즉 현재 상태는:
 
 1. 2C.6 corpus baseline refresh 완료
 2. 2C.7 문서/릴리즈 close-out 완료
-3. reviewer item [B-1] / [C]는 M0에서 **recall 0.25 / false-positive rate 0.25**를 확보했고, 다음 단계는 표본 확장이다
+3. reviewer item [B-1] / [C]는 local-7에서 **recall 0.142857 / false-positive rate 0.142857**를 확보했고, 다음 단계는 gap pair 및 fresh dedicated rerun 확장이다
 
 ## Operator note
 

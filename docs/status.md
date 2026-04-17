@@ -307,12 +307,12 @@ R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 pos
 
 > 2C.6 fresh corpus refresh는 **1123-target 기준 1110 success / 4 partial / 9 fatal**로 마감됐다. 성공 run은 `extraction=ok` / `inventory=sufficient`가 1110건 전부 일치하고, nonzero findings는 1110/1110, nonzero CVE는 1089/1110이다. 다만 이 rerun은 여전히 baseline refresh이지, 곧바로 "가치가 증명됐다"는 뜻은 아니다. review-facing 숫자는 extraction success / inventory sufficiency / SBOM delta / pair-labeled recall-FP / tier ROC를 분리해서 읽어야 하고, reviewer-facing precision/recall/ROC는 pair-labeled eval lane에서 별도로 확정한다.
 
-> Reviewer eval lane M0 완료: 4 local pairs / 8 runs, **recall 0.25 / false-positive rate 0.25** (`benchmark-results/pair-eval/pair_eval_summary.json`). R7000은 target CVE를 vulnerable/patched 모두에서 유지했고, 나머지 3쌍은 vulnerable miss + patched clean으로 나왔다.
+> Reviewer eval lane local-7 완료: 7 local pairs / 14 runs, **recall 0.142857 / false-positive rate 0.142857** (`benchmark-results/pair-eval/pair_eval_summary.json`). R7000은 target CVE를 vulnerable/patched 모두에서 유지했고, 나머지 6쌍은 vulnerable miss + patched clean으로 나왔다.
 
 **2C.7 이후 권장 실행 순서** (live roadmap):
 1. **[B-2] E2E demo 확정** — `docs/r7000_e2e_demo.md`를 실측 artifact 기준으로 마감하고 reviewer walkthrough를 고정
 2. **[D] results overview 마감** — corpus baseline, pair eval, calibration, E2E demo를 한 문서에서 cross-link하고 reviewer 공유용 요약본으로 고정
-3. **Reviewer eval lane 확장** — 7 local pairs 또는 gap pair 수급으로 recall/FPR 표본을 확장
+3. **Reviewer eval lane 확장** — gap pair(DIR-859 등) 수급 또는 fresh dedicated rerun으로 표본/driver 다양성을 확장
 4. **Phase 2D 진입** — 2D.1 → 2D.2 → 2D.3 → 2D.4 순으로 capability layer 착수
 
 **Phase 2D 요약** (8-12주, capability layer — 기존 Phase 2C였던 항목):
