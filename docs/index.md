@@ -17,6 +17,10 @@
   - 지금 어디까지 구현됐는지
   - 무엇이 깨져있는지(known issues)
   - 다음 우선순위
+- `docs/carry_over_benchmark_v2.6.md`
+  - 2C.6 fresh corpus refresh 최종 baseline
+  - success / partial / fatal best-view 집계
+  - holdout 목록
 - Tier 2 benchmark contract 변화
   - old `benchmark-results/legacy/tier2-llm-v2`는 legacy snapshot
   - 새 benchmark는 archived bundle verifier와 analyst-readiness를 함께 봄
@@ -37,6 +41,10 @@
   - 팀원이 SCOUT를 실제로 사용해 취약점 후보를 찾고, 피드백을 남기고, 재현 가능한 실험 결과를 축적하기 위한 운영 프로토콜
 - `docs/scout_evaluation_labeling_criteria.md`
   - TP/FP/blocked/duplicate를 분리해 SCOUT 결과를 논문화·발표 가능한 방식으로 수치화하기 위한 판정 기준
+- `docs/r7000_e2e_demo.md`
+  - reviewer item [B-2]용 R7000 end-to-end demo walkthrough skeleton
+- `docs/results_overview.md`
+  - reviewer 공유용 corpus baseline / pair-eval / calibration / E2E demo 단일 진입점
 
 ## 4) 저수준 계약(Contracts)
 
@@ -72,3 +80,10 @@ tooling → extraction → structure → carving → firmware_profile → invent
 → attribution → emulation → dynamic_validation → fuzzing
 → exploit_gate → exploit_chain → exploit_autopoc → poc_validation → exploit_policy
 ```
+
+## 7) Release / semantics
+
+- `docs/llm_driver_degradation_matrix.md`
+  - Codex CLI / Claude API / Claude Code CLI / Ollama 간 system prompt 전달 방식과 열화 차이
+- `docs/confidence_semantic_break_v2.6.md`
+  - v2.5.x → v2.6+에서 `confidence` 의미가 어떻게 달라졌는지

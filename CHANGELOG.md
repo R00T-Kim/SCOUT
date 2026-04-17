@@ -5,10 +5,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [2.6.1] — 2026-04-17
+
+Phase 2C close-out release. This point release rolls up the post-v2.6.0 foundation hardening work, publishes the fresh corpus refresh baseline, and documents the semantic / driver caveats that were previously implicit.
+
+### Added
+
+- **Fresh corpus refresh baseline** (`docs/carry_over_benchmark_v2.6.md`, `benchmark-results/2c6-fresh-full-final/aggregate.json`, `scripts/aggregate_corpus_metrics.py`). The 1,123-target refresh is now published as a best-view aggregate across the fresh rerun waves. Final outcome: **1110 success / 4 partial / 9 fatal**; successful runs are `extraction=ok 1110/1110`, `inventory=sufficient 1110/1110`, `nonzero findings 1110/1110`, `nonzero CVE 1089/1110`.
+- **LLM driver degradation matrix** (`docs/llm_driver_degradation_matrix.md`). Documents the actual contract differences between Codex CLI, Claude API, Claude Code CLI, and Ollama, especially around system-prompt delivery and temperature handling.
+- **Confidence semantic break note** (`docs/confidence_semantic_break_v2.6.md`). Makes the v2.5.x → v2.6+ shift explicit: `confidence` is now evidence-only; `priority_score` / `priority_inputs` carry ranking semantics.
+
+### Changed
+
+- **README / README.ko baseline messaging**. Tier 1 hero numbers now point at the fresh v2.6.1 corpus refresh, while Tier 2 remains explicitly carry-over until the pair-eval lane lands. The over-broad "False negative rate ≈ 0%" phrasing is replaced with a pending pair-eval note.
+- **Analyst copilot wording**. Public docs now split the surface into `Explainability surface`, `Analyst-in-the-loop channel`, and `Autonomous reasoning (future)` instead of presenting all LLM-related behavior as one undifferentiated capability.
+- **Release governance helper** (`scripts/release.sh`). The helper is upgraded from a README-only version bumper into a release close-out utility that can synchronize pyproject, README badges, and CHANGELOG headers in dry-run/apply modes.
+
 ### Fixed
 
-- **Synthesis finding reasoning_trail inheritance** (`findings.py`). Top-level synthesis findings such as `aiedge.findings.web.exec_sink_overlap` are built from inventory overlap signals, not directly from LLM-debated taint paths. As a result, `findings.json` would report `reasoning_trail_count=0` at the top level even when 100+ underlying taint alerts had been debated by `adversarial_triage` and verified by `fp_verification`. New helper `_inherit_synthesis_reasoning_trail()` loads `stages/adversarial_triage/triaged_findings.json` and `stages/fp_verification/verified_alerts.json` summaries, then attaches `synthesis_inherit` `ReasoningEntry` items that mirror the aggregate downstream outcome (TP/FP counts + debate downgraded/maintained split) onto the targeted synthesis finding. Fail-open on missing artifacts; additive-only (PR #11 / PR #7a pattern). Surfaced on Netgear R7000 v2.6.0 post-merge validation run where top-level trail count was 0/3 despite 100/100 trails present at the stage-artifact level. _(5 new tests in `TestSynthesisReasoningTrailInheritance`; 1033 tests green.)_
-- **SBOM stage silent schema mismatch** (`sbom.py`). Two dead-code paths were causing `SbomStage` to return 0 components on any firmware that does not ship an opkg / dpkg status file — i.e. most vendor stock firmware. OpenWrt masked the bug because its opkg status database alone contributes 100+ components. (a) `_collect_so_files_from_inventory` read `inventory.file_list`, a pre-v2.x key that the inventory stage no longer emits (it now exposes `roots` plus a top-level `entries` *count*). (b) `_detect_from_binary_analysis` expected each binary entry to carry a pre-extracted `string_hits` list, but the current schema only ships `path`/`arch`/`matched_symbols`. The helpers now walk inventory roots on disk for `.so*` globs and fall back to reading the first 256 KB of each binary file directly (via a new `_extract_ascii_runs` helper that preserves the zero-dependency constraint) before applying `_BINARY_PATTERNS`. The `binary_analysis.json` reader also accepts the current `hits` key alongside the legacy `binaries` / `entries` keys. Validated on the same Netgear R7000 v2.6.0 post-merge run: sbom went from **0 components (status=partial)** to **4 components (status=ok)** — `curl 7.36.0` detected by reading `/usr/bin/curl` directly, plus `openssl 1.0.0`, `libz 1`, `libpthread 0` from on-disk `.so*` walking. Additive-only: all legacy code paths retained as fallbacks; no schema bump. _(14 new tests in `tests/test_sbom_schema_fix.py`; 1047 tests green.)_
+- **Synthesis finding reasoning trail inheritance** (`findings.py`). Top-level synthesis findings such as `aiedge.findings.web.exec_sink_overlap` now inherit matched downstream evidence lineage instead of relying only on the stage-level aggregate summary. Matching prefers run-relative binary path, falls back to binary SHA-256, emits a `findings/synthesis_match` summary entry, and appends a deterministic top-K sample of representative downstream trail entries.
+- **SBOM stage silent schema mismatch** (`sbom.py`). Vendor-stock firmware no longer silently returns 0 components because of stale `inventory.file_list` / `string_hits` assumptions. The stage now walks `inventory.roots` directly and falls back to direct binary reads via `_extract_ascii_runs`.
+- **Relative `runs_root` handling in `create_run()`** (`run.py`). `runs_root` is resolved before path derivation so relative output roots still wire absolute firmware paths into extraction; regression coverage lives in `tests/test_create_run_relative_runs_root.py`.
+
+### Verification
+
+- `python3 -m py_compile scripts/aggregate_corpus_metrics.py`
+- `python3 scripts/check_doc_consistency.py`
+- fresh corpus aggregate regenerated from `benchmark-results/2c6-fresh-full-v2*` waves
+- representative firmware smoke coverage retained from 2C.1–2C.5 (R7000 lineage / SBOM pilot / verified-chain provenance)
 
 ## [2.6.0] — 2026-04-13
 
@@ -143,7 +169,7 @@ Phase 2B release. Performance + analyst copilot UX + confidence calibration. 6 a
 - `benchmark_eval.py` — analyst readiness evaluation, bundle verifier, metrics collection
 - `DESIGN.md` — visual design system documentation (indigo/purple palette, glassmorphism)
 - Benchmark scripts: `rebenchmark_v2.sh`, `rerun_adv_triage_codex.sh`, `rerun_adv_triage_parallel.sh`
-- Tier 2 LLM benchmark: 36 firmware, 2430 findings debated, 99.3% FPR reduction, 18 maintained true findings
+- Tier 2 LLM benchmark: 36 firmware, 2430 findings debated, 99.3% LLM-adjudicated FPR reduction, 18 maintained true findings
 
 ### Changed
 - TUI rebranded AIEdge → SCOUT, header color cyan → magenta

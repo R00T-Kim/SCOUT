@@ -122,14 +122,14 @@ Phase 2A run.py decomposition: 4,476 → 4,140 lines (normalize/stage_executor/r
 - v2.5.0의 LLM driver contract (system_prompt / temperature / 5-stage parser) 그대로
 - 200-char `raw_response_excerpt` cap은 `__post_init__`에서 강제
 
-### v2.6.0 릴리즈 후속 수정 (2026-04-13, `[Unreleased]`)
+### v2.6.1 close-out (2026-04-17)
 
 R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 post-release로 수정. 둘 다 additive-only, schema bump 없음, 기존 consumer 무수정.
 
 **버그 #1 — synthesis 레벨 reasoning_trail 상속 누락** (commit `7b36274`):
 - top-level synthesis finding `web.exec_sink_overlap`이 자기 밑에서 debate된 per-alert trail을 상속받지 못했음
 - `findings.json`에서 `reasoning_trail_count: 0/3` (top-level), 그러나 `stages/adversarial_triage/triaged_findings.json`에는 100/100 trail 존재
-- 수정: `_inherit_synthesis_reasoning_trail()` 헬퍼 — `fp_verification` 및 `adversarial_triage` summary를 읽어 `synthesis_inherit` `ReasoningEntry` 2개 (fp TP/FP/unverified + triage downgrade/maintain/parse_fail) 부착
+- 수정: `_inherit_synthesis_reasoning_trail()` 헬퍼 — matched downstream evidence lineage를 읽어 top-level synthesis finding에 `reasoning_trail`을 상속. run-relative binary path를 우선 매칭하고, 불일치 시 binary SHA-256을 보조 사용. `findings/synthesis_match` summary entry + 대표 downstream evidence의 deterministic top-K trail 샘플을 부착하며, 매칭 불가 시 기존 aggregate `synthesis_inherit` fallback 유지
 - 테스트: `TestSynthesisReasoningTrailInheritance` 5 cases
 
 **버그 #2 — SBOM inventory 스키마 불일치** (commit `8e0bb82`):
@@ -152,7 +152,7 @@ R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 pos
 | ruff | clean | **clean** |
 | check_doc_consistency | 0 violations | **0** |
 
-**태그**: 두 수정 모두 `[Unreleased]` CHANGELOG에 누적. 다음 point release(v2.6.1) 때 roll up 예정.
+**태그**: 위 후속 수정과 2C.3~2C.6 foundation hardening은 **v2.6.1**로 roll-up 완료.
 
 ## v2.5.0 업그레이드 (2026-04-13)
 
@@ -223,7 +223,7 @@ R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 pos
 - **TUI 리브랜딩**: AIEdge → SCOUT, 색상 cyan → magenta, viewer indigo/purple 팔레트.
 - **Apache 2.0 라이선스**: MIT에서 전환.
 - **LLM JSON 파싱 통합**: `parse_json_from_llm_output()` 3-stage fallback으로 7개 중복 구현 대체.
-- **Tier 2 LLM 벤치마크**: 36 firmware, 2430 findings debated, 99.3% FPR reduction, 18 maintained true findings.
+- **Tier 2 LLM 벤치마크**: 36 firmware, 2430 findings debated, 99.3% LLM-adjudicated FPR reduction, 18 maintained true findings.
 - 파이프라인 41 → 42 stages: `csource_identification` 추가.
 
 ## v2.0 업그레이드 (2026-03-27)
@@ -297,13 +297,21 @@ R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 pos
 > [!important] **Phase 2C/2D/3 실행 계획**은 gnosis wiki에 통합 관리됩니다: [`gnosis/wiki/projects/scout-phase-2c-2d-plan.md`](https://github.com/R00T-Kim/gnosis/blob/main/wiki/projects/scout-phase-2c-2d-plan.md). 세션이 바뀌거나 담당자가 교체돼도 동일 품질의 결과가 나오도록 SSOT 표, dependency DAG, operator checklist, 각 작업 항목의 entry/exit criteria, 검증 명령, 롤백 계획이 전부 거기에 있습니다. 아래 "다음 우선순위" 목록은 **Phase 2C 착수 전의 레거시 백로그**이며, 계획 문서의 Phase 2C 작업이 이들을 흡수/재배치합니다.
 
 **Phase 2C 요약** (6-8주, foundation hardening):
-- 2C.1 SBOM 재측정 파일럿 5 펌웨어 (3일)
-- 2C.2 Synthesis inherit finding-level 재작성 (3일)
-- 2C.3 `finding.evidence_tier` 필드 rollout (1주)
-- 2C.4 Stage contract tests 42 스테이지 (2-3주)
-- 2C.5 병렬 실행 hardening + wall-clock 실측 (1주)
-- 2C.6 1,123 펌웨어 corpus 전체 재측정 (1-2주)
-- 2C.7 Docs/marketing 규율 + v2.6.1 태그 (1주)
+- 2C.1 SBOM 재측정 파일럿 5 펌웨어 (3일) — 근거 보고서: `docs/sbom_schema_fix_impact.md` (`4/6` 샘플 변화, 결론: **2C.6 전체 재측정 필수**)
+- 2C.2 Synthesis inherit finding-level 재작성 (matched downstream lineage / deterministic top-K / aggregate fallback, 3일)
+- 2C.3 `finding.evidence_tier` 필드 rollout (1주) — branch 구현 기준 additive taxonomy landed: `evidence_tier` + `tier_counts`, SARIF `scout_evidence_tier`, MCP tier filter (`docs/evidence_tier_contract.md`)
+- 2C.4 Stage contract tests 42 스테이지 (2-3주) — lightweight validator landed and smoke-verified on representative firmware; `scripts/validate_stage_outputs.py` + `src/aiedge/stage_contracts.py` + `tests/test_stage_contracts.py` + `docs/stage_contracts.md`
+- 2C.5 병렬 실행 hardening + wall-clock 실측 (1주) — execution provenance landed and verified via `manifest.execution_mode/max_workers`, `verified_chain.execution`, and legacy-compatible verifier checks; `docs/parallel_execution.md`
+- 2C.6 1,123 펌웨어 corpus 전체 재측정 (1-2주) — **완료**. 최종 baseline refresh는 `docs/carry_over_benchmark_v2.6.md` 및 `benchmark-results/2c6-fresh-full-final/aggregate.json`에 기록: **success 1110 / partial 4 / fatal 9**. archive-only rerun은 invalid로 폐기했고, fresh rerun 4파동(v2/resume/r3/r4)을 합쳐 best-view corpus를 재구성함
+- 2C.7 Docs/marketing 규율 + v2.6.1 태그 (1주) — **완료**. Tier 1 fresh baseline, confidence semantic break, LLM driver degradation, analyst copilot 3분리, release/governance 문구를 정리하고 `v2.6.1` 태그/릴리즈를 발행함
+
+> 2C.6 fresh corpus refresh는 **1123-target 기준 1110 success / 4 partial / 9 fatal**로 마감됐다. 성공 run은 `extraction=ok` / `inventory=sufficient`가 1110건 전부 일치하고, nonzero findings는 1110/1110, nonzero CVE는 1089/1110이다. 다만 이 rerun은 여전히 baseline refresh이지, 곧바로 "가치가 증명됐다"는 뜻은 아니다. review-facing 숫자는 extraction success / inventory sufficiency / SBOM delta / pair-labeled recall-FP / tier ROC를 분리해서 읽어야 하고, reviewer-facing precision/recall/ROC는 pair-labeled eval lane에서 별도로 확정한다.
+
+**2C.7 이후 권장 실행 순서** (live roadmap):
+1. **Reviewer eval lane** — `[B-1]` pair-labeled recall/FP + `[C]` tier/confidence ROC를 `docs/pair_eval_lane.md` 기준으로 수행하고 `docs/results_overview.md`에 숫자 반영
+2. **[B-2] E2E demo 확정** — `docs/r7000_e2e_demo.md`를 실측 artifact 기준으로 마감하고 reviewer walkthrough를 고정
+3. **[D] results overview 마감** — corpus baseline, pair eval, calibration, E2E demo를 한 문서에서 cross-link하고 reviewer 공유용 요약본으로 고정
+4. **Phase 2D 진입** — 2D.1 → 2D.2 → 2D.3 → 2D.4 순으로 capability layer 착수
 
 **Phase 2D 요약** (8-12주, capability layer — 기존 Phase 2C였던 항목):
 - 2D.1 reasoning_trail + MCP 실전 루프 검증

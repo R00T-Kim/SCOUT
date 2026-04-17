@@ -6,9 +6,9 @@
 
 ### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
 
-**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인 + analyst-ready reasoning trail이 나옵니다 -- 명령어 하나로.**
+**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인 + analyst-reviewable evidence lineage / reasoning trail이 나옵니다 -- 명령어 하나로.**
 
-*SCOUT는 대규모 벌크 스캐너보다는 단일 펌웨어를 깊게 파고드는 분석가 코파일럿으로 최적화되어 있습니다. Ghidra P-code taint 분석, adversarial LLM 토론, finding/report/viewer/TUI 전반 reasoning persistence, pip 의존성 제로.*
+*SCOUT는 대규모 벌크 스캐너보다는 단일 펌웨어를 깊게 파고드는 분석가 코파일럿으로 최적화되어 있습니다. Ghidra P-code taint 분석, analyst-in-the-loop LLM 판정 보조, finding/report/viewer/TUI 전반 evidence lineage / reasoning persistence, pip 의존성 제로.*
 
 <br />
 
@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.6.0-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.6.1-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -26,14 +26,14 @@
 
 <table>
 <tr>
-<td align="center"><strong>1,123</strong><br/><sub>펌웨어 분석 완료<br/>(Tier 1)</sub></td>
-<td align="center"><strong>99.2%</strong><br/><sub>분석 성공률</sub></td>
-<td align="center"><strong>13,893</strong><br/><sub>CVE 매칭</sub></td>
-<td align="center"><strong>99.3%</strong><br/><sub>FPR 감소율<br/>(Tier 2 LLM)</sub></td>
-<td align="center"><strong>≈ 0%</strong><br/><sub>False Negative<br/>Rate</sub></td>
+<td align="center"><strong>1,123</strong><br/><sub>코퍼스 타깃<br/>(Tier 1 refresh)</sub></td>
+<td align="center"><strong>98.8%</strong><br/><sub>성공률<br/>(1110 / 1123)</sub></td>
+<td align="center"><strong>146,943</strong><br/><sub>CVE 매칭<br/>(Tier 1 refresh)</sub></td>
+<td align="center"><strong>99.3%</strong><br/><sub>LLM 판정 기준 FPR<br/>(Tier 2 carry-over)</sub></td>
+<td align="center"><strong>Pending</strong><br/><sub>Pair-Eval FN/FP<br/>(next lane)</sub></td>
 </tr>
 </table>
-<sub>기준 데이터(carry-over): Tier 1 v2.4.0, 2026-04-05, static-only, 1,123 펌웨어 · Tier 2 v2.3.0, 2026-04-09, claude-code 드라이버, 36 펌웨어</sub>
+<sub>Tier 1 fresh baseline: v2.6.1 corpus refresh, 2026-04-17, 1,123개 펌웨어, success 1110 / partial 4 / fatal 9 · Tier 2 carry-over: v2.3.0, 2026-04-09, claude-code 드라이버, 36개 펌웨어</sub>
 
 [English](README.md) | [한국어 (이 파일)](README.ko.md)
 
@@ -42,15 +42,14 @@
 ---
 
 > [!NOTE]
-> **README의 벤치마크 수치는 모두 carry-over baseline입니다** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123개 펌웨어 · Tier 2: v2.3.0 claude-code 드라이버, 2026-04-09, 36개 펌웨어). v2.6.0 기준 fresh corpus 재검증은 대기 중입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md) 와 [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
+> **README의 Tier 1 수치는 이제 fresh v2.6.1 corpus refresh 기준입니다** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM 수치는 pair-eval lane이 닫히기 전까지는 여전히 carry-over (`v2.3.0`, 36 firmware)입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
 
 > [!TIP]
-> **v2.6.0 핵심 변화** ([PR #6](https://github.com/R00T-Kim/SCOUT/pull/6) · Phase 2B 통합)
-> - **DAG 기반 병렬 stage 실행 PoC**: `--experimental-parallel [N]`로 42-stage 파이프라인을 level-wise 병렬 실행 (15 level / max-width 7). out-of-order 안전 progress 출력. 기존 순차 경로 무수정.
-> - **`reasoning_trail` finding / analyst report / TUI / 웹 뷰어 전면 노출**: `adversarial_triage`와 `fp_verification`이 advocate / critic / decision / pattern-hit 엔트리를 기록 (raw response 200자 redaction). 분석가가 왜 downgrade/uphold/priority 결정이 났는지 바로 추적 가능.
-> - **MCP analyst tools 4종**: verdict override, hint injection, reasoning 조회, category filter. `adversarial_triage` advocate 프롬프트가 다음 런에서 `AIEDGE_FEEDBACK_DIR`의 분석가 hint를 읽어 prefix — analyst-in-the-loop 피드백 루프 완성.
-> - **`priority_score` / `priority_inputs`를 detection confidence와 분리**: `confidence`는 static-evidence cap에 엄격 유지. EPSS / reachability / backport / CVSS는 별도 ranking 신호로 이동. "EPSS-additive confidence가 heuristic으로 보인다"는 리뷰어 비판 직접 응답.
-> - **extraction 실패 시 analyst guidance**: 언패킹 실패 시 opaque error 대신 vendor decrypt 힌트, `--rootfs` 우회, binwalk variants, 이슈 템플릿 등 실무 가이드 제공.
+> **v2.6.1 핵심 변화** (Phase 2C close-out)
+> - **fresh corpus refresh 완료** — Tier 1 baseline은 `1110 success / 4 partial / 9 fatal`로 닫혔고, 결과는 `docs/carry_over_benchmark_v2.6.md`에 정리됨.
+> - **synthesis lineage + SBOM schema fix 반영** — top-level synthesis finding은 matched downstream lineage를 상속하고, vendor-stock SBOM은 더 이상 legacy schema key에 묶이지 않음.
+> - **evidence / contract hardening 반영** — `evidence_tier`, stage contract validation, execution provenance가 실제 산출물 표면에 포함됨.
+> - **release governance 정리** — confidence semantic break와 LLM driver degradation을 문서로 명시해 코드에 숨어 있던 의미 변화를 공개적으로 고정.
 
 ---
 
@@ -66,7 +65,7 @@
 > GitHub Code Scanning, VS Code, CI/CD 즉시 연동.
 
 > **Analyst-in-the-loop 펌웨어 리뷰용으로 설계됨.**
-> SCOUT는 단일 펌웨어 이미지를 빠르게 깊이 파고들고, evidence 경로를 드러내며, triage와 reporting 표면 전반에 reasoning을 보존할 때 가장 강합니다. MCP를 통해 분석가 hint가 다음 런의 LLM 판단에 피드백됩니다.
+> SCOUT는 단일 펌웨어 이미지를 빠르게 깊이 파고들고, evidence 경로와 finding-level lineage를 드러내며, triage와 reporting 표면 전반에 reasoning을 보존할 때 가장 강합니다. 자율 추론 에이전트라기보다 분석가의 검토 루프를 보조하는 도구이며, MCP를 통해 분석가 hint가 다음 런의 LLM 판단에 피드백됩니다.
 
 ---
 
@@ -133,9 +132,9 @@
 | :dart: | **공격 표면** | Source→sink 추적, 웹 서버 자동 감지, 크로스 바이너리 IPC 체인 (5종: unix socket, dbus, shm, pipe, exec) |
 | :brain: | **테인트 분석** | HTTP-aware 프로시저 간 테인트, P-code SSA dataflow, call chain 시각화, 4-strategy fallback (P-code → colocated → decompiled → interprocedural) |
 | :robot: | **LLM 엔진** | 4개 백엔드 (Codex CLI / Claude API / Claude Code CLI / Ollama) + 중앙 관리 시스템 프롬프트 + structured JSON 출력 + 5-stage 파서 (preamble/fence/raw/brace-counting/error-recovery) + temperature 제어 |
-| :crossed_swords: | **Adversarial Debate** | Advocate/Critic LLM 토론 기반 FPR 감소 (Tier 2 99.3%). parse_failures vs llm_call_failures 분리 + quota_exhausted 명시적 탐지 |
-| :compass: | **Analyst Copilot** *(v2.6.0)* | finding / analyst markdown / TUI / 웹 뷰어에 `reasoning_trail`을 보존해, 왜 downgrade/uphold/priority 결정이 났는지 바로 추적 가능. advocate / critic / decision / pattern-hit 엔트리, raw response 200자 redaction |
-| :inbox_tray: | **MCP Analyst Tools** *(v2.6.0)* | reasoning 조회, hint injection, verdict override, category filter 4개 tool. `AIEDGE_FEEDBACK_DIR` opt-in으로 hint가 다음 런 advocate 프롬프트에 주입됨 (`fcntl.flock` 기반 쓰기 안전) |
+| :crossed_swords: | **LLM-Adjudicated Debate** | Advocate/Critic LLM 판정 기반 FP 후보 축소 (Tier 2 carry-over 기준 99.3%). parse_failures vs llm_call_failures 분리 + quota_exhausted 명시적 탐지 |
+| :compass: | **Explainability Surface** *(v2.6.1)* | finding / analyst markdown / TUI / 웹 뷰어에 `reasoning_trail`과 evidence lineage를 보존해, 왜 downgrade/uphold/priority 결정이 났는지 바로 추적 가능. advocate / critic / decision / pattern-hit 엔트리, raw response 200자 redaction |
+| :inbox_tray: | **Analyst-in-the-loop Channel** *(v2.6.1)* | reasoning 조회, hint injection, verdict override, category filter 4개 tool. `AIEDGE_FEEDBACK_DIR` opt-in으로 hint가 다음 런 advocate 프롬프트에 주입됨 (`fcntl.flock` 기반 쓰기 안전) |
 | :triangular_ruler: | **Detection vs Priority 분리** *(v2.6.0)* | `confidence`는 증거 강도만 (≤0.55 static cap), `priority_score` / `priority_inputs`는 EPSS·reachability·backport·CVSS 기반 운영 우선순위 신호만 담당. [`docs/scoring_calibration.md`](docs/scoring_calibration.md) 참조 |
 | :speedboat: | **병렬 DAG 실행** *(v2.6.0, PoC)* | `--experimental-parallel [N]` 기반 opt-in level-wise stage 병렬 실행 (ThreadPoolExecutor + Kahn topo). 42-stage 기준 15 level / max-width 7. 기존 순차 경로 무수정 |
 | :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한, 자격 증명 매핑, hardcoded secret 탐지 |
@@ -152,6 +151,20 @@
 | :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib만 사용 — pip 의존성 없음, 에어갭 환경 배포 친화적 |
 
 ---
+
+## Analyst Copilot 표면
+
+### Explainability surface
+- `reasoning_trail`과 evidence lineage가 findings / analyst Markdown / TUI / 웹 뷰어 / SARIF 속성까지 이어진다.
+- 리뷰어는 여기서 *왜* downgrade/uphold/promotion이 일어났는지 확인한다.
+
+### Analyst-in-the-loop channel
+- MCP 도구와 `AIEDGE_FEEDBACK_DIR`가 공식 hint/override 경로다.
+- 인간 분석가의 힌트는 다음 런 판단에 반영될 수 있지만, 최종 판정 책임은 여전히 분석가에게 남는다.
+
+### Autonomous reasoning (future)
+- v2.6.1의 SCOUT는 **완전자율 exploit agent**로 포지셔닝하지 않는다.
+- multi-agent exploit chain, pair-grounded eval loop, LLM fuzz harness는 **Phase 2D / reviewer eval lane** 범위다.
 
 ## 파이프라인 (42단계)
 
@@ -189,7 +202,7 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | `csource_identification` | `csource_identification.py` | 정적 센티널 + QEMU 기반 HTTP 입력 소스 식별 | 아니오 | $0 |
 | `taint_propagation` | `taint_propagation.py` | 28개 sink + format string 탐지 인터프로시저 taint | 예 | 중간 |
 | `fp_verification` | `fp_verification.py` | 3패턴 FP 제거 + LLM 검증 (parse/call 실패 분리) | 예 | 낮음 |
-| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM 토론 (FPR 99.3% 감소) | 예 | 중간 |
+| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM 토론 (LLM 판정 기준 FPR 감소, 99.3%) | 예 | 중간 |
 | `graph` | `graph.py` | 통신 그래프 (5종 IPC edge) | 아니오 | $0 |
 | `attack_surface` | `attack_surface.py` | IPC 체인 포함 공격 표면 매핑 | 아니오 | $0 |
 | `attribution` | `attribution.py` | 벤더/펌웨어 attribution | 아니오 | $0 |
@@ -218,19 +231,20 @@ OTA 전용 스테이지: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boott
 
 ### Tier 1 (정적 분석, frozen baseline)
 
-_기준 데이터: v2.4.0, 2026-04-05, static-only (carry-over; v2.5.0 코퍼스 재검증 예정)_
+_기준 데이터: v2.6.1, 2026-04-17, fresh corpus refresh (`docs/carry_over_benchmark_v2.6.md`)_
 
-- `1,123`개 펌웨어 / `8`개 벤더 / `99.2%` 분석 가능 비율
-- `1,110` success / `4` partial / `9` failed
-- `3,523` findings / `13,893` CVE 매칭
+- `1,123`개 펌웨어 / `8`개 벤더 / **98.8%** 성공률
+- `1,110` success / `4` partial / `9` fatal
+- `3,531` findings / `146,943` CVE 매칭
+- `1,089 / 1,110` successful runs에서 nonzero CVE 산출
 
 ### Tier 2 (LLM Adversarial Debate, GPT-5.3-Codex)
 
-_기준 데이터: v2.3.0, 2026-04-09, claude-code 드라이버 (carry-over; v2.5.0 코퍼스 재검증 예정)_
+_기준 데이터: v2.3.0, 2026-04-09, claude-code 드라이버 (carry-over; pair-eval lane pending)_
 
 - `36`개 펌웨어 / `9`개 벤더
 - `2,430` findings 토론 → `2,412` downgraded + `18` maintained
-- **FPR 감소율: 99.3%** | **False negative rate: ≈ 0%**
+- **LLM 판정 기준 FPR 감소율: 99.3%** | **pair-grounded FN/FP는 reviewer eval lane에서 확정 예정**
 
 ### v2.6.0 post-merge 실펌웨어 검증
 
@@ -249,7 +263,7 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 | `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — `sbom`이 partial이라 `cve_scan`/`reachability`가 upstream 의존성 실패로 skip ²) |
 | `--experimental-parallel 4` wall-clock | N/A | **약 170분** 파이프라인 end-to-end (`fp_verification`이 113분으로 dominant. 순차 실행 baseline 없어서 델타 미산정) |
 
-¹ **v2.6.0 → v2.6.1 후속 수정 (커밋 `7b36274`)**: 기존에는 top-level synthesis finding(`web.exec_sink_overlap`)이 그 아래에서 debate된 per-alert trail을 상속받지 못했습니다. 후속 패치는 `fp_verification`의 TP/FP 카운트 + `adversarial_triage`의 downgrade/maintain 집계를 `synthesis_inherit` 항목으로 synthesis finding에 부착합니다. 위 R7000 런은 v2.6.0 배포본 동작이며, 패치 적용 후 재실행하면 top-level `reasoning_trail_count`는 **1/3**이 됩니다.
+¹ **v2.6.0 → v2.6.1 후속 수정 (커밋 `7b36274`)**: top-level synthesis finding(`web.exec_sink_overlap`)은 이제 stage-level aggregate summary에만 기대지 않고, 매칭된 downstream evidence lineage를 상속합니다. run-relative binary path를 우선하고, SHA-256으로 폴백하며, 대표 downstream trail을 deterministic top-K로 샘플링해 synthesis finding이 실제로 어떤 alerts에 의해 형성됐는지 드러냅니다. 위 R7000 런은 v2.6.0 배포본 동작입니다.
 
 ² **v2.6.0 → v2.6.1 후속 수정 (커밋 `8e0bb82`)**: R7000의 extraction 자체는 정상 성공 (1,664개 파일 + 2,412개 바이너리가 `squashfs-root` 아래에 존재). 그런데 SBOM 스테이지가 0 components를 반환한 진짜 이유는 조용한 스키마 불일치였습니다 — `_collect_so_files_from_inventory`가 deprecated된 `inventory.file_list`를 읽었고 (`roots`만 노출되는 현재 스키마), `_detect_from_binary_analysis`가 엔트리별 `string_hits`를 기대했으나 현재는 `matched_symbols`만 방출. OpenWrt는 opkg 데이터베이스 한 군데서만 100+ 컴포넌트가 나와서 이 버그가 가려져 있었습니다. 수정: 두 헬퍼가 `inventory.roots`를 직접 walk하고, `_extract_ascii_runs` 신규 헬퍼로 바이너리 파일 앞 256KB를 읽어 printable run 추출로 폴백. 이 R7000 런에 `SbomStage`만 재실행하면 component 수가 **0 → 4**로 증가 (`curl 7.36.0`은 `/usr/bin/curl` 직접 읽어서 탐지, `openssl 1.0.0` / `libz 1` / `libpthread 0`은 `.so*` walking). 전체 파이프라인 재실행 시 downstream `cve_scan` / `reachability`가 실제 CVE + EPSS 수치를 생성.
 

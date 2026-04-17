@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-SCOUT는 42-stage 결정론적 증거 패키징(deterministic evidence packaging), 해시 앵커링 증거 체인, adversarial LLM debate(99.3% FPR 감소, Tier 2 v2.3.0 baseline)로 **펌웨어 증거 엔진** 분야에서 독보적 위치를 점유한다. 그러나 **precision 35-41%**, **68% LLM parse failure**, **순차 파이프라인 병목**이라는 3가지 핵심 과제가 다음 단계 도약을 가로막고 있다.
+SCOUT는 42-stage 결정론적 증거 패키징(deterministic evidence packaging), 해시 앵커링 증거 체인, adversarial LLM debate(99.3% LLM 판정 기준 FPR 감소, Tier 2 v2.3.0 baseline)로 **펌웨어 증거 엔진** 분야에서 독보적 위치를 점유한다. 그러나 **precision 35-41%**, **68% LLM parse failure**, **순차 파이프라인 병목**이라는 3가지 핵심 과제가 다음 단계 도약을 가로막고 있다.
 
 이 보고서는 4개 병렬 연구 스트림(학술 논문, 업계 동향, LLM 프론티어, 코드 갭 분석)과 Theori Xint 심층 분석을 종합하여, SCOUT의 **3-Phase 전략 로드맵**을 제안한다.
 

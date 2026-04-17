@@ -8,7 +8,7 @@
 
 **Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, hash-anchored evidence, and analyst-ready reasoning trails -- in one command.**
 
-*SCOUT is optimized for deep analysis of a single firmware image: it acts as an analyst copilot, not just a bulk scanner. Ghidra P-code taint, adversarial LLM debate, reasoning persistence across findings/reports/viewer/TUI, zero pip dependencies.*
+*SCOUT is optimized for deep analysis of a single firmware image: it acts as an analyst copilot grounded in evidence lineage, not an autonomous verdict engine. Ghidra P-code taint, adversarial LLM adjudication, reasoning persistence across findings/reports/viewer/TUI, zero pip dependencies.*
 
 <br />
 
@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.6.0-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.6.1-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -26,14 +26,14 @@
 
 <table>
 <tr>
-<td align="center"><strong>1,123</strong><br/><sub>Firmware Analyzed<br/>(Tier 1)</sub></td>
-<td align="center"><strong>99.2%</strong><br/><sub>Analysis Rate</sub></td>
-<td align="center"><strong>13,893</strong><br/><sub>CVE Matches</sub></td>
-<td align="center"><strong>99.3%</strong><br/><sub>FPR Reduction<br/>(Tier 2 LLM)</sub></td>
-<td align="center"><strong>≈ 0%</strong><br/><sub>False Negative<br/>Rate</sub></td>
+<td align="center"><strong>1,123</strong><br/><sub>Corpus Targets<br/>(Tier 1 refresh)</sub></td>
+<td align="center"><strong>98.8%</strong><br/><sub>Success Rate<br/>(1110 / 1123)</sub></td>
+<td align="center"><strong>146,943</strong><br/><sub>CVE Matches<br/>(Tier 1 refresh)</sub></td>
+<td align="center"><strong>99.3%</strong><br/><sub>LLM-Adjudicated FPR<br/>(Tier 2 carry-over)</sub></td>
+<td align="center"><strong>Pending</strong><br/><sub>Pair-Eval FN/FP<br/>(next lane)</sub></td>
 </tr>
 </table>
-<sub>Baseline (carry-over): Tier 1 v2.4.0, 2026-04-05, static-only, 1,123 firmware · Tier 2 v2.3.0, 2026-04-09, claude-code driver, 36 firmware</sub>
+<sub>Tier 1 fresh baseline: v2.6.1 corpus refresh, 2026-04-17, 1,123 firmware, success 1110 / partial 4 / fatal 9 · Tier 2 carry-over: v2.3.0, 2026-04-09, claude-code driver, 36 firmware</sub>
 
 [English (this file)](README.md) | [한국어](README.ko.md)
 
@@ -42,15 +42,14 @@
 ---
 
 > [!NOTE]
-> **Benchmark numbers in this README are carry-over baselines** (Tier 1: v2.4.0 static-only, 2026-04-05, 1,123 firmware · Tier 2: v2.3.0 claude-code driver, 2026-04-09, 36 firmware). Fresh v2.6.0 corpus re-validation is pending. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md) and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
+> **Tier 1 numbers in this README now reflect the fresh v2.6.1 corpus refresh** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM numbers are still carry-over (`v2.3.0`, 36 firmware) until the pair-eval lane lands. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
 
 > [!TIP]
-> **What's new in v2.6.0** ([PR #6](https://github.com/R00T-Kim/SCOUT/pull/6) · Phase 2B integration)
-> - **DAG-based parallel stage execution PoC** via `--experimental-parallel [N]` — opt-in level-wise parallelism over the 42-stage pipeline (15 levels / max-width 7), with out-of-order-safe progress rendering. Sequential path unchanged.
-> - **`reasoning_trail` persisted across findings, analyst reports, TUI, and web viewer** — `adversarial_triage` and `fp_verification` capture advocate / critic / decision / pattern-hit entries (with 200-char excerpt redaction) so reviewers can inspect *why* a finding was downgraded, upheld, or prioritized.
-> - **4 MCP analyst tools** for verdict override, hint injection, reasoning lookup, and category filtering. `adversarial_triage` advocate prompt reads analyst hints from `AIEDGE_FEEDBACK_DIR` on next run — closes the analyst-in-the-loop feedback cycle.
-> - **`priority_score` / `priority_inputs` separated from detection confidence** — `confidence` stays strictly at static-evidence cap; EPSS, reachability, backport, and CVSS feed a new ranking signal instead. Addresses reviewer critique that EPSS-additive confidence looked like a heuristic.
-> - **Extraction failure analyst guidance** — when unpacking fails, SCOUT now emits actionable next steps (vendor decrypt hints, `--rootfs` bypass, binwalk variants, issue template) instead of an opaque stage error.
+> **What's new in v2.6.1** (Phase 2C close-out)
+> - **Fresh corpus refresh completed** — Tier 1 baseline is now `1110 success / 4 partial / 9 fatal` over 1,123 targets (`docs/carry_over_benchmark_v2.6.md`).
+> - **Synthesis lineage + SBOM schema fixes landed** — top-level synthesis findings inherit matched downstream lineage, and vendor-stock SBOM detection no longer depends on legacy schema keys.
+> - **Evidence / contract hardening landed** — `evidence_tier`, stage contract validation, and execution provenance are all part of the shipped surface.
+> - **Release governance tightened** — confidence semantic break and LLM driver degradation are now documented explicitly instead of implied by code paths.
 
 ---
 
@@ -66,7 +65,7 @@
 > GitHub Code Scanning, VS Code, CI/CD integration out of the box.
 
 > **Built for analyst-in-the-loop firmware review.**
-> SCOUT is strongest when used to start deep review on a single firmware image quickly, expose evidence paths, and preserve reasoning across triage and reporting surfaces. Analyst hints loop back into next-run LLM judgment via MCP.
+> SCOUT is strongest when used to start deep review on a single firmware image quickly, expose evidence paths, and preserve matched reasoning lineage across triage and reporting surfaces. Analyst hints loop back into next-run LLM adjudication via MCP, while final verdict ownership stays with the reviewer.
 
 ---
 
@@ -133,9 +132,9 @@
 | :dart: | **Attack Surface** | Source→sink tracing, web server auto-detection, cross-binary IPC chains (5 types: unix socket, dbus, shm, pipe, exec) |
 | :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint, P-code SSA dataflow, call chain visualization, 4-strategy fallback (P-code → colocated → decompiled → interprocedural) |
 | :robot: | **LLM Engine** | 4 backends (Codex CLI / Claude API / Claude Code CLI / Ollama) + centralized system prompts + structured JSON output + 5-stage parser (preamble/fence/raw/brace-counting/error-recovery) + temperature control |
-| :crossed_swords: | **Adversarial Debate** | Advocate/Critic LLM debate for FPR reduction (99.3% on Tier 2). Separate parse_failures vs llm_call_failures observability with quota_exhausted detection |
-| :compass: | **Analyst Copilot** *(v2.6.0)* | `reasoning_trail` persisted across findings, analyst Markdown, TUI, and web viewer — reviewers can inspect *why* a finding was downgraded, upheld, or prioritized. Advocate / critic / decision / pattern-hit entries with 200-char excerpt redaction |
-| :inbox_tray: | **MCP Analyst Tools** *(v2.6.0)* | 4 tools for reasoning lookup, hint injection, verdict override, category filtering. Hints loop back into next-run advocate prompt via `AIEDGE_FEEDBACK_DIR` (opt-in, `fcntl.flock`-safe) |
+| :crossed_swords: | **LLM-Adjudicated Debate** | Advocate/Critic LLM debate for LLM-adjudicated FPR reduction (99.3% on the Tier 2 carry-over baseline). Separate parse_failures vs llm_call_failures observability with quota_exhausted detection |
+| :compass: | **Explainability Surface** *(v2.6.1)* | `reasoning_trail` persisted across findings, analyst Markdown, TUI, and web viewer so reviewers can inspect matched evidence lineage — not just a final score. Advocate / critic / decision / pattern-hit entries with 200-char excerpt redaction |
+| :inbox_tray: | **Analyst-in-the-loop Channel** *(v2.6.1)* | 4 MCP tools for reasoning lookup, hint injection, verdict override, and category filtering. Hints loop back into next-run advocate prompt via `AIEDGE_FEEDBACK_DIR` (opt-in, `fcntl.flock`-safe) |
 | :triangular_ruler: | **Detection vs Priority Separation** *(v2.6.0)* | `confidence` stays evidence-bound (≤0.55 static cap); `priority_score` / `priority_inputs` capture EPSS, reachability, backport, and CVSS as ranking signals. See [`docs/scoring_calibration.md`](docs/scoring_calibration.md) |
 | :speedboat: | **Parallel DAG Execution** *(v2.6.0, PoC)* | `--experimental-parallel [N]` opt-in level-wise stage parallelism (ThreadPoolExecutor + Kahn topo levels). 15 levels / max-width 7 on the 42-stage pipeline. Sequential path unchanged |
 | :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping, hardcoded secret detection |
@@ -152,6 +151,20 @@
 | :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib only — no pip dependencies, air-gap friendly deployment |
 
 ---
+
+## Analyst Copilot Surfaces
+
+### Explainability surface
+- `reasoning_trail` and evidence lineage are preserved across findings, analyst Markdown, TUI, web viewer, and SARIF properties.
+- This is where reviewers inspect *why* a finding was downgraded, upheld, or promoted.
+
+### Analyst-in-the-loop channel
+- MCP tools and `AIEDGE_FEEDBACK_DIR` are the supported override/hint path.
+- Human hints are allowed to influence the next run; final ownership still stays with the analyst.
+
+### Autonomous reasoning (future)
+- SCOUT is **not** positioned as a fully autonomous exploit agent in v2.6.1.
+- Multi-agent exploit chains, pair-grounded evaluation loops, and autonomous fuzz harness generation remain **Phase 2D / reviewer-eval lane** work.
 
 ## Pipeline (42 Stages)
 
@@ -189,7 +202,7 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | `csource_identification` | `csource_identification.py` | HTTP input source identification via static sentinel + QEMU | No | $0 |
 | `taint_propagation` | `taint_propagation.py` | Inter-procedural taint with 28 sinks + format string detection | Yes | Medium |
 | `fp_verification` | `fp_verification.py` | 3-pattern FP removal + LLM verification with parse/call failure separation | Yes | Low |
-| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM debate (99.3% FPR reduction) | Yes | Medium |
+| `adversarial_triage` | `adversarial_triage.py` | Advocate/Critic LLM debate (LLM-adjudicated FPR reduction, 99.3%) | Yes | Medium |
 | `graph` | `graph.py` | Communication graph (5 IPC edge types) | No | $0 |
 | `attack_surface` | `attack_surface.py` | Attack surface mapping with IPC chains | No | $0 |
 | `attribution` | `attribution.py` | Vendor/firmware attribution | No | $0 |
@@ -218,19 +231,20 @@ OTA-specific stages: `ota`, `ota_payload`, `ota_fs`, `ota_roots`, `ota_boottriag
 
 ### Tier 1 (Static, frozen baseline)
 
-_Baseline: v2.4.0, 2026-04-05, static-only (carry-over; fresh v2.5.0 corpus re-validation pending)_
+_Baseline: v2.6.1, 2026-04-17, fresh corpus refresh (`docs/carry_over_benchmark_v2.6.md`)_
 
-- `1,123` firmware / `8` vendors / `99.2%` analysis rate
-- `1,110` success / `4` partial / `9` failed
-- `3,523` findings / `13,893` CVE matches
+- `1,123` firmware / `8` vendors / **98.8%** success rate
+- `1,110` success / `4` partial / `9` fatal
+- `3,531` findings / `146,943` CVE matches
+- `1,089 / 1,110` successful runs produced nonzero CVE output
 
-### Tier 2 (LLM Adversarial Debate, GPT-5.3-Codex)
+### Tier 2 (LLM-Adjudicated Adversarial Debate, GPT-5.3-Codex)
 
-_Baseline: v2.3.0, 2026-04-09, claude-code driver (carry-over; fresh v2.5.0 corpus re-validation pending)_
+_Baseline: v2.3.0, 2026-04-09, claude-code driver (carry-over; pair-eval lane still pending)_
 
 - `36` firmware / `9` vendors
 - `2,430` findings debated → `2,412` downgraded + `18` maintained
-- **FPR reduction: 99.3%** | **False negative rate: ≈ 0%**
+- **LLM-adjudicated FPR reduction: 99.3%** | **pair-grounded FN/FP: pending reviewer eval lane**
 
 ### v2.6.0 Post-merge Real-Firmware Validation
 
@@ -249,7 +263,7 @@ _This section records post-release real-firmware validation runs, distinct from 
 | `cve_scan` EPSS enriched | 23/23 | **0** (stage skipped — `sbom` landed partial and `cve_scan`/`reachability` skip on `sbom` dependency failure ²) |
 | `--experimental-parallel 4` wall-clock | N/A | **~170 minutes** end-to-end across the registered pipeline (`fp_verification` dominant at 113 min; no sequential baseline for delta) |
 
-¹ **v2.6.0 → v2.6.1 follow-up (commit `7b36274`)**: the top-level synthesis finding (`web.exec_sink_overlap`) did not inherit the per-alert trails debated under it. A post-v2.6.0 fix adds synthesis-level `synthesis_inherit` entries that mirror the downstream aggregate outcome (`fp_verification` TP/FP counts + `adversarial_triage` downgrade/maintain split) onto the synthesis finding. This R7000 run reflects the v2.6.0 shipped behaviour; after the fix, `reasoning_trail_count` at the top level rises to **1/3** on re-run.
+¹ **v2.6.0 → v2.6.1 follow-up (commit `7b36274`)**: the top-level synthesis finding (`web.exec_sink_overlap`) now inherits matched downstream evidence lineage instead of relying only on the stage-level aggregate summary. Matching prefers run-relative binary path, falls back to binary SHA-256, and samples representative downstream trail entries deterministically so the synthesis finding reflects the alerts that actually informed it. This R7000 run reflects the v2.6.0 shipped behaviour.
 
 ² **v2.6.0 → v2.6.1 follow-up (commit `8e0bb82`)**: the R7000 extraction actually succeeded (1,664 files, 2,412 binaries scanned under `squashfs-root`), but the SBOM stage returned 0 components on this firmware due to a silent schema mismatch — `_collect_so_files_from_inventory` read `inventory.file_list` (a pre-v2.x key no longer emitted) and `_detect_from_binary_analysis` expected per-entry `string_hits` (replaced by `matched_symbols` in the current inventory schema). OpenWrt hid the bug because its opkg database alone contributes 100+ components. The fix makes both helpers walk `inventory.roots` directly and fall back to reading the binary file contents via a new `_extract_ascii_runs` helper. A clean re-run of just `SbomStage` on this R7000 run raises the component count from **0 to 4** (`curl 7.36.0` via binary read, plus `openssl 1.0.0` / `libz 1` / `libpthread 0` via `.so*` walking). Downstream `cve_scan` / `reachability` would then produce real CVE + EPSS numbers on a full pipeline re-run.
 
