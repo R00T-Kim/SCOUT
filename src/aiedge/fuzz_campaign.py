@@ -334,6 +334,8 @@ def _run_campaign(
         "--rm",
         "--network",
         "none",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
         "--privileged",  # needed for AFL++ fork server
         "--ulimit",
         "core=0",
