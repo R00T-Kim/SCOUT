@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **CRA mapping relocated into `docs/compliance_mapping/`** (`docs/compliance_mapping/cra_annex_i.md`, was `docs/cra_compliance_mapping.md`). Phase 3'.1 step B-1 sets up a four-document compliance-mapping suite (CRA Annex I / FDA Section 524B / ISO 21434 / UN R155); the CRA file ships first as the canonical baseline format, with sibling placeholders cross-linked from its header. References updated in README.md, README.ko.md, docs/status.md, CHANGELOG.md, and scripts/check_doc_consistency.py. The disclaimer is tightened to spell out that the "compatible with" wording is mandatory throughout the directory — any "compliant with" / "compliance" / "ready" substitution is rejected by `check_doc_consistency.py`.
+
 ### Fixed
 
 - **AFL++ Docker fuzzing artifact ownership** (`fuzz_campaign.py`, PR #7). The Docker container is now invoked with the host user's uid/gid (`--user $(id -u):$(id -g)`), so files written under `stages/fuzzing/*/afl_output/` remain readable by SCOUT after the container exits. Previously, `_collect_stats` would raise `PermissionError: [Errno 13] Permission denied: .../fuzzer_stats` on any run that entered the fuzzing stage because the directory was created as `drwx------ root:root`. Validated on the OpenWrt Archer C7 v5 run (`2026-04-13_1014_sha256-bf9eeb5af38a`), where the pre-existing `PermissionError` no longer reproduces and `afl_output/default/` is now owned by the invoking user.
@@ -100,7 +104,7 @@ Phase 2B release. Performance + analyst copilot UX + confidence calibration. 6 a
 - **Sink expansion** (`taint_propagation.py`): `_SINK_SYMBOLS` 11 → 28 entries (memcpy, memmove, strcat, strncpy, gets, vsprintf, printf, fprintf, syslog, vprintf, vfprintf, snprintf, scanf, sscanf, fscanf, dlopen, realpath)
 - **Format string sink set**: `_FORMAT_STRING_SINKS` + `_is_format_string_variable()` helper for variable-controlled format string detection
 - **GitHub Action**: `.github/actions/scout-scan/` composite action for CI/CD with SARIF upload to GitHub Security tab
-- **CRA compatibility documentation**: `docs/cra_compliance_mapping.md` mapping all 12 EU Cyber Resilience Act Annex I requirements to SCOUT outputs (output formats compatible with CRA Annex I)
+- **CRA compatibility documentation**: `docs/compliance_mapping/cra_annex_i.md` mapping all 12 EU Cyber Resilience Act Annex I requirements to SCOUT outputs (output formats compatible with CRA Annex I)
 - **Strategic roadmap**: `docs/strategic_roadmap_2026.md` 3-Phase plan based on 30+ academic papers and competitive analysis (Theori Xint, FirmAgent, EU CRA)
 - LLM failure observability: `parse_failures` vs `llm_call_failures` separation in `adversarial_triage.py` and `fp_verification.py`
 - Common LLM failure classification helpers in `llm_driver.py` (`quota_exhausted`, `driver_unavailable`, `driver_nonzero_exit`)

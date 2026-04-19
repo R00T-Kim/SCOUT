@@ -145,7 +145,7 @@
 | :link: | **Evidence Chain** | SHA-256 anchored artifacts + 4-tier confidence caps (0.40/0.55/0.60/0.75) + 5-tier exploit promotion ladder |
 | :scroll: | **Standard Output** | SARIF 2.1.0 (GitHub Code Scanning) + CycloneDX 1.6 + VEX + SLSA Level 2 in-toto attestation |
 | :gear: | **CI/CD Integration** | GitHub Action (`.github/actions/scout-scan/`) with composite Docker action + automatic SARIF upload to GitHub Security tab |
-| :scales: | **Regulatory Alignment** | Output formats compatible with EU CRA Annex I (`docs/cra_compliance_mapping.md`); SBOM output compatible with FDA Section 524B guidance; output formats compatible with ISO 21434 / UN R155 |
+| :scales: | **Regulatory Alignment** | Output formats compatible with EU CRA Annex I (`docs/compliance_mapping/cra_annex_i.md`); SBOM output compatible with FDA Section 524B guidance; output formats compatible with ISO 21434 / UN R155 |
 | :chart_with_upwards_trend: | **Benchmarking** | FirmAE dataset (1,123 firmware), analyst-readiness scoring, verifier-backed archive bundles, TP/FP analysis scripts |
 | :key: | **Vendor Decrypt** | D-Link SHRS AES-128-CBC auto-decryption; Shannon entropy encryption detection (>7.9); binwalk v3 compatibility |
 | :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib only — no pip dependencies, air-gap friendly deployment |

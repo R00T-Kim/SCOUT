@@ -1,13 +1,25 @@
 # SCOUT CRA Compatibility Mapping
 
-**Document Version:** 1.0  
-**SCOUT Version:** 2.5.0+  
-**Date:** 2026-04-12  
+**Document Version:** 1.1
+**SCOUT Version:** 2.5.0+
+**Last revised:** 2026-04-19 (relocated into `docs/compliance_mapping/` as part of Phase 3'.1)
 **Regulation:** EU Cyber Resilience Act (CRA) — Regulation (EU) 2024/2847
 
 ---
 
-> **Disclaimer**: This document maps SCOUT outputs to EU CRA Annex I requirements for reference. SCOUT's output formats are *compatible with* CRA evidence requirements; full compliance certification is outside the scope of this tool and depends on the operator's complete compliance program.
+> **Disclaimer**: This document maps SCOUT outputs to EU CRA Annex I requirements for reference. SCOUT's output formats are *compatible with* CRA evidence requirements; full compliance certification is outside the scope of this tool and depends on the operator's complete compliance program. The phrase "compatible with" is mandatory throughout this directory; do not substitute "compliant with", "compliance", or "ready" — see `scripts/check_doc_consistency.py` for the regex enforcement.
+
+---
+
+## Companion mappings (Phase 3'.1, planned)
+
+This file is the first member of a four-document compliance-mapping suite covering the regulatory standards SCOUT's outputs are intended to support. Companion files will land in subsequent commits on the `phase-3-compliance-report` branch:
+
+- `docs/compliance_mapping/fda_section_524b.md` — FDA Section 524B (Cyber Devices) SBOM + SAST mapping (Phase 3'.1 step B-2)
+- `docs/compliance_mapping/iso_21434.md` — ISO/SAE 21434 automotive cybersecurity engineering mapping (Phase 3'.1 step B-3)
+- `docs/compliance_mapping/un_r155.md` — UN R155 vehicle cybersecurity management system mapping (Phase 3'.1 step B-3)
+
+Each companion will reuse the per-requirement coverage table format established below so consumers can compare SCOUT output coverage across regulatory regimes side-by-side.
 
 ---
 

@@ -145,7 +145,7 @@
 | :link: | **증거 체인** | SHA-256 앵커 아티팩트 + 4-tier 신뢰도 상한 (0.40/0.55/0.60/0.75) + 5단계 exploit 승격 ladder |
 | :scroll: | **표준 출력** | SARIF 2.1.0 (GitHub Code Scanning) + CycloneDX 1.6 + VEX + SLSA Level 2 in-toto 인증 |
 | :gear: | **CI/CD 통합** | GitHub Action (`.github/actions/scout-scan/`) composite Docker action + GitHub Security 탭 SARIF 자동 업로드 |
-| :scales: | **규제 정합성** | EU CRA Annex I 호환 출력 포맷 (`docs/cra_compliance_mapping.md`); FDA Section 524B 가이던스 호환 SBOM 출력; ISO 21434 / UN R155 호환 출력 포맷 |
+| :scales: | **규제 정합성** | EU CRA Annex I 호환 출력 포맷 (`docs/compliance_mapping/cra_annex_i.md`); FDA Section 524B 가이던스 호환 SBOM 출력; ISO 21434 / UN R155 호환 출력 포맷 |
 | :chart_with_upwards_trend: | **벤치마킹** | FirmAE 데이터셋 (1,123 펌웨어), analyst-readiness 점수화, verifier 기반 archive bundle, TP/FP 분석 스크립트 |
 | :key: | **벤더 복호화** | D-Link SHRS AES-128-CBC 자동 복호화; Shannon entropy 암호화 탐지 (>7.9); binwalk v3 호환 |
 | :white_check_mark: | **Zero Dependencies** | Pure Python 3.10+ stdlib만 사용 — pip 의존성 없음, 에어갭 환경 배포 친화적 |
