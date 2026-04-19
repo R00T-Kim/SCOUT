@@ -5,6 +5,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Finding diversity gate (Phase 2C+.5)** (`quality_policy.py`, `release_gate.sh`, `tests/test_finding_diversity_gate.py`, `docs/finding_diversity_gate.md`). Detects degenerate pair-eval coverage where every pair-side row maps to the same `finding_id` — the structural failure surfaced by the 2026-04-19 reviewer eval lane analysis (local-7 baseline `finding_diversity_index = 1.0`, all 14 rows on `aiedge.findings.web.exec_sink_overlap`). New helpers `compute_pair_eval_diversity_index()`, `load_pair_eval_finding_ids()`, `evaluate_pair_eval_diversity_gate()` produce a `QUALITY_GATE_DIVERSITY_MISS` violation when `max_share(finding_id) >= AIEDGE_PAIR_DIVERSITY_MAX` (default 0.5). `release_gate.sh` wires this in as the opt-in `PAIR_EVAL_DIVERSITY` sub-gate via `--pair-eval-findings`. _(12 new tests in `tests/test_finding_diversity_gate.py`.)_
+- **Pair-eval timeout diagnostic** (`scripts/run_pair_eval.py`). When a pair-side run hits the wall-clock timeout, `_dump_timeout_diagnostic()` writes `<side>/timeout_diagnostic.json` capturing the last 200 stderr / 50 stdout lines, a best-effort run_dir guess, and the most recent stage's name/status. Closes the visibility gap that left the dedicated reviewer rerun lanes (`pair-eval-dedicated-local7-claude-6h`, `codex-6h`) stuck at `run_index rows = 0` without actionable signal.
+
 ### Fixed
 
 - **AFL++ Docker fuzzing artifact ownership** (`fuzz_campaign.py`, PR #7). The Docker container is now invoked with the host user's uid/gid (`--user $(id -u):$(id -g)`), so files written under `stages/fuzzing/*/afl_output/` remain readable by SCOUT after the container exits. Previously, `_collect_stats` would raise `PermissionError: [Errno 13] Permission denied: .../fuzzer_stats` on any run that entered the fuzzing stage because the directory was created as `drwx------ root:root`. Validated on the OpenWrt Archer C7 v5 run (`2026-04-13_1014_sha256-bf9eeb5af38a`), where the pre-existing `PermissionError` no longer reproduces and `afl_output/default/` is now owned by the invoking user.

@@ -10,12 +10,13 @@ CORPUS_MANIFEST="benchmarks/corpus/manifest.json"
 METRICS_OUT=""
 QUALITY_OUT=""
 LLM_FIXTURE=""
+PAIR_EVAL_FINDINGS=""
 
 FAILED=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release_gate.sh --run-dir <PATH> [--manifest <PATH>] [--metrics-out <PATH>] [--quality-out <PATH>] [--llm-fixture <PATH>]
+Usage: scripts/release_gate.sh --run-dir <PATH> [--manifest <PATH>] [--metrics-out <PATH>] [--quality-out <PATH>] [--llm-fixture <PATH>] [--pair-eval-findings <PATH>]
 
 Unified release governance gate (single entrypoint).
 
@@ -25,6 +26,7 @@ Sub-gates:
   - QUALITY_METRICS: aiedge quality-metrics
   - QUALITY_POLICY: aiedge release-quality-gate
   - EXPLOIT_TIER_POLICY: schema tier checks plus exploit_policy artifact checks when present
+  - PAIR_EVAL_DIVERSITY: finding-diversity gate over pair_eval_findings.csv (skipped when --pair-eval-findings absent)
   - TAMPER_SUITE: pytest tests/test_tamper_suite.py
 EOF
 }
@@ -95,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --llm-fixture)
       LLM_FIXTURE="$2"
+      shift 2
+      ;;
+    --pair-eval-findings)
+      PAIR_EVAL_FINDINGS="$2"
       shift 2
       ;;
     -h|--help)
@@ -202,6 +208,66 @@ else
   done <"$EXPLOIT_CHECK_OUTPUT"
 fi
 rm -f "$EXPLOIT_CHECK_OUTPUT"
+
+if [[ -n "$PAIR_EVAL_FINDINGS" ]]; then
+  PAIR_EVAL_OUTPUT="$(mktemp)"
+  set +e
+  PYTHONPATH="$PYTHONPATH" python3 - <<'PY' "$PAIR_EVAL_FINDINGS" "$RUN_DIR" >"$PAIR_EVAL_OUTPUT" 2>&1
+import json
+import sys
+from pathlib import Path
+
+from aiedge.quality_policy import (
+    QualityGateError,
+    evaluate_pair_eval_diversity_gate,
+    load_pair_eval_finding_ids,
+)
+
+csv_path = Path(sys.argv[1]).resolve()
+run_dir = Path(sys.argv[2]).resolve()
+out_path = run_dir / "pair_eval_diversity_gate.json"
+try:
+    finding_ids = load_pair_eval_finding_ids(csv_path)
+except QualityGateError as exc:
+    print(f"{exc.token}: {exc}")
+    raise SystemExit(1) from exc
+
+result = evaluate_pair_eval_diversity_gate(
+    finding_ids=finding_ids,
+    findings_source=str(csv_path),
+)
+out_path.write_text(
+    json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+)
+if not result["passed"]:
+    for err in result["errors"]:
+        print(err.get("message") or err.get("error_token"))
+    raise SystemExit(1)
+measured = result["measured"]
+print(
+    "diversity_index="
+    + str(measured["finding_diversity_index"])
+    + " sample_size="
+    + str(measured["sample_size"])
+)
+PY
+  PAIR_EVAL_RC=$?
+  set -e
+  if [[ "$PAIR_EVAL_RC" -ne 0 ]]; then
+    gate_fail "PAIR_EVAL_DIVERSITY" "diversity gate violated"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && echo "[GATE][LOG][PAIR_EVAL_DIVERSITY] $line"
+    done <"$PAIR_EVAL_OUTPUT"
+  else
+    gate_pass "PAIR_EVAL_DIVERSITY" "diversity gate passed"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && gate_info "PAIR_EVAL_DIVERSITY" "$line"
+    done <"$PAIR_EVAL_OUTPUT"
+  fi
+  rm -f "$PAIR_EVAL_OUTPUT"
+else
+  gate_info "PAIR_EVAL_DIVERSITY" "skipped (no --pair-eval-findings)"
+fi
 
 if [[ "${AIEDGE_SKIP_TAMPER_TESTS:-0}" == "1" ]]; then
   gate_info "TAMPER_SUITE" "skipped by AIEDGE_SKIP_TAMPER_TESTS=1"
