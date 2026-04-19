@@ -154,6 +154,34 @@ R7000 post-merge 실펌웨어 검증 도중 발견된 2개 shipped 버그를 pos
 
 **태그**: 위 후속 수정과 2C.3~2C.6 foundation hardening은 **v2.6.1**로 roll-up 완료.
 
+### post-v2.6.1 fuzzing stage 수정 (2026-04-19)
+
+v2.6.1 이후 외부 기여(@NightStalkers-160th) PR 2건을 머지. 둘 다 AFL++ fuzzing stage 경계의 실제 운영 실패를 좁은 범위로 수정. CHANGELOG는 `[Unreleased] Fixed`에 보관, 다음 point release에서 roll-up 예정.
+
+**PR #7 — Docker fuzzing 산출물 ownership 수정** (merge `c919390`):
+- 증상: AFL++ Docker 컨테이너가 root 소유로 `stages/fuzzing/*/afl_output/default/` 생성 → SCOUT `_collect_stats`가 `fuzzer_stats`를 읽을 때 `PermissionError: [Errno 13]` 발생 → fuzzing stage `failed`
+- 수정: docker_cmd에 `--user $(os.getuid()):$(os.getgid())` 추가 (2줄 diff)
+- 검증: OpenWrt Archer C7 v5 run (`2026-04-13_1014_sha256-bf9eeb5af38a`) — 이전에 정확히 이 에러로 `failed` 상태였던 run을 재실행, `default/` 소유자가 root:root → rootk1m:rootk1m으로 변경되며 PermissionError 소멸
+
+**PR #8 — AFL++ 0-execution campaign을 partial로 정직 보고** (merge `4e7ee05`):
+- 증상: AFL++가 fork server handshake 실패 / QEMU arch mismatch / docker non-zero exit 등으로 target을 한 번도 실행 못 해도 `fuzzing: ok`로 보고됨
+- 수정:
+  - `_append_campaign_execution_limitations(limitations, docker_rc, docker_err, stats)` — docker exit code / forkserver handshake / arch mismatch / zero-exec 4가지 실패 신호를 limitation 문자열로 기록
+  - `_campaign_completed(result)` — `stats.execs_done > 0`일 때만 `True` 반환. `targets_completed` 카운터는 이 게이트 통과분만 증가
+  - 한 파일에서 helper 분리 + 2개 호출지점 수정
+- 테스트: `tests/test_fuzz_campaign.py` 4 cases (no-exec / arch mismatch / campaign_completed gate / stage-level partial status)
+- 검증: 같은 OpenWrt Archer C7 v5 run에서 AFL++가 `Fork server handshake failed`로 abort 한 MIPS-32 dnsmasq target — `limitations = [docker_exit_1, forkserver_handshake_failed, no_fuzzer_executions]` 3개 모두 기록됨, `targets_attempted=1 / targets_completed=0`, stage status = **`partial`**
+
+**회귀**:
+| 지표 | v2.6.1 | post-merge |
+|------|--------|-----------|
+| pytest | 1047 | **1051+** (+4 fuzz_campaign) |
+| pyright | 0 errors | **0** |
+| ruff | clean | **clean** |
+| check_doc_consistency | 0 violations | **0** |
+
+**실펌웨어 증거**: `aiedge-runs/2026-04-13_1014_sha256-bf9eeb5af38a/stages/fuzzing/`에서 pre-/post-merge 쌍 유지 (status `failed`→`partial`, limitations `[PermissionError]`→`[docker_exit_1, forkserver_handshake_failed, no_fuzzer_executions]`).
+
 ## v2.5.0 업그레이드 (2026-04-13)
 
 전략 로드맵 Phase 1 구현. 학술 논문 30+편, 경쟁 도구 12개(Theori Xint, FirmAgent, FIRMHIVE 등), Theori Xint 심층 분석 기반.

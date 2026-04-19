@@ -5,7 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Fixed
+
+- **AFL++ Docker fuzzing artifact ownership** (`fuzz_campaign.py`, PR #7). The Docker container is now invoked with the host user's uid/gid (`--user $(id -u):$(id -g)`), so files written under `stages/fuzzing/*/afl_output/` remain readable by SCOUT after the container exits. Previously, `_collect_stats` would raise `PermissionError: [Errno 13] Permission denied: .../fuzzer_stats` on any run that entered the fuzzing stage because the directory was created as `drwx------ root:root`. Validated on the OpenWrt Archer C7 v5 run (`2026-04-13_1014_sha256-bf9eeb5af38a`), where the pre-existing `PermissionError` no longer reproduces and `afl_output/default/` is now owned by the invoking user.
+- **Fuzzing stage status when AFL++ never executes the target** (`fuzz_campaign.py`, PR #8). Campaigns that abort before any target execution — for example on forkserver handshake failure, QEMU architecture mismatch, or non-zero Docker exit — are no longer reported as `ok`. New helpers `_append_campaign_execution_limitations()` and `_campaign_completed()` record explicit limitations (`docker_exit_N`, `forkserver_handshake_failed`, `target_arch_mismatch`, `no_fuzzer_executions`) and refuse to increment `targets_completed` unless `stats.execs_done > 0`, so the stage correctly resolves to `partial` with actionable signal. Validated on the OpenWrt Archer C7 v5 MIPS-32 dnsmasq target, where AFL++ aborted with `Fork server handshake failed` and the stage now emits `status=partial` with all three limitations plus `targets_completed=0 / targets_attempted=1`. _(4 new tests in `tests/test_fuzz_campaign.py`.)_
 
 ## [2.6.1] — 2026-04-17
 
