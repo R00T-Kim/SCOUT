@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import cast
 
 from .path_safety import assert_under_dir
-from .schema import JsonValue
 from .sbom import _extract_ascii_runs
+from .schema import JsonValue
 from .stage import StageContext, StageOutcome, StageStatus
 
 _SCHEMA_VERSION = "enhanced-source-v1"
