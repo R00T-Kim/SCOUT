@@ -1,6 +1,65 @@
 # SCOUT 전략 로드맵 2026-2028
 
 > 작성일: 2026-04-12 | 기반: 학술 논문 30+편, 경쟁 도구 12개, 규제 동향 5개 축, 코드베이스 심층 분석
+> **2026-04-19 Direction Pivot 보정 추가** (아래 섹션 참조)
+
+---
+
+## 2026-04-19 Direction Pivot 보정
+
+> [!important] 본 전략 로드맵은 v2.5.0 작성 시점(2026-04-12) 기준입니다. v2.6.1 close-out + reviewer eval lane 분석 결과, 2026-04-19에 다음과 같이 재포지셔닝되었습니다. 본격 갱신된 실행 계획은 gnosis SSOT (`scout-phase-2c-2d-plan.md`)에 있습니다.
+
+### Pivot 결정 (3개)
+
+1. **SCOUT 1순위 정체성 = 갈래 A (Compliance/Audit 도구)** — EU CRA 2026/09 보고 의무 시작 timing + SCOUT의 deterministic + audit-ready 모트가 갈래 A에서만 1등 가능
+2. **갈래 B (Discovery Engine)는 보조** — 자율 discovery 항목(LLM 퍼즈 하네스 자동 생성, LLM4Decompile/GhidraMCP, Big Sleep 자율 에이전트, Foundation Model 파일럿)은 **external track**으로 이관. SCOUT는 evidence layer로 통합
+3. **Phase 2D 직진 보류 → Phase 2C+ (detection 보강 4-6주) insert** — reviewer eval lane recall 0.142857 / degenerate ROC / dedicated rerun 정체 직접 공략. Phase 2D 진입 Exit Gate 5개 임계값 통과 후 진입
+
+### SCOUT 정체성
+
+#### 갈래 A — Compliance/Audit 도구 (1순위)
+
+- **모트**: deterministic + SARIF 2.1.0 + CycloneDX 1.6 VEX + SLSA L2 + zero-dep + air-gap 배포 + 4 LLM driver 추상화 + MCP 서버
+- **시장**: EU CRA 2026/09 보고 의무 시작 (5개월 후) / FDA Section 524B / ISO 21434 / UN R155
+- **경쟁**: Finite State / Eclypsium / Binarly ($14M-$94M 펀딩, SaaS-only). **오픈소스 + audit-ready 조합은 SCOUT가 유일**
+
+#### 갈래 B — Discovery Engine (보조)
+
+- **현재 상태**: recall 14% / degenerate ROC. 자율 discovery는 external track으로 이관
+- **SCOUT 본체 유지 부분**: 42-stage pipeline 결정론, Ghidra P-code taint, AFL++ 통합, adversarial debate (LLM-adjudicated), Vul-RAG (CVE 시맨틱 매칭) — 모두 갈래 A의 evidence quality 보강
+
+### Phase 보정 매핑
+
+| 본 로드맵 | Pivot 후 |
+|---|---|
+| Phase 1 (Quick Wins, v2.5-v2.6) | **Completed** (LLM structured output, sink 11→28, EPSS, CRA mapping, GitHub Action 모두 v2.5.0에 들어감) |
+| Phase 1.5 (LATTE), 1.6 (LARA) | **Phase 2C+로 이관** (detection 보강 4-6주) |
+| Phase 2 (Architecture Leap, v3.0) | **Phase 2D'로 scope 좁힘** (2D.1, 2D.2, 2D.4a Vul-RAG만 SCOUT 본체 유지) |
+| Phase 2.3 (Multi-agent), 2.6 (Vul-RAG) | **Phase 2D'로 유지** |
+| Phase 2.4 (LLM 퍼즈 하네스), 2.5 (서비스 인식 퍼징), 2.7 (LLM4Decompile), 2.8 (GhidrAssistMCP) | **external track으로 이관** |
+| Phase 3.1 (Big Sleep), 3.10 (Foundation Model) | **external track으로 이관** |
+| Phase 3.7 (산업별 보고서) | **승격 1순위** (Phase 3'.1, EU CRA timing) |
+| Phase 3.2 (Cloud API), 3.3 (포트폴리오), 3.4 (CVE-Bench), 3.6 (LFwC), 3.8 (Greenhouse Tier 1.5), 3.9 (증분 분석) | Phase 3'에 유지 또는 deprioritize |
+
+### Phase 2C+ Insert (4-6주, 신규)
+
+reviewer eval lane의 detection 약점 직접 공략:
+
+| ID | 작업 | 규모 |
+|---|---|---|
+| 2C+.1 | LATTE Code Slicing (`taint_propagation.py`) | 1주 |
+| 2C+.2 | LARA URI/키 시맨틱 소스 (`enhanced_source.py`) | 1주 |
+| 2C+.3 | Sink 28→50+ 확장 + format string variable | 3일 |
+| 2C+.4 | Vendor 포맷별 extraction chain 확장 (5종) | 1-2주 |
+| 2C+.5 | finding diversity gate + dedicated rerun 진단 | 1주 |
+
+**Phase 2D 진입 Exit Gate**: recall ≥ 0.40 / evidence_tier ≥ 2 nonzero TP / finding diversity < 0.5 / dedicated rerun 1 driver success / corpus size ≥ 10
+
+### Pivot의 위험
+
+1. 갈래 A 1순위 결정은 인증 기관 / 컨설팅 채널 / reference customer 등 비기술 작업 부담 동반
+2. 갈래 B의 external track 합의는 별도 진행 필요
+3. NDSS/USENIX 논문 트랙 약화 리스크 — Phase 2D'에 2D.1 + 2D.2 유지로 한 편 분량 확보
 
 ---
 

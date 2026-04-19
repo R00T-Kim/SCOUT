@@ -337,17 +337,47 @@ v2.6.1 이후 외부 기여(@NightStalkers-160th) PR 2건을 머지. 둘 다 AFL
 
 > Reviewer eval lane local-7 완료: 7 local pairs / 14 runs, **recall 0.142857 / false-positive rate 0.142857** (`benchmark-results/pair-eval/pair_eval_summary.json`). R7000은 target CVE를 vulnerable/patched 모두에서 유지했고, 나머지 6쌍은 vulnerable miss + patched clean으로 나왔다.
 
-**2C.7 이후 권장 실행 순서** (live roadmap):
+**2C.7 이후 권장 실행 순서** (Pivot 2026-04-19 반영):
+
+> [!important] **Direction Pivot 2026-04-19**: reviewer eval lane 분석 (recall 0.142857 / degenerate ROC / dedicated rerun 정체) + SCOUT 정체성 갈림길 검토 결과, **Phase 2D 직진 보류 + Phase 2C+ (detection 보강 4-6주) insert + 갈래 A (Compliance/Audit) 1순위 재포지셔닝**이 채택되었습니다. 본격 SSOT 재배치는 gnosis 계획 문서를 참조하세요.
+
 1. **[B-2] E2E demo 확정** — `docs/r7000_e2e_demo.md`를 실측 artifact 기준으로 마감하고 reviewer walkthrough를 고정
 2. **[D] results overview 마감** — corpus baseline, pair eval, calibration, E2E demo를 한 문서에서 cross-link하고 reviewer 공유용 요약본으로 고정
-3. **Reviewer eval lane 확장** — gap pair(DIR-859 등) 수급 또는 fresh dedicated rerun으로 표본/driver 다양성을 확장
-4. **Phase 2D 진입** — 2D.1 → 2D.2 → 2D.3 → 2D.4 순으로 capability layer 착수
+3. **Phase 2C+ 진입** — 5개 detection 보강 항목 (4-6주)
+4. **Phase 3'.1 (산업별 보고서) 즉시 시작** — Phase 2C+와 완전 병렬, EU CRA 2026/09 보고 의무 5개월 timing
+5. **Phase 2D 진입 Exit Gate 통과 후 Phase 2D' 착수** (capability layer, scope 좁힘)
 
-**Phase 2D 요약** (8-12주, capability layer — 기존 Phase 2C였던 항목):
+**Phase 2C+ 요약** (4-6주, detection 보강 — Pivot 2026-04-19 insert):
+- 2C+.1 LATTE Code Slicing (`taint_propagation.py`)
+- 2C+.2 LARA URI/키 시맨틱 소스 식별 (`enhanced_source.py`)
+- 2C+.3 Sink 28→50+ 확장 + format string variable 검출 강화
+- 2C+.4 Vendor 포맷별 extraction chain 확장 (5종)
+- 2C+.5 finding diversity gate + dedicated rerun timeout 진단
+
+권장 실행 순서: 2C+.5 (측정 도구 먼저) → 2C+.3 (sink) → 2C+.1 (LATTE) → 2C+.2 (LARA) → 2C+.4 (vendor extraction)
+
+**Phase 2D 진입 Exit Gate** (5개 임계값 모두 통과 시 진입):
+- pair eval recall ≥ 0.40 (현재 0.142857)
+- evidence_tier ≥ 2개 tier nonzero TP (현재 `symbol_only`만)
+- finding diversity index < 0.5 (현재 1.0 — 모든 pair가 같은 finding)
+- dedicated reviewer rerun: 1개 driver(claude 또는 codex) success
+- pair corpus size ≥ 10 (현재 7)
+
+**Phase 2D' 요약** (4-6주, capability layer — scope 좁힘):
 - 2D.1 reasoning_trail + MCP 실전 루프 검증
-- 2D.2 Multi-agent exploit chain (VulnSage)
-- 2D.3 LLM 퍼즈 하네스 자동 생성
-- 2D.4 Vul-RAG / LLM4Decompile / GhidraMCP
+- 2D.2 Multi-agent exploit chain
+- 2D.4a Vul-RAG (CVE 시맨틱 매칭만)
+- ~~2D.3 LLM 퍼즈 하네스 자동 생성~~ → external track
+- ~~2D.4b LLM4Decompile / GhidraMCP~~ → external track
+
+**Phase 3' 요약** (재배치 2026-04-19, 갈래 A 우선):
+- **3'.1 산업별 보고서 (FDA Section 524B / EU CRA Annex I / ISO 21434 / UN R155)** — **승격 1순위**, Phase 2C.7만 의존, 즉시 착수 가능
+- 3'.2 CRA-compatible audit SaaS (전 SCOUT Cloud API, scope 좁힘)
+- 3'.3 LFwC 10,913 벤치마크
+- 3'.4 펌웨어 portfolio 관리
+- 3'.5 CVE-Bench 자동 평가
+- ~~3.1 Big Sleep 자율 에이전트~~ → external track
+- ~~3.6 Foundation Model 파일럿~~ → external track
 
 ---
 
