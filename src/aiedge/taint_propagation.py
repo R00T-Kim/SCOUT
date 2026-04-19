@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import cast
 
 from ._typing_helpers import safe_float, safe_int
+from .code_slicing import maybe_slice
 from .confidence_caps import (
     PCODE_VERIFIED_CAP,
     STATIC_CODE_VERIFIED_CAP,
@@ -305,7 +306,12 @@ def _build_taint_prompt(
     code_blocks = ""
     for fb in function_bodies:
         fname = fb.get("name", "unknown")
-        body = _truncate_text(fb.get("body", ""), max_chars=2000)
+        # Phase 2C+.1 (LATTE): when AIEDGE_LATTE_SLICING=1, replace the full
+        # body with a backward slice rooted at the sink call. Default-off so
+        # behaviour stays byte-identical when the env var is unset.
+        body_raw = fb.get("body", "")
+        body_sliced = maybe_slice(body_raw, sink_symbol)
+        body = _truncate_text(body_sliced, max_chars=2000)
         code_blocks += f"\n### {fname}\n```c\n{body}\n```\n"
 
     return (
