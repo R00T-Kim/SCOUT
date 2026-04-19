@@ -210,6 +210,44 @@ def _collect_stats(output_dir: Path) -> dict[str, Any]:
     }
 
 
+def _append_campaign_execution_limitations(
+    limitations: list[str],
+    *,
+    docker_rc: int | None,
+    docker_err: str,
+    stats: dict[str, Any],
+) -> None:
+    """Record AFL++ startup/execution failures that make a campaign incomplete."""
+    if docker_rc not in (None, 0):
+        limitations.append(f"docker_exit_{docker_rc}")
+
+    err_lc = docker_err.lower()
+    if "fork server handshake failed" in err_lc:
+        limitations.append("forkserver_handshake_failed")
+    if "invalid elf image" in err_lc:
+        limitations.append("target_arch_mismatch")
+
+    try:
+        execs_done = int(stats.get("execs_done", 0))
+    except (TypeError, ValueError):
+        execs_done = 0
+    if execs_done <= 0:
+        limitations.append("no_fuzzer_executions")
+
+
+def _campaign_completed(result: dict[str, Any]) -> bool:
+    """Return True only when AFL++ actually executed the target at least once."""
+    if result.get("skipped"):
+        return False
+    stats = result.get("stats", {})
+    if not isinstance(stats, dict):
+        return False
+    try:
+        return int(stats.get("execs_done", 0)) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Campaign execution for a single target
 # ---------------------------------------------------------------------------
@@ -401,6 +439,12 @@ def _run_campaign(
 
     # --- collect stats and crashes ---------------------------------------
     stats = _collect_stats(output_dir)
+    _append_campaign_execution_limitations(
+        limitations,
+        docker_rc=docker_rc,
+        docker_err=docker_err,
+        stats=stats,
+    )
 
     crashes_dir = output_dir / "default" / "crashes"
     crash_files: list[dict] = []
@@ -606,7 +650,7 @@ class FuzzCampaignStage:
 
             campaign_results.append(result)
 
-            if not result.get("skipped"):
+            if _campaign_completed(result):
                 targets_completed += 1
             if result.get("limitations"):
                 limitations.extend(result["limitations"])
