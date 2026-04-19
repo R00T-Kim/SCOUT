@@ -5,6 +5,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **FDA Section 524B compatibility mapping (Phase 3'.1 step B-2)** (`docs/compliance_mapping/fda_section_524b.md`). Maps SCOUT outputs to the four §524B(b) statutory obligations (postmarket vulnerability monitoring plan, secure design/develop/maintain processes, postmarket updates/patches, SBOM) and to the September 2023 FDA premarket cybersecurity guidance content elements (security objectives, threat modelling, security risk management, cybersecurity testing, architecture views, SBOM, vulnerability management, labelling, postmarket plan). Coverage is documented per element with explicit "out of scope" callouts for sponsor-side QMS deliverables. Disclaimer reuses the directory-wide "compatible with" wording rule.
+- **ISO/SAE 21434 compatibility mapping (Phase 3'.1 step B-3)** (`docs/compliance_mapping/iso_21434.md`). Maps SCOUT outputs to ISO/SAE 21434:2021 work products across clauses 8 (continual cybersecurity activities), 9 (concept), 10 (product development), 11 (cybersecurity validation), 13 (operations and maintenance), and 15 (TARA methods). Identifies which work products are tool-friendly (WP-08-01..04, WP-10-04, WP-10-05, WP-13-02) versus manufacturer-side narratives (WP-09-02, WP-10-01, WP-10-02, etc.).
+- **UN R155 compatibility mapping (Phase 3'.1 step B-3)** (`docs/compliance_mapping/un_r155.md`). Maps SCOUT outputs to UN R155 §7.2 (CSMS) and §7.3 (vehicle-type approval) requirements, plus per-threat guidance for the 15 most-relevant Annex 5 threat categories (manipulation, replay, malware insertion, network-design vulnerabilities, etc.). Co-published with the ISO/SAE 21434 mapping per the standard / regulation pairing.
+
 ### Changed
 
 - **CRA mapping relocated into `docs/compliance_mapping/`** (`docs/compliance_mapping/cra_annex_i.md`, was `docs/cra_compliance_mapping.md`). Phase 3'.1 step B-1 sets up a four-document compliance-mapping suite (CRA Annex I / FDA Section 524B / ISO 21434 / UN R155); the CRA file ships first as the canonical baseline format, with sibling placeholders cross-linked from its header. References updated in README.md, README.ko.md, docs/status.md, CHANGELOG.md, and scripts/check_doc_consistency.py. The disclaimer is tightened to spell out that the "compatible with" wording is mandatory throughout the directory — any "compliant with" / "compliance" / "ready" substitution is rejected by `check_doc_consistency.py`.
