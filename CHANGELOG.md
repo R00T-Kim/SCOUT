@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`compliance_report` stage (Phase 3'.1 step B-4)** (`src/aiedge/compliance_report.py`, `src/aiedge/stage_registry.py`, `src/aiedge/stage_dag.py`, `tests/test_compliance_report.py`). New 43rd pipeline stage that emits four per-standard markdown reports (`<run_dir>/stages/compliance_report/{cra_annex_i,fda_524b,iso_21434,un_r155}_report.md`) plus a structured `stage.json` evidence summary. Each report aggregates per-run counts from sbom / cve_scan / findings / cert_analysis / init_analysis / fs_permissions and links back to the canonical mapping document. Stage degrades to `partial` (without crashing) when no upstream artefacts are present, ensuring it always emits the four reports. Registered as `"compliance_report"` in `_STAGE_FACTORIES`; `STAGE_DEPS` records dependencies on `exploit_policy`, `sbom`, and `cve_scan` so it always runs after the other evidence-producing stages. _(8 new tests in `tests/test_compliance_report.py`.)_
+
 ### Fixed
 
 - **AFL++ Docker fuzzing artifact ownership** (`fuzz_campaign.py`, PR #7). The Docker container is now invoked with the host user's uid/gid (`--user $(id -u):$(id -g)`), so files written under `stages/fuzzing/*/afl_output/` remain readable by SCOUT after the container exits. Previously, `_collect_stats` would raise `PermissionError: [Errno 13] Permission denied: .../fuzzer_stats` on any run that entered the fuzzing stage because the directory was created as `drwx------ root:root`. Validated on the OpenWrt Archer C7 v5 run (`2026-04-13_1014_sha256-bf9eeb5af38a`), where the pre-existing `PermissionError` no longer reproduces and `afl_output/default/` is now owned by the invoking user.

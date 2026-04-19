@@ -649,6 +649,18 @@ def _make_csource_identification_stage(
     return CSourceIdentificationStage(no_llm=no_llm)
 
 
+def _make_compliance_report_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .compliance_report import ComplianceReportStage
+
+    _ = info, source_input_path, remaining_s
+    return ComplianceReportStage(no_llm=no_llm)
+
+
 # All stages registered here are included in the full pipeline in run.py:analyze_run().
 # firmware_lineage runs after ExtractionStage (depends on extraction output).
 # fuzzing runs in the exploit section (manifest_profile == "exploit") near DynamicValidationStage.
@@ -695,6 +707,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "exploit_autopoc": _make_exploit_autopoc_stage,
     "poc_validation": _make_poc_validation_stage,
     "exploit_policy": _make_exploit_policy_stage,
+    "compliance_report": _make_compliance_report_stage,
 }
 
 
