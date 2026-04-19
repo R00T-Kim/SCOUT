@@ -46,7 +46,7 @@ _RETRYABLE_TOKENS: tuple[str, ...] = (
 
 _SINK_SYMBOLS: frozenset[str] = frozenset(
     {
-        # -- Command injection --
+        # -- CWE-78 command / process injection --
         "system",
         "popen",
         "execve",
@@ -56,7 +56,10 @@ _SINK_SYMBOLS: frozenset[str] = frozenset(
         "execlp",
         "execle",
         "execv",
-        # -- Buffer overflow (string) --
+        "wordexp",
+        "posix_spawn",
+        "posix_spawnp",
+        # -- CWE-120/121 buffer overflow (string) --
         "strcpy",
         "sprintf",
         "strcat",
@@ -64,23 +67,55 @@ _SINK_SYMBOLS: frozenset[str] = frozenset(
         "strncat",
         "gets",
         "vsprintf",
-        # -- Buffer overflow (memory) --
+        # -- CWE-120 buffer overflow (memory) --
         "memcpy",
         "memmove",
-        # -- Format string --
+        # -- CWE-134 format string --
         "printf",
         "fprintf",
         "syslog",
         "vprintf",
         "vfprintf",
         "snprintf",
-        # -- Dangerous input parsing --
+        "vsnprintf",
+        "dprintf",
+        "vdprintf",
+        # -- CWE-20 input parsing --
         "scanf",
         "sscanf",
         "fscanf",
-        # -- Dynamic loading / path traversal --
-        "dlopen",
+        # -- CWE-22 / CWE-73 path traversal --
+        "fopen",
+        "open",
+        "openat",
+        "freopen",
+        "chdir",
         "realpath",
+        # -- CWE-426 untrusted search path / dynamic loading --
+        "dlopen",
+        "dlsym",
+        "dlmopen",
+        # -- CWE-732 incorrect permission assignment --
+        "chmod",
+        "fchmod",
+        "chown",
+        "fchown",
+        "lchown",
+        # -- CWE-377 insecure temporary file --
+        "mktemp",
+        "tmpnam",
+        "tempnam",
+        "tmpfile",
+        # -- CWE-250 / CWE-269 privilege management --
+        "chroot",
+        "setuid",
+        "seteuid",
+        "setgid",
+        "setegid",
+        # -- CWE-454 environment injection --
+        "putenv",
+        "setenv",
+        "unsetenv",
     }
 )
 
@@ -92,6 +127,15 @@ _FORMAT_STRING_SINKS: frozenset[str] = frozenset(
         "vprintf",
         "vfprintf",
         "snprintf",
+        "vsnprintf",
+        "dprintf",
+        "vdprintf",
+        "swprintf",
+        "vswprintf",
+        "wprintf",
+        "vwprintf",
+        "fwprintf",
+        "vfwprintf",
     }
 )
 
@@ -195,12 +239,23 @@ def _is_format_string_variable(
     sink_sym: str,
     decompiled_body: str,
 ) -> bool:
-    """Return True if sink_sym is called with a variable (non-literal) format string."""
+    """Return True if sink_sym is called with a variable (non-literal) format string.
+
+    Recognised variable forms (anything whose first argument is *not* a string
+    literal): bare identifiers (``printf(buf)``), function-call results
+    (``printf(get_str())``), struct field access (``printf(obj->field)`` /
+    ``printf(obj.field)``), array subscripts (``printf(arr[i])``), C-style
+    casts (``printf((char *) buf)``), parenthesised expressions including
+    ternaries (``printf((cond ? a : b))``).
+    """
     if sink_sym not in _FORMAT_STRING_SINKS:
         return False
-    # Pattern: printf(variable...) vs printf("literal"...)
+    # Match the sink call with a first argument whose first non-whitespace
+    # character is anything other than a double-quote (string literal). Any
+    # non-literal first argument — identifier, function call, ``(`` for cast or
+    # ternary, ``*``/``&`` for pointer operations — is treated as variable.
     variable_fmt_pat = re.compile(
-        r"\b" + re.escape(sink_sym) + r"\s*\(\s*[a-zA-Z_]",
+        r"\b" + re.escape(sink_sym) + r'\s*\(\s*[^"\s\)]',
     )
     return bool(variable_fmt_pat.search(decompiled_body))
 
