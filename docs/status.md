@@ -208,7 +208,7 @@ v2.6.1 이후 외부 기여(@NightStalkers-160th) PR 2건을 머지. 둘 다 AFL
 
 ### CI/CD & 문서
 - **GitHub Action**: `.github/actions/scout-scan/` (composite, SARIF + Security 탭 업로드)
-- **CRA 매핑**: `docs/cra_compliance_mapping.md` (EU CRA Annex I 12개 요구사항)
+- **CRA 매핑**: `docs/compliance_mapping/cra_annex_i.md` (EU CRA Annex I 12개 요구사항)
 - **전략 로드맵**: `docs/strategic_roadmap_2026.md` (3-Phase plan)
 
 ### R7000 검증 (2026-04-13)
