@@ -14,6 +14,7 @@ from typing import cast
 
 from .path_safety import assert_under_dir
 from .schema import JsonValue
+from .sbom import _extract_ascii_runs
 from .stage import StageContext, StageOutcome, StageStatus
 
 _SCHEMA_VERSION = "enhanced-source-v1"
@@ -489,7 +490,21 @@ class EnhancedSourceStage:
             # Confidence stays at the SYMBOL_COOCCURRENCE cap (0.40) because
             # string presence alone does not prove reachability; downstream
             # taint propagation can promote individual matches.
-            for pattern, kind in _extract_uri_key_sources(bin_path, symbols):
+            ascii_strings: set[str] = set()
+            try:
+                bin_full = (run_dir / bin_path).resolve()
+                assert_under_dir(run_dir, bin_full)
+                if bin_full.is_file():
+                    with bin_full.open("rb") as fh:
+                        data = fh.read(2 * 1024 * 1024)
+                    txt = _extract_ascii_runs(data)
+                    if txt:
+                        ascii_strings = set(txt.split())
+            except Exception:
+                ascii_strings = set()
+            for pattern, kind in _extract_uri_key_sources(
+                bin_path, symbols, ascii_strings
+            ):
                 sources.append(
                     {
                         "address": "0x0",

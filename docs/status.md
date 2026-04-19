@@ -348,20 +348,22 @@ v2.6.1 이후 외부 기여(@NightStalkers-160th) PR 2건을 머지. 둘 다 AFL
 5. **Phase 2D 진입 Exit Gate 통과 후 Phase 2D' 착수** (capability layer, scope 좁힘)
 
 **Phase 2C+ 요약** (4-6주, detection 보강 — Pivot 2026-04-19 insert):
-- 2C+.1 LATTE Code Slicing (`taint_propagation.py`)
-- 2C+.2 LARA URI/키 시맨틱 소스 식별 (`enhanced_source.py`)
-- 2C+.3 Sink 28→50+ 확장 + format string variable 검출 강화
-- 2C+.4 Vendor 포맷별 extraction chain 확장 (5종)
-- 2C+.5 finding diversity gate + dedicated rerun timeout 진단
+- 2C+.1 LATTE Code Slicing (`taint_propagation.py`) — **landed PR #9** (opt-in via `AIEDGE_LATTE_SLICING=1`)
+- 2C+.2 LARA URI/키 시맨틱 소스 식별 (`enhanced_source.py`) — **landed PR #9**; follow-up `ascii_strings` wire-through 적용됨 (`CHANGELOG [Unreleased] Fixed`)
+- 2C+.3 Sink 28→50+ 확장 + format string variable 검출 강화 — **landed PR #9**
+- 2C+.4 Vendor 포맷별 extraction chain 확장 (5종) — pending (유일한 미완)
+- 2C+.5 finding diversity gate + dedicated rerun timeout 진단 — **landed PR #9**
 
 권장 실행 순서: 2C+.5 (측정 도구 먼저) → 2C+.3 (sink) → 2C+.1 (LATTE) → 2C+.2 (LARA) → 2C+.4 (vendor extraction)
 
 **Phase 2D 진입 Exit Gate** (5개 임계값 모두 통과 시 진입):
-- pair eval recall ≥ 0.40 (현재 0.142857)
+- pair eval recall ≥ 0.40 (summary-reuse baseline 0.142857 / 1차 측정 Codex 6h LATTE-off + LARA misconnected 14/14 = 0.142857)
 - evidence_tier ≥ 2개 tier nonzero TP (현재 `symbol_only`만)
-- finding diversity index < 0.5 (현재 1.0 — 모든 pair가 같은 finding)
-- dedicated reviewer rerun: 1개 driver(claude 또는 codex) success
-- pair corpus size ≥ 10 (현재 7)
+- finding diversity index < 0.5 (summary-reuse baseline 1.0 / 1차 측정 1.0, 공식 `PAIR_EVAL_DIVERSITY` gate FAIL)
+- dedicated reviewer rerun: 1개 driver(claude 또는 codex) success — **통과 (Codex 6h LATTE-off 14/14 완주, 2026-04-19 ~ 2026-04-20)**
+- pair corpus size ≥ 10 (현재 7, 2C+.4로 확장 예정)
+
+**Exit Gate 1차 측정 (Codex baseline, 2026-04-19→20)**: 11h 1min wall-clock, 14/14 rows success, avg 93min/run. 공식 `scripts/release_gate.sh` 결과 `RELEASE_GOVERNANCE=FAIL` (`PAIR_EVAL_DIVERSITY` + `QUALITY_POLICY` + `CONTRACT_FINAL` 3개 sub-gate FAIL). 이 run은 `AIEDGE_LATTE_SLICING` 미설정 + 2C+.2 LARA `ascii_strings` 단락 상태였으므로 2C+ 핵심 detection 축이 비활성. 즉시 재측정 lane 2개를 `AIEDGE_LATTE_SLICING=1` + LARA follow-up fix 적용으로 병렬 기동: `benchmark-results/pair-eval-dedicated-local7-codex-6h-r2-latte-on/` (codex) + `pair-eval-dedicated-local7-claude-6h-r2-latte-on/` (claude-code).
 
 **Phase 2D' 요약** (4-6주, capability layer — scope 좁힘):
 - 2D.1 reasoning_trail + MCP 실전 루프 검증
