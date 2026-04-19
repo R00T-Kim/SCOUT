@@ -28,7 +28,7 @@ DOC_FILES = [
     "docs/status.md",
     "docs/strategic_roadmap_2026.md",
     "docs/blueprint.md",
-    "docs/cra_compliance_mapping.md",
+    "docs/compliance_mapping/cra_annex_i.md",
     "pyproject.toml",
 ]
 
