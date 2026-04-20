@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.6.1-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.7.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -45,11 +45,12 @@
 > **Tier 1 numbers in this README now reflect the fresh v2.6.1 corpus refresh** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM numbers are still carry-over (`v2.3.0`, 36 firmware) until the pair-eval lane lands. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
 
 > [!TIP]
-> **What's new in v2.6.1** (Phase 2C close-out)
-> - **Fresh corpus refresh completed** — Tier 1 baseline is now `1110 success / 4 partial / 9 fatal` over 1,123 targets (`docs/carry_over_benchmark_v2.6.md`).
-> - **Synthesis lineage + SBOM schema fixes landed** — top-level synthesis findings inherit matched downstream lineage, and vendor-stock SBOM detection no longer depends on legacy schema keys.
-> - **Evidence / contract hardening landed** — `evidence_tier`, stage contract validation, and execution provenance are all part of the shipped surface.
-> - **Release governance tightened** — confidence semantic break and LLM driver degradation are now documented explicitly instead of implied by code paths.
+> **What's new in v2.7.0** (Phase 2C+ close-out + compliance-track landing + scenario-C sealing)
+> - **Phase 2C+ detection reinforcement landed** — LATTE backward slicing (opt-in via `AIEDGE_LATTE_SLICING=1`), LARA pattern-based source identification (URI / CGI / config-key, 50 patterns, with an `ascii_strings` wire-through follow-up fix), sink coverage 28 → 51+ with format-string variable detection strengthened, and a `PAIR_EVAL_DIVERSITY` release-gate that detects degenerate pair-eval finding-id coverage.
+> - **Phase 3'.1 compliance mapping suite shipped** — four per-standard compatibility documents (`docs/compliance_mapping/{cra_annex_i,fda_524b,iso_21434,un_r155}.md`) plus a new 43rd pipeline stage `compliance_report` that emits the four standards' reports under each run.
+> - **Reviewer-evaluation lane officially re-measured** — Codex LATTE-on lane hit 14/14 at 2026-04-20 13:33 KST, `pairs=7 / recall=0.1429 / fpr=0.1429`, finding diversity `1.000` (14/14 rows on the single synthesis finding id). Results stay identical to the summary-reuse baseline to all decimal places. Full scorecard in `docs/v2.7.0_release_plan.md`.
+> - **Scenario C sealed per the Pivot 2026-04-19 roadmap** — Phase 2D' is deferred (option D), SCOUT adopts the compliance-led identity as its primary track. See `wiki/projects/scout-direction-pivot-2026-04.md` and `wiki/projects/scout-cra-audit-saas-scope.md` for the full rationale and the 3'.2 CRA-compatible audit SaaS scope draft.
+> - **Operational stability proven over a 12h+ long-running job** — `nohup setsid` detach + real-time stdout redirect + sequential lane launcher survives SSH disconnects and completes reviewer-lane work without OOM regression (the failure mode of the 2026-04-19 baseline lanes).
 
 ---
 

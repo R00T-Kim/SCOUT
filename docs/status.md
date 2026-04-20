@@ -363,7 +363,23 @@ v2.6.1 이후 외부 기여(@NightStalkers-160th) PR 2건을 머지. 둘 다 AFL
 - dedicated reviewer rerun: 1개 driver(claude 또는 codex) success — **통과 (Codex 6h LATTE-off 14/14 완주, 2026-04-19 ~ 2026-04-20)**
 - pair corpus size ≥ 10 (현재 7, 2C+.4로 확장 예정)
 
-**Exit Gate 1차 측정 (Codex baseline, 2026-04-19→20)**: 11h 1min wall-clock, 14/14 rows success, avg 93min/run. 공식 `scripts/release_gate.sh` 결과 `RELEASE_GOVERNANCE=FAIL` (`PAIR_EVAL_DIVERSITY` + `QUALITY_POLICY` + `CONTRACT_FINAL` 3개 sub-gate FAIL). 이 run은 `AIEDGE_LATTE_SLICING` 미설정 + 2C+.2 LARA `ascii_strings` 단락 상태였으므로 2C+ 핵심 detection 축이 비활성. 즉시 재측정 lane 2개를 `AIEDGE_LATTE_SLICING=1` + LARA follow-up fix 적용으로 병렬 기동: `benchmark-results/pair-eval-dedicated-local7-codex-6h-r2-latte-on/` (codex) + `pair-eval-dedicated-local7-claude-6h-r2-latte-on/` (claude-code).
+**Exit Gate 1차 측정 (Codex baseline, 2026-04-19→20)**: 11h 1min wall-clock, 14/14 rows success, avg 93min/run. 공식 `scripts/release_gate.sh` 결과 `RELEASE_GOVERNANCE=FAIL` (`PAIR_EVAL_DIVERSITY` + `QUALITY_POLICY` + `CONTRACT_FINAL` 3개 sub-gate FAIL). 이 run은 `AIEDGE_LATTE_SLICING` 미설정 + 2C+.2 LARA `ascii_strings` 단락 상태였으므로 2C+ 핵심 detection 축이 비활성.
+
+**Exit Gate 2차 측정 공식 봉인 (Codex LATTE-on, 2026-04-20)**: `benchmark-results/pair-eval-dedicated-local7-codex-6h-r2-latte-on/` 14/14 완주 (13:33 KST, 12h 45min wall-clock). `AIEDGE_LATTE_SLICING=1` + LARA `ascii_strings` follow-up fix 모두 반영된 상태. 결과:
+- `scripts/score_pair_corpus.py --pairs benchmarks/pair-eval/pairs.json` → `{"pairs": 7, "recall": 0.142857, "fpr": 0.142857}` — summary-reuse baseline과 소수점 이하까지 **완전 동일**
+- `pair_eval_findings.csv` 14개 row 전부 `aiedge.findings.web.exec_sink_overlap` 단일 ID (`finding_diversity_index = 1.000`)
+- `scripts/release_gate.sh` → `RELEASE_GOVERNANCE=FAIL` (PAIR_EVAL_DIVERSITY / QUALITY_POLICY / CONTRACT_FINAL sub-gate FAIL)
+
+**Phase 2D' Entry Gate 5개 scorecard 최종**:
+- Gate 1 recall ≥ 0.40 → 0.143 **FAIL**
+- Gate 2 tier variation ≥ 2 nonzero TP tiers → 1 **FAIL**
+- Gate 3 finding diversity < 0.5 → 1.000 **FAIL**
+- Gate 4 dedicated rerun ≥ 1/N success → 14/14 **PASS**
+- Gate 5 pair corpus size ≥ 10 → 7 **FAIL**
+
+**시나리오 C 공식 봉인**: Pivot 2026-04-19의 "변동 없음 → 2C+ 전략 재검토" 시나리오 채택 확정. Option D (Phase 2D' deferred, 갈래 A 올인)로 로드맵 이동. 근본 원인은 `findings.py`의 primary-finding 선택이 synthesis-stage 합성 finding (`web.exec_sink_overlap`) 하나만 선택한다는 점 — LARA source 확장(0→21-86 hits/run)과 LATTE slicing은 evidence를 풍부하게 만들지만 finding ID 다양성에는 기여하지 못함. 이 전체 분석은 `docs/v2.7.0_release_plan.md` + `wiki/projects/scout-direction-pivot-2026-04.md` + `wiki/projects/scout-cra-audit-saas-scope.md`에 기록됨. Claude LATTE-on lane은 Claude Pro/Max 플랜의 5h rolling usage quota 소진(`"You've hit your limit · resets 5am (Asia/Seoul)"`)으로 `llm_call_failures=100/100` 발생 후 폐기 (driver-level noise, 재측정 결과와 무관).
+
+**v2.7.0 tag 발행 조건 충족**: 공식 scorecard가 release note에 인용 가능한 상태. 후속 v2.7.1은 2C+.4 vendor extraction chain 확장 (DIR-859 / RT-AC68U / WRT1900ACS / DIR-878 + 1종 → corpus 7→10+) + 3'.1 B-5 release tag로 bundle 예정.
 
 **Phase 2D' 요약** (4-6주, capability layer — scope 좁힘):
 - 2D.1 reasoning_trail + MCP 실전 루프 검증
