@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.7.1] — 2026-04-22
+
 ### Added
 
 - **Phase 2C+.4 vendor extraction chain expansion** — pair-eval corpus grows 7 → 12 with five new vendor/model pairs covering D-Link DIR-859, D-Link DIR-878, ASUS RT-AC68U, Linksys WRT1900AC v2, and Linksys EA6700 (`benchmarks/pair-eval/pairs.json`). Combined with the existing 7-pair baseline, the manifest now satisfies Phase 2D' Entry Gate 5 (corpus ≥ 10) by registration alone. Measurement under `--no-llm` full pipeline at `benchmark-results/pair-eval-12pair-mixed/` shifts the scorecard from v2.7.0's **1/5 PASS** to **2/5 PASS** (Gate 4 Rerun + Gate 5 Corpus). Gates 1 (recall 0.143 → **0.167**, +17% relative), 2 (tier variation, unchanged at 1 nonzero TP tier), and 3 (diversity 1.000 → **0.917**) still FAIL. The new TP/FP pair (DIR-859 vuln + patched both hit `aiedge.findings.web.exec_sink_overlap`) corroborates the v2.7.0 diagnosis that `findings.py`'s single-synthesis-finding selection bottleneck remains the structural limit on Gate 1/3. An intermediate measurement under partial WRT1900AC extractions (1200s budget) showed Gate 2 transiently PASS due to `aiedge.findings.analysis_incomplete` populating the `unknown` tier; the figure of record is the ok-state measurement after the 2400-second budget rerun.

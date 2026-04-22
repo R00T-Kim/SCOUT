@@ -45,12 +45,12 @@
 > **README의 Tier 1 수치는 이제 fresh v2.6.1 corpus refresh 기준입니다** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM 수치는 pair-eval lane이 닫히기 전까지는 여전히 carry-over (`v2.3.0`, 36 firmware)입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
 
 > [!TIP]
-> **v2.7.0 핵심 변화** (Phase 2C+ close-out + compliance track landing + 시나리오 C 봉인)
-> - **Phase 2C+ detection 보강 머지** — LATTE backward slicing (`AIEDGE_LATTE_SLICING=1` opt-in), LARA 패턴 기반 source identification (URI / CGI / config-key 50 패턴, `ascii_strings` wire-through follow-up fix 포함), sink 커버리지 28 → 51+ (format-string variable 검출 강화), pair-eval finding-id 분포가 degenerate일 때 잡는 `PAIR_EVAL_DIVERSITY` release gate 추가.
-> - **Phase 3'.1 compliance mapping 4종 + stage 출범** — `docs/compliance_mapping/{cra_annex_i,fda_524b,iso_21434,un_r155}.md` 4-document suite와 43번째 pipeline stage `compliance_report` (run마다 4 standard별 markdown report 자동 생성) 머지.
-> - **Reviewer-evaluation lane 공식 재측정** — Codex LATTE-on lane이 2026-04-20 13:33 KST에 14/14 완주. `pairs=7 / recall=0.1429 / fpr=0.1429`, finding diversity `1.000` (14/14 전부 synthesis finding id 단일). summary-reuse baseline과 소수점 이하까지 동일. 전체 scorecard는 `docs/v2.7.0_release_plan.md` 참조.
-> - **Pivot 2026-04-19의 시나리오 C 봉인** — Phase 2D'는 deferred (option D), SCOUT은 compliance-led identity를 primary track으로 확정. 상세 근거와 3'.2 CRA-compatible audit SaaS scope 초안은 `wiki/projects/scout-direction-pivot-2026-04.md` 및 `wiki/projects/scout-cra-audit-saas-scope.md` 참조.
-> - **12시간+ long-running job의 operational stability 검증** — `nohup setsid` detach + 실시간 stdout redirect + 순차 lane launcher 조합으로 SSH 끊어지거나 외부 interruption이 있어도 reviewer lane이 OOM regression 없이 완주 (2026-04-19 baseline lane의 실패 모드가 재발하지 않음을 입증).
+> **v2.7.1 핵심 변화** (Phase 2C+.4 vendor corpus 확장 — v2.7.0 시나리오 C의 정량적 정련)
+> - **Pair-eval corpus 7 → 12 pair로 확장** — 신규 5종: D-Link DIR-859 (CVE-2019-17621), D-Link DIR-878 (vendor advisory), ASUS RT-AC68U (CVE-2020-15498), Linksys WRT1900AC v2 (progression), Linksys EA6700 (progression). Manifest 등록만으로 Phase 2D' Entry Gate 5 (corpus ≥ 10) 통과.
+> - **Phase 2D' Entry Gate scorecard: 1/5 → 2/5 PASS** (Gate 4 Rerun + Gate 5 Corpus). Gate 1 recall 0.143 → 0.167 (+17% rel) 개선되었지만 여전히 FAIL; Gate 2 (tier 변별력)과 Gate 3 (finding diversity 0.917)도 FAIL 유지. 신규 TP/FP가 동일 `aiedge.findings.web.exec_sink_overlap`에 매핑됨 (DIR-859 vuln + patched 모두) — v2.7.0 진단 ("`findings.py` single-synthesis-finding selection이 Gate 1/3 구조적 한계") 재확인.
+> - **정직한 figure-of-record 측정 원칙** — 1차 측정에서 WRT1900AC partial extraction이 만든 `aiedge.findings.analysis_incomplete`가 `unknown` tier를 채워 Gate 2가 일시적으로 PASS로 보였음. `--time-budget-s 2400` 재실행으로 ok 전환 후 unknown TP 소멸, Gate 2 baseline (FAIL)으로 회귀. 정직한 figure of record는 ok 측정. 상세는 `docs/v2.7.1_release_plan.md` 참조.
+> - **Scorer 안정성 fix** — `scripts/score_pair_corpus.py`가 누락된 pair run에 대해 `StopIteration`으로 abort 하지 않고 graceful-skip (`vulnerable_status="missing"` / `patched_status="missing"` 기록 후 분모에서 자연 제외). corpus 확장 / partial-coverage 측정이 release gate를 더 이상 크래시하지 않음.
+> - **Pivot Option D (compliance-led identity) 유지** — v2.7.1은 v2.7.0 시나리오 C의 정량적 정련이지 re-pivot 아님. v2.7.0의 `compliance_report` stage와 4 standard mapping은 변경 없음.
 
 ---
 
