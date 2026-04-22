@@ -98,6 +98,76 @@
         "firmware_path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_US__V4_180425.zip",
         "sha256": "71f633b05ee34a258b1f10dfdc2af489a3f5c556a9f3bceaf79bd317cea15f06"
       }
+    },
+    {
+      "pair_id": "dlink-dir859-cve-2019-17621",
+      "vendor": "dlink",
+      "model": "DIR-859 RevA",
+      "cve_id": "CVE-2019-17621",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_1.05B03.zip",
+        "sha256": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_1.07B03_HOTFIX.zip",
+        "sha256": "0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664"
+      }
+    },
+    {
+      "pair_id": "dlink-dir878-buffer-overflow-hotfix",
+      "vendor": "dlink",
+      "model": "DIR-878 RevA",
+      "cve_id": "DLINK-DIR878-BUFFER-OVERFLOW-HOTFIX",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR-878_REVA_FIRMWARE_v1.30B08.zip",
+        "sha256": "2bcd87ef190497b521c44eec390234e8f49f5b534df32506dbc5004241924bb7"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR-878_REVA_FIRMWARE_v1.30B08_FIX_BUFFER_OVERFLOW_HOTFIX.zip",
+        "sha256": "1ecf5f7b8d9a10aafeda2cf303bd427862ce2565cf7df1d4d9e6eaa8592c72c5"
+      }
+    },
+    {
+      "pair_id": "asus-rtac68u-cve-2020-15498",
+      "vendor": "asus",
+      "model": "RT-AC68U",
+      "cve_id": "CVE-2020-15498",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/asus/FW_RT_AC68U_300438432799.zip",
+        "sha256": "f83e86d537596b8ccb0e175a5c944d860cdbcf92de0829aece25d9e9a13a47df"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/asus/FW_RT_AC68U_300438640558.zip",
+        "sha256": "6cea0a7a953af29c4af417e2e3b8de9c696aa2548cd27791368024d152693773"
+      }
+    },
+    {
+      "pair_id": "linksys-wrt1900acv2-progression",
+      "vendor": "linksys",
+      "model": "WRT1900AC v2",
+      "cve_id": "LINKSYS-WRT1900ACV2-PROGRESSION-2.0.8-2.0.9",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/linksys/9735ddc4661487aee1c1a57d851dd6bb.img",
+        "sha256": "6fc0f0db2d6870b9bd56d0549536c8baa78473d1091956d18a73fb033b212693"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/linksys/237fbe6f8471b78843b8506cf9782722.img",
+        "sha256": "019ac476a7a0462baedfb85bb3de1a0fd314aa937f681468aa708ad9e1e66405"
+      }
+    },
+    {
+      "pair_id": "linksys-ea6700-progression",
+      "vendor": "linksys",
+      "model": "EA6700",
+      "cve_id": "LINKSYS-EA6700-PROGRESSION-1.1.40-1.1.41",
+      "vulnerable": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/linksys/FW_EA6700_1.1.40.176451_prod.img",
+        "sha256": "b933ab7e90979379368ac0edced22319f8813a0f4aff9f8abd372b738ee3e2ef"
+      },
+      "patched": {
+        "firmware_path": "aiedge-inputs/firmae-benchmark/linksys/FW_EA6700_1.1.41.183873_prod.img",
+        "sha256": "072e35e5ec2ce061001992644d83f267c3aea08c622311dd56b44f43b2663394"
+      }
     }
   ]
 }

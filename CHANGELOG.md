@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Phase 2C+.4 vendor extraction chain expansion** — pair-eval corpus grows 7 → 12 with five new vendor/model pairs covering D-Link DIR-859, D-Link DIR-878, ASUS RT-AC68U, Linksys WRT1900AC v2, and Linksys EA6700 (`benchmarks/pair-eval/pairs.json`). Combined with the existing 7-pair baseline, the manifest now satisfies Phase 2D' Entry Gate 5 (corpus ≥ 10) by registration alone. Measurement under `--no-llm` full pipeline at `benchmark-results/pair-eval-12pair-mixed/` shifts the scorecard from v2.7.0's **1/5 PASS** to **2/5 PASS** (Gate 4 Rerun + Gate 5 Corpus). Gates 1 (recall 0.143 → **0.167**, +17% relative), 2 (tier variation, unchanged at 1 nonzero TP tier), and 3 (diversity 1.000 → **0.917**) still FAIL. The new TP/FP pair (DIR-859 vuln + patched both hit `aiedge.findings.web.exec_sink_overlap`) corroborates the v2.7.0 diagnosis that `findings.py`'s single-synthesis-finding selection bottleneck remains the structural limit on Gate 1/3. An intermediate measurement under partial WRT1900AC extractions (1200s budget) showed Gate 2 transiently PASS due to `aiedge.findings.analysis_incomplete` populating the `unknown` tier; the figure of record is the ok-state measurement after the 2400-second budget rerun.
+
+### Fixed
+
+- **`scripts/score_pair_corpus.py` raised StopIteration on missing pair runs** — when a 12-pair manifest was scored against a 7-pair `run_index.json` the `next(...)` lookup for `vulnerable`/`patched` rows aborted the run. The scorer now records pairs with absent runs as `vulnerable_status="missing"` / `patched_status="missing"` and excludes them from recall/FPR denominators (graceful skip), so corpus growth and partial-coverage measurements no longer crash the release gate.
+
 ## [2.7.0] — 2026-04-20
 
 Phase 2C+ close-out release. Pivot 2026-04-19 roadmap's detection-strengthening insert (LATTE backward slicing, LARA pattern-based source identification, sink coverage expansion, finding diversity gate) is merged, with a follow-up wire-through fix for the LARA `ascii_strings` path that was silently inert on the initial landing. The compliance-led track (Phase 3'.1 steps B-1..B-4) lands its four standard mappings (CRA Annex I / FDA Section 524B / ISO/SAE 21434 / UN R155) plus the `compliance_report` pipeline stage. The reviewer-evaluation lane is formally re-measured under these changes at `benchmark-results/pair-eval-dedicated-local7-codex-6h-r2-latte-on/` (Codex driver, 14/14 success, 12h 45min wall-clock), and the official numbers are recorded in `docs/v2.7.0_release_plan.md` for release-note reference.
