@@ -33,7 +33,7 @@
 | 본 로드맵 | Pivot 후 |
 |---|---|
 | Phase 1 (Quick Wins, v2.5-v2.6) | **Completed** (LLM structured output, sink 11→28, EPSS, CRA mapping, GitHub Action 모두 v2.5.0에 들어감) |
-| Phase 1.5 (LATTE), 1.6 (LARA) | **Phase 2C+로 이관** (detection 보강 4-6주) |
+| Phase 1.5 (LATTE), 1.6 (LARA) | **Phase 2C+로 이관 → v2.7.0 PR #9에 landed** (detection 보강 4-6주, 2026-04-20) |
 | Phase 2 (Architecture Leap, v3.0) | **Phase 2D'로 scope 좁힘** (2D.1, 2D.2, 2D.4a Vul-RAG만 SCOUT 본체 유지) |
 | Phase 2.3 (Multi-agent), 2.6 (Vul-RAG) | **Phase 2D'로 유지** |
 | Phase 2.4 (LLM 퍼즈 하네스), 2.5 (서비스 인식 퍼징), 2.7 (LLM4Decompile), 2.8 (GhidrAssistMCP) | **external track으로 이관** |
@@ -54,6 +54,23 @@ reviewer eval lane의 detection 약점 직접 공략:
 | 2C+.5 | finding diversity gate + dedicated rerun 진단 | 1주 |
 
 **Phase 2D 진입 Exit Gate**: recall ≥ 0.40 / evidence_tier ≥ 2 nonzero TP / finding diversity < 0.5 / dedicated rerun 1 driver success / corpus size ≥ 10
+
+### v2.7.0 / v2.7.1 landed status (2026-04-20 / 2026-04-22)
+
+- **2C+.1 LATTE Code Slicing / 2C+.2 LARA source identification / 2C+.3 sink expansion / 2C+.5 diversity gate** — v2.7.0 PR #9에 landed (2026-04-20). LARA `ascii_strings` wire-through follow-up fix 포함.
+- **2C+.4 vendor extraction 5종** — v2.7.1에 landed (2026-04-22). DIR-859 / DIR-878 / RT-AC68U / WRT1900AC v2 / EA6700. pair-eval corpus 7 → 12.
+
+**Phase 2D' Entry Gate 5-Scorecard FINAL** (12-pair `--no-llm`, WRT1900AC v2 ok 측정 기준):
+
+| Gate | 임계값 | v2.7.0 (7-pair) | **v2.7.1 FINAL (12-pair)** | 판정 |
+|------|--------|-----------------|---------------------------|------|
+| 1 Recall | ≥ 0.40 | 0.1429 | **0.1667** (+17% rel) | ❌ FAIL |
+| 2 Tier variation | ≥ 2 | 1 (`symbol_only`만) | **1** (back-slide from 1차 PASS) | ❌ FAIL |
+| 3 Diversity | < 0.5 | 1.000 | **0.917** | ❌ FAIL |
+| 4 Dedicated rerun | ≥ 1/N | 14/14 Codex | **14/14 + 12/12 `--no-llm`** | ✅ PASS |
+| 5 Corpus | ≥ 10 | 7 | **12** | ✅ PASS |
+
+**FINAL 2/5 PASS** (Gate 4 Rerun + Gate 5 Corpus). v2.7.0의 1/5 → v2.7.1 2/5, +1 순증가는 Corpus에서 옴. 1차 측정에서 WRT1900AC partial extraction이 만든 `aiedge.findings.analysis_incomplete` 부산물이 `unknown` tier를 채워 Gate 2가 일시 PASS로 보였으나 `--time-budget-s 2400` rerun 후 ok 전환으로 TP 소멸, baseline (FAIL) 회귀. Gate 1/2/3의 구조적 한계 (`findings.py` single-synthesis-finding selection)는 외부 detection-engine 트랙 유지. Pivot Option D (갈래 A 1순위) 변경 없음 — v2.7.1은 시나리오 C의 정량적 정련이지 re-pivot 아님. 상세는 `docs/v2.7.1_release_plan.md`.
 
 ### Pivot의 위험
 
