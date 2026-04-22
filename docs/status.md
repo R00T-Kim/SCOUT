@@ -381,6 +381,16 @@ v2.6.1 이후 외부 기여(@NightStalkers-160th) PR 2건을 머지. 둘 다 AFL
 
 **v2.7.0 tag 발행 조건 충족**: 공식 scorecard가 release note에 인용 가능한 상태. 후속 v2.7.1은 2C+.4 vendor extraction chain 확장 (DIR-859 / RT-AC68U / WRT1900ACS / DIR-878 + 1종 → corpus 7→10+) + 3'.1 B-5 release tag로 bundle 예정.
 
+**v2.7.1 post-release update (2026-04-22, Phase 2C+.4 corpus expansion + B-5 release tag)**: v2.7.1 released 2026-04-22 — Phase 2C+.4 vendor extraction 5종 완결 (DIR-859 / DIR-878 / RT-AC68U / WRT1900AC v2 / EA6700) + Phase 3'.1 step B-5 release tag packaging. 공식 release note: [GitHub](https://github.com/R00T-Kim/SCOUT/releases/tag/v2.7.1) / 측정 이력: `docs/v2.7.1_release_plan.md`. 12-pair `--no-llm` FINAL 측정 (WRT1900AC v2 ok 전환 후) 결과:
+
+- Gate 1 Recall: 0.1429 → **0.1667** (+17% rel) — 여전히 FAIL (임계 0.40 미달)
+- Gate 2 Tier variation: 1 (`symbol_only`만) — FAIL 유지 (1차 측정에서 WRT partial의 `analysis_incomplete`가 `unknown` tier 채움으로 일시 PASS 보였으나 2400s rerun 후 TP 소멸, baseline 회귀)
+- Gate 3 Finding diversity: 1.000 → **0.917** — FAIL (24 row 중 22 `web.exec_sink_overlap` + 2 `analysis_incomplete` from DIR-878 partial)
+- Gate 4 Dedicated rerun: 14/14 + **12/12 `--no-llm`** — PASS 유지
+- Gate 5 Corpus size: 7 → **12** — ❌ → ✅ **PASS** (manifest 등록만으로 통과)
+
+**FINAL scorecard: 5/5 중 2/5 PASS** (Gate 4 + Gate 5). v2.7.0의 1/5 → v2.7.1 2/5, +1 순증가는 Corpus에서 옴. 공식 수치는 `benchmark-results/pair-eval-12pair-mixed/` 및 `docs/v2.7.1_release_plan.md`. **교훈**: partial extraction artifact가 Gate 2 수치를 왜곡할 수 있음 — ok 측정이 figure of record. Pivot Option D (갈래 A 1순위, 갈래 B external)는 변경 없음 — v2.7.1은 시나리오 C의 정량적 정련이지 re-pivot 아님. Gate 1/2/3의 구조적 한계 (`findings.py` single-synthesis-finding selection)는 외부 detection-engine 트랙 유지.
+
 **Phase 2D' 요약** (4-6주, capability layer — scope 좁힘):
 - 2D.1 reasoning_trail + MCP 실전 루프 검증
 - 2D.2 Multi-agent exploit chain

@@ -73,6 +73,22 @@ Fill this table from the final `evidence_tier` summary.
 This section is for the follow-on `[B-1]` lane. It should be populated only from
 pair-labeled vuln/patched runs that come from extraction-success inputs.
 
+**v2.7.1 current (12-pair mixed-lane, 2026-04-22 FINAL):**
+
+| Metric | Value |
+| --- | --- |
+| pair corpus size | `12` |
+| vuln targets | `12` |
+| patched targets | `12` |
+| recall | `0.166667` (+17% rel vs v2.7.0 baseline) |
+| false-positive rate | `0.166667` |
+| finding diversity index | `0.917` (22/24 `web.exec_sink_overlap` + 2/24 `analysis_incomplete` from DIR-878 partial) |
+| Phase 2D' scorecard | **2/5 PASS** (Gate 4 Rerun + Gate 5 Corpus) |
+| run_index source | `benchmark-results/pair-eval-12pair-mixed/run_index.json` (24 rows: 14 Codex LATTE-on + 10 `--no-llm`) |
+| release note | [v2.7.1 GitHub release](https://github.com/R00T-Kim/SCOUT/releases/tag/v2.7.1), `docs/v2.7.1_release_plan.md` |
+
+**v2.7.0 legacy baseline (7-pair Codex LATTE-on, 2026-04-20):**
+
 | Metric | Value |
 | --- | --- |
 | pair corpus size | `7` |
@@ -86,7 +102,8 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
 ### Pair corpus notes
 
 - Full candidate list and CVE mapping is in `docs/pair_corpus_candidates.md` (10 candidate pairs + 2 gaps documented).
-- **Current local-7 set** (baseline-reuse, 7 pairs / 14 runs):
+- **v2.7.1 12-pair set** (current, 12 pairs / 24 runs): v2.7.0 local-7 + five new vendor/model entries — D-Link DIR-859 (CVE-2019-17621), D-Link DIR-878 (vendor advisory), ASUS RT-AC68U (CVE-2020-15498), Linksys WRT1900AC v2 (progression), Linksys EA6700 (progression). See `benchmarks/pair-eval/pairs.json` and `docs/v2.7.1_release_plan.md`.
+- **Legacy local-7 set** (v2.6.1/v2.7.0 baseline, 7 pairs / 14 runs):
   - Netgear R7000 V1.0.7.12 → V1.0.9.34 (CVE-2017-5521)
   - D-Link DIR-868L K02 → K04 (CVE-2018-10970 ref)
   - D-Link DIR-850L FW105 → FW115 (CVE-2019-20213 / CVE-2019-6258 ref)

@@ -199,7 +199,7 @@ The following Phase 3'.1 sub-steps build on this mapping:
 | **B-2** (this document) | FDA Section 524B compatibility mapping |
 | **B-3** | ISO 21434 + UN R155 mappings (parallel automotive cybersecurity standards) |
 | **B-4** | `compliance_report` stage that emits per-standard reports (this document, CRA Annex I, ISO 21434, UN R155) per run, alongside `executive_report.md` |
-| **B-5** | v2.7.1 release tag (after Track A v2.7.0 lands), packaging the four-document suite + the `compliance_report` stage |
+| **B-5** | v2.7.1 release tag — **released 2026-04-22** (Phase 2C+.4 vendor corpus expansion; the four-document suite + the `compliance_report` stage are shipped. See [GitHub release](https://github.com/R00T-Kim/SCOUT/releases/tag/v2.7.1) and `docs/v2.7.1_release_plan.md`) |
 
 SPDX SBOM export and CSAF advisory output are non-blocking follow-ups intended for a later release; both are recognised by the FDA premarket guidance and would broaden SCOUT's compatibility footprint.
 
