@@ -271,12 +271,37 @@ class LLMDriver(Protocol):
 class CodexCLIDriver:
     """Wraps ``codex exec --ephemeral`` with retry / fallback logic."""
 
+    _CODEX_HOME_DIRNAME = ".codex-home"
+
     @property
     def name(self) -> str:
         return "codex"
 
     def available(self) -> bool:
         return shutil.which("codex") is not None
+
+    def _seed_codex_auth(self, *, codex_home: Path, run_dir: Path) -> None:
+        source_home_env = os.environ.get("CODEX_HOME")
+        if source_home_env:
+            source_home = Path(source_home_env)
+        else:
+            source_home = Path.home() / ".codex"
+
+        if codex_home == source_home:
+            return
+
+        source_auth = source_home / "auth.json"
+        target_auth = codex_home / "auth.json"
+        if target_auth.exists() or not source_auth.is_file():
+            return
+
+        codex_home.mkdir(parents=True, exist_ok=True)
+        try:
+            target_auth.parent.resolve().relative_to(run_dir.resolve())
+        except Exception:
+            return
+
+        shutil.copy2(source_auth, target_auth)
 
     def execute(
         self,
@@ -308,6 +333,10 @@ class CodexCLIDriver:
         )
 
         codex_model = os.environ.get("AIEDGE_CODEX_MODEL", "gpt-5.3-codex")
+        codex_home = Path(
+            os.environ.get("CODEX_HOME", str(run_dir / self._CODEX_HOME_DIRNAME))
+        )
+        sandbox_mode = os.environ.get("AIEDGE_CODEX_SANDBOX", "workspace-write")
         base_argv = [
             "codex",
             "exec",
@@ -315,14 +344,22 @@ class CodexCLIDriver:
             "-m",
             codex_model,
             "-s",
-            "read-only",
+            sandbox_mode,
             "-C",
             str(run_dir),
         ]
+        try:
+            codex_home.relative_to(run_dir)
+        except ValueError:
+            base_argv.extend(["--add-dir", str(codex_home)])
         argv = base_argv + [effective_prompt]
         attempts: list[dict[str, object]] = []
+        exec_env = os.environ.copy()
+        exec_env["CODEX_HOME"] = str(codex_home)
 
         def _exec_once(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+            codex_home.mkdir(parents=True, exist_ok=True)
+            self._seed_codex_auth(codex_home=codex_home, run_dir=run_dir)
             cp = subprocess.run(
                 cmd,
                 check=False,
@@ -330,6 +367,7 @@ class CodexCLIDriver:
                 text=True,
                 timeout=timeout_s,
                 stdin=subprocess.DEVNULL,
+                env=exec_env,
             )
             attempts.append(
                 {
