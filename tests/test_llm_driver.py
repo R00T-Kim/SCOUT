@@ -49,6 +49,107 @@ class TestCodexCLIDriverExecute:
         assert result.returncode == 0
         assert len(result.attempts) == 1
 
+    def test_uses_workspace_write_and_run_local_codex_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/codex")
+        captured: dict[str, object] = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="output", stderr=""
+            )
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+
+        driver = CodexCLIDriver()
+        result = driver.execute(
+            prompt="test prompt",
+            run_dir=tmp_path,
+            timeout_s=30.0,
+            max_attempts=1,
+        )
+
+        assert result.status == "ok"
+        cmd = captured["cmd"]
+        assert isinstance(cmd, list)
+        assert "-s" in cmd
+        assert cmd[cmd.index("-s") + 1] == "workspace-write"
+        assert "--add-dir" not in cmd
+        env = captured["env"]
+        assert isinstance(env, dict)
+        assert env["CODEX_HOME"] == str(tmp_path / ".codex-home")
+        assert (tmp_path / ".codex-home").is_dir()
+
+    def test_respects_external_codex_home_with_add_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/codex")
+        external_home = tmp_path.parent / "shared-codex-home"
+        monkeypatch.setenv("CODEX_HOME", str(external_home))
+        captured: dict[str, object] = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="output", stderr=""
+            )
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+
+        driver = CodexCLIDriver()
+        result = driver.execute(
+            prompt="test prompt",
+            run_dir=tmp_path,
+            timeout_s=30.0,
+            max_attempts=1,
+        )
+
+        assert result.status == "ok"
+        cmd = captured["cmd"]
+        assert isinstance(cmd, list)
+        assert "--add-dir" in cmd
+        assert cmd[cmd.index("--add-dir") + 1] == str(external_home)
+        env = captured["env"]
+        assert isinstance(env, dict)
+        assert env["CODEX_HOME"] == str(external_home)
+        assert external_home.is_dir()
+
+    def test_seeds_default_auth_into_run_local_codex_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/codex")
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        fake_home = tmp_path / "fake-home"
+        monkeypatch.setenv("HOME", str(fake_home))
+        source_auth = fake_home / ".codex" / "auth.json"
+        source_auth.parent.mkdir(parents=True)
+        source_auth.write_text('{"token":"abc"}', encoding="utf-8")
+
+        def fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="output", stderr=""
+            )
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        driver = CodexCLIDriver()
+        result = driver.execute(
+            prompt="test prompt",
+            run_dir=run_dir,
+            timeout_s=30.0,
+            max_attempts=1,
+        )
+
+        assert result.status == "ok"
+        target_auth = run_dir / ".codex-home" / "auth.json"
+        assert target_auth.read_text(encoding="utf-8") == '{"token":"abc"}'
+
     def test_missing_cli(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("shutil.which", lambda cmd: None)
 
