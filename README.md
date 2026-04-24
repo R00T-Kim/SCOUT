@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.7.1-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.7.2-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -43,6 +43,13 @@
 
 > [!NOTE]
 > **Tier 1 numbers in this README now reflect the fresh v2.6.1 corpus refresh** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM numbers are still carry-over (`v2.3.0`, 36 firmware) until the pair-eval lane lands. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
+
+> [!TIP]
+> **What's new in v2.7.2** (Phase 2C++ detection-engine integrity patch — no scorecard movement expected)
+> - **Phase 2C++.1 — `DECOMPILED_COLOCATED_CAP = 0.45` promoted to a named constant.** The `decompiled_colocated` taint method previously hardcoded a `0.50` ceiling inline. The 5-tier cap ladder (`SYMBOL_COOCCURRENCE 0.40 < DECOMPILED_COLOCATED 0.45 < STATIC_CODE_VERIFIED 0.55 < STATIC_ONLY 0.60 < PCODE_VERIFIED 0.75`) is now externally cited. Consumer impact: `decompiled_colocated` traces drop `0.50 → 0.45` (-0.05); ROC thresholds previously pinned at 0.50 should be retuned to 0.45. `priority_score` and `cve_scan`'s `STATIC_CODE_VERIFIED_CAP=0.55` unchanged. Rationale: the v2.4.0 external review (`docs/upgrade_plz.md` Gap C) flagged the prior value as over-confident relative to body-text-only evidence.
+> - **Phase 2C++.2 — legacy `addr_diff > 16` residues removed from `ghidra_analysis.py` and `ghidra_scripts/pcode_taint.py`.** Commit `3352783` (v2.4.1) replaced the primary CALL-matching path with callee-name resolution but left a dead `trace_pcode_forward()` helper inside `_PYGHIDRA_SCRIPT` and an unreachable `else: addr_diff` fallback in the analyzeHeadless Strategy 1 loop. Both are now physically removed; `_trace_forward_pcode()`'s `source_api_name` parameter is required (no default). No runtime behaviour change — the production paths have done callee-name matching for 13 days already. Guard-rail tests in `tests/test_ghidra_dead_code_removed.py` pin the removal.
+> - **No scorecard movement expected.** Gap B was runtime-effective since v2.4.1. Gap C's new ceiling only binds on `decompiled_colocated` traces, which are emitted solely by the pyghidra fallback (`ghidra_analysis.py:609`) that Ghidra-12 environments don't exercise. Phase 2D' Entry Gate remains at the v2.7.1 figure of record (**2/5 PASS**). Pair-eval re-measurement is deferred to the session that evaluates Gap A (interprocedural taint) ROI.
+> - **Pivot Option D (compliance-led identity) remains in force.** v2.7.2 is detection-engine hygiene, not a behavioural pivot. The `compliance_report` stage and four standard mappings shipped in v2.7.0 are unchanged.
 
 > [!TIP]
 > **What's new in v2.7.1** (Phase 2C+.4 vendor corpus expansion — quantitative refinement of v2.7.0's scenario C)

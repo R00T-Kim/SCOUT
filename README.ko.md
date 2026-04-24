@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-42_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.7.1-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.7.2-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -43,6 +43,13 @@
 
 > [!NOTE]
 > **README의 Tier 1 수치는 이제 fresh v2.6.1 corpus refresh 기준입니다** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM 수치는 pair-eval lane이 닫히기 전까지는 여전히 carry-over (`v2.3.0`, 36 firmware)입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
+
+> [!TIP]
+> **v2.7.2 핵심 변화** (Phase 2C++ detection engine integrity patch — scorecard 변화 없음 예상)
+> - **Phase 2C++.1 — `DECOMPILED_COLOCATED_CAP = 0.45` 명명 상수 승격.** `decompiled_colocated` taint method가 이전에는 inline literal `0.50`으로 하드코딩되어 있었음. 5-tier cap 사다리 (`SYMBOL_COOCCURRENCE 0.40 < DECOMPILED_COLOCATED 0.45 < STATIC_CODE_VERIFIED 0.55 < STATIC_ONLY 0.60 < PCODE_VERIFIED 0.75`)가 외부 인용 가능한 형태로 노출됨. Consumer 영향: `decompiled_colocated` trace가 `0.50 → 0.45` (-0.05); ROC threshold 0.50 pin은 0.45로 재조정 필요. `priority_score`와 `cve_scan`의 `STATIC_CODE_VERIFIED_CAP=0.55`는 변화 없음. 근거: v2.4.0 외부 리뷰(`docs/upgrade_plz.md` Gap C)가 prior 값이 body-text-only 증거 수준 대비 과대평가됐다고 지적.
+> - **Phase 2C++.2 — `ghidra_analysis.py`와 `ghidra_scripts/pcode_taint.py`에서 legacy `addr_diff > 16` 잔해 제거.** 커밋 `3352783`(v2.4.1)이 primary CALL 매칭 경로를 callee-name resolution으로 교체했으나, `_PYGHIDRA_SCRIPT` 안의 dead `trace_pcode_forward()` helper와 analyzeHeadless Strategy 1 루프의 unreachable `else: addr_diff` fallback이 남아있었음. 둘 다 물리적으로 제거; `_trace_forward_pcode()`의 `source_api_name` 파라미터는 필수(default 제거). Runtime 동작 변화 없음 — production 경로는 이미 13일 전부터 callee-name 매칭만 사용. `tests/test_ghidra_dead_code_removed.py`가 제거를 pin.
+> - **Scorecard 변화 없음 예상.** Gap B는 v2.4.1부터 runtime-effective. Gap C의 새 ceiling은 `decompiled_colocated` trace에만 bind되는데, 이 method는 pyghidra fallback(`ghidra_analysis.py:609`)에서만 emit되고 Ghidra-12 환경에서는 이 경로가 실행되지 않음. Phase 2D' Entry Gate는 v2.7.1 figure of record (**2/5 PASS**) 유지. Pair-eval 재측정은 Gap A(interprocedural taint) ROI를 평가할 별도 세션으로 이연.
+> - **Pivot Option D (compliance-led identity) 유지.** v2.7.2는 detection engine hygiene이지 behavioural pivot 아님. v2.7.0에서 ship한 `compliance_report` stage와 4 standard mapping은 변화 없음.
 
 > [!TIP]
 > **v2.7.1 핵심 변화** (Phase 2C+.4 vendor corpus 확장 — v2.7.0 시나리오 C의 정량적 정련)

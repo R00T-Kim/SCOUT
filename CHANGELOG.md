@@ -5,6 +5,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.7.2] — 2026-04-24
+
+Detection-engine integrity patch. Two follow-ups from the v2.4.0 external
+review (`docs/upgrade_plz.md`) that were partially addressed in v2.4.1 but
+left cosmetic residues. No change to pair-eval scorecard is expected:
+Gap B was runtime-effective since v2.4.1, and Gap C's confidence ceiling
+only binds on the `decompiled_colocated` taint method, which is emitted
+exclusively by the pyghidra fallback path (`ghidra_analysis.py:609`) that
+Ghidra-12-enabled environments do not exercise. The Phase 2D' Entry Gate
+scorecard therefore remains the v2.7.1 figure of record (**2/5 PASS**).
+
 ### Changed
 
 - **Phase 2C++.1 — `DECOMPILED_COLOCATED_CAP` separated from inline literal** (`confidence_caps.py`, `taint_propagation.py`, `tests/test_confidence_caps.py`, `docs/confidence_semantic_break_v2.6.md`). The `decompiled_colocated` taint method previously hardcoded a `0.50` ceiling in-line; confidence_caps now exposes `DECOMPILED_COLOCATED_CAP = 0.45` as part of a five-tier cap ladder (`SYMBOL_COOCCURRENCE < DECOMPILED_COLOCATED < STATIC_CODE_VERIFIED < STATIC_ONLY < PCODE_VERIFIED`). Consumer impact: `decompiled_colocated` traces drop `0.50 → 0.45` (-0.05); `priority_score` weights and `STATIC_CODE_VERIFIED_CAP=0.55` (cve_scan) unchanged. ROC thresholds previously pinned at 0.50 should be retuned to 0.45 to preserve pre-v2.7.1 recall. Rationale: the v2.4.0 external review (`docs/upgrade_plz.md` Gap C) flagged the prior value as over-confident relative to the body-text-only evidence it represents; the new value reflects evidence-level parity with `SYMBOL_COOCCURRENCE` (0.40) plus +0.05 because decompilation exposes inlined CALLs absent from symbol tables.
