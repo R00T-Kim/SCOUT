@@ -66,7 +66,7 @@ STAGE_DEPS: dict[str, frozenset[str]] = {
     "exploit_gate": frozenset({"chain_construction"}),
     "exploit_chain": frozenset({"exploit_gate"}),
     "exploit_autopoc": frozenset({"exploit_chain"}),
-    "poc_validation": frozenset({"exploit_autopoc"}),
+    "poc_validation": frozenset({"exploit_autopoc", "exploit_chain"}),
     "exploit_policy": frozenset({"poc_validation"}),
     "compliance_report": frozenset({"exploit_policy", "sbom", "cve_scan"}),
 }

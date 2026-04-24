@@ -145,6 +145,18 @@ def test_stage_deps_includes_exploit_gate() -> None:
     assert "chain_construction" in STAGE_DEPS["exploit_gate"]
 
 
+def test_stage_deps_poc_validation_requires_exploit_chain() -> None:
+    """poc_validation's prereq check reads stages/exploit_chain/milestones.json
+    directly, so the DAG must list exploit_chain as an explicit dependency.
+    Without the edge, a parallel run can schedule poc_validation before
+    exploit_chain has emitted milestones.json -- exactly the topological
+    violation observed in the 2026-04-13_1014 R7000 run where
+    poc_validation started 2h40m before exploit_chain.
+    """
+    assert "exploit_chain" in STAGE_DEPS["poc_validation"]
+    assert "exploit_autopoc" in STAGE_DEPS["poc_validation"]
+
+
 def test_stage_deps_ipc_chain_from_docs() -> None:
     """pipeline-architecture.md IPC chain: inventory -> endpoints -> surfaces -> graph -> attack_surface."""
     assert "inventory" in STAGE_DEPS["endpoints"]

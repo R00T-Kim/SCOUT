@@ -121,6 +121,79 @@ def test_poc_validation_blocks_non_lab_scope(tmp_path: Path) -> None:
     assert "POLICY_SCOPE_NOT_LAB_ONLY" in blocked_codes
 
 
+def test_poc_validation_missing_prereq_note_lists_paths(tmp_path: Path) -> None:
+    """When exploit_chain is skipped, the blocked note should enumerate the
+    specific missing paths so the analyst can see which upstream stage to
+    re-run, rather than a generic "artifacts missing" string.
+    """
+    fw = _write_firmware(tmp_path)
+    info = create_run(
+        str(fw),
+        case_id="case-poc-missing-detail",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+    _set_profile_exploit(info.manifest_path)
+
+    # Run poc_validation alone -- exploit_chain never executed so
+    # milestones.json is absent. The stage must fail with detail.
+    rep = run_subset(
+        info,
+        ["exploit_gate", "poc_validation"],
+        time_budget_s=5,
+        no_llm=True,
+    )
+    assert rep.status in ("partial", "failed")
+
+    validation_json = info.run_dir / "stages" / "poc_validation" / "poc_validation.json"
+    validation_obj = cast(
+        dict[str, object], json.loads(validation_json.read_text(encoding="utf-8"))
+    )
+    assert validation_obj.get("status") == "failed"
+    blocked = cast(list[object], validation_obj.get("blocked"))
+    prereq_items = [
+        cast(dict[str, object], item)
+        for item in blocked
+        if isinstance(item, dict)
+        and item.get("reason_code") == "POLICY_PREREQ_STAGE_ARTIFACT_MISSING"
+    ]
+    assert prereq_items, "expected a PREREQ_STAGE_ARTIFACT_MISSING block"
+    note = cast(str, prereq_items[0].get("note", ""))
+    assert (
+        "stages/exploit_chain/milestones.json" in note
+    ), "missing-paths detail must name the specific artifact"
+
+
+def test_poc_validation_resolves_run_dir_symlinks(tmp_path: Path) -> None:
+    """``ctx.run_dir`` may be reached via a symlink (e.g. a ``latest`` alias).
+    The prereq check must follow symlinks via ``.resolve().is_file()`` so
+    reruns that pass a symlinked run_dir still see their artefacts.
+    """
+    fw = _write_firmware(tmp_path)
+    info = create_run(
+        str(fw),
+        case_id="case-poc-symlink",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+    _set_profile_exploit(info.manifest_path)
+
+    # First run the full exploit chain so artefacts exist under the real
+    # run_dir path.
+    rep = run_subset(
+        info,
+        ["exploit_gate", "exploit_chain", "poc_validation"],
+        time_budget_s=5,
+        no_llm=True,
+    )
+    assert rep.status in ("ok", "partial")
+    validation_json = info.run_dir / "stages" / "poc_validation" / "poc_validation.json"
+    validation_obj = cast(
+        dict[str, object], json.loads(validation_json.read_text(encoding="utf-8"))
+    )
+    assert validation_obj.get("status") == "ok"
+
+
 def test_exploit_policy_scans_poc_validation_artifacts(tmp_path: Path) -> None:
     fw = _write_firmware(tmp_path)
     info = create_run(

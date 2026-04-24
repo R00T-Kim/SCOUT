@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Phase 2D' Step C.1 — `poc_validation` prereq topological order + path robustness** (`src/aiedge/stage_dag.py`, `src/aiedge/poc_validation.py`, `tests/test_poc_validation_stage.py`, `tests/test_stage_dag.py`). In the 2026-04-13 R7000 run, `poc_validation` finished at `10:14:39 UTC` with `failed` / `POLICY_PREREQ_STAGE_ARTIFACT_MISSING` even though `stages/exploit_chain/milestones.json` existed — because it existed 2h40m *after* poc_validation ran. Root cause: `STAGE_DEPS["poc_validation"]` listed only `exploit_autopoc`, so a parallel (or subset) rerun could schedule poc_validation while `exploit_chain` was still pending, and the stage's prereq check would observe a transiently missing `milestones.json`. Fix: (a) `STAGE_DEPS["poc_validation"]` now requires both `exploit_autopoc` and `exploit_chain`, closing the DAG gap that the prereq check always implied. (b) `poc_validation` now uses `.resolve().is_file()` so symlinked or relative run_dir prefixes resolve correctly. (c) The blocked `note` now enumerates the specific missing paths (`"Required exploit-stage artifacts are missing: <path1>, <path2>"`) instead of a generic message, so analysts can see which upstream stage to rerun. New pinning tests: `test_poc_validation_missing_prereq_note_lists_paths`, `test_poc_validation_resolves_run_dir_symlinks`, `test_stage_deps_poc_validation_requires_exploit_chain`.
+
 ## [2.7.2] — 2026-04-24
 
 Detection-engine integrity patch. Two follow-ups from the v2.4.0 external

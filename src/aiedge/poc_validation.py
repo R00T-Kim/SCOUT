@@ -335,17 +335,25 @@ class PocValidationStage:
             }
         )
 
-        missing_paths = [
-            p
-            for p in checked_paths
-            if p != "manifest.json" and not (ctx.run_dir / p).is_file()
-        ]
+        # Use `.resolve().is_file()` for path-traversal resilience: run_dir
+        # may be reached via symlink or relative prefix in subset reruns.
+        missing_paths: list[str] = []
+        for p in checked_paths:
+            if p == "manifest.json":
+                continue
+            candidate = (ctx.run_dir / p).resolve()
+            if not candidate.is_file():
+                missing_paths.append(p)
+
         if missing_paths:
             blocked.append(
                 {
                     "reason_code": _REASON_PREREQ_STAGE_ARTIFACT_MISSING,
                     "target": "stages",
-                    "note": "Required exploit-stage artifacts are missing.",
+                    "note": (
+                        "Required exploit-stage artifacts are missing: "
+                        + ", ".join(missing_paths)
+                    ),
                 }
             )
 
