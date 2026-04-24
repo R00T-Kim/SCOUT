@@ -324,70 +324,15 @@ def resolve_call_target(call_op, high_func):
         return s.getName()
     return ""
 
-def trace_pcode_forward(high_func, source_call_addr, max_depth=8):
-    traces = []
-    if high_func is None:
-        return traces
-    pcode_iter = high_func.getPcodeOps()
-    if pcode_iter is None:
-        return traces
-    all_ops = []
-    while pcode_iter.hasNext():
-        all_ops.append(pcode_iter.next())
-    # Find CALL ops near source address
-    source_outputs = []
-    for op in all_ops:
-        if op.getOpcode() not in (4, 5):
-            continue
-        diff = abs(op.getSeqnum().getTarget().getOffset() - source_call_addr.getOffset())
-        if diff > 16:
-            continue
-        out = op.getOutput()
-        if out is not None:
-            source_outputs.append(out)
-    if not source_outputs:
-        return traces
-    visited = set()
-    queue = list(source_outputs)
-    sanitized = False
-    reached = []
-    depth = 0
-    while queue and depth < max_depth:
-        nxt = []
-        for vn in queue:
-            vid = vn.getUniqueId()
-            if vid in visited:
-                continue
-            visited.add(vid)
-            desc = vn.getDescendants()
-            if desc is None:
-                continue
-            while desc.hasNext():
-                use_op = desc.next()
-                if use_op.getOpcode() in (4, 5):
-                    callee = resolve_call_target(use_op, high_func)
-                    if callee in SINK_APIS:
-                        reached.append({{"sink": callee, "address": str(use_op.getSeqnum().getTarget()), "depth": depth}})
-                    elif callee in SANITIZER_APIS:
-                        sanitized = True
-                out = use_op.getOutput()
-                if out is not None:
-                    nxt.append(out)
-        queue = nxt
-        depth += 1
-    for r in reached:
-        conf = 0.75
-        if sanitized:
-            conf = 0.20
-        elif r["sink"] in HIGH_RISK_SINKS:
-            conf = 0.80
-        traces.append({{
-            "sink": r["sink"], "sink_address": r["address"], "depth": r["depth"],
-            "sanitized": sanitized, "confidence": max(0.10, min(0.90, conf)),
-            "source_address": str(source_call_addr),
-        }})
-    return traces
-
+# NOTE: A standalone `trace_pcode_forward(high_func, source_call_addr, ...)`
+# used to live here and was the legacy target of the v2.4.0 external review
+# (`docs/upgrade_plz.md` Gap B — `addr_diff > 16` heuristic). That helper was
+# never actually invoked inside `_PYGHIDRA_SCRIPT`: the inline forward-taint
+# loop further down (search for "Scan ALL CALL ops in P-code") has always been
+# the real path and already resolves CALL targets by callee name via
+# `resolve_call_target()`, not by byte-offset proximity. The dead helper was
+# removed in Phase 2C++.2 (v2.7.2) so readers searching for `addr_diff` no
+# longer find a false-positive match in the pyghidra fallback path.
 try:
     import pyghidra
     pyghidra.start()

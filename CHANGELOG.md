@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Phase 2C++.1 — `DECOMPILED_COLOCATED_CAP` separated from inline literal** (`confidence_caps.py`, `taint_propagation.py`, `tests/test_confidence_caps.py`, `docs/confidence_semantic_break_v2.6.md`). The `decompiled_colocated` taint method previously hardcoded a `0.50` ceiling in-line; confidence_caps now exposes `DECOMPILED_COLOCATED_CAP = 0.45` as part of a five-tier cap ladder (`SYMBOL_COOCCURRENCE < DECOMPILED_COLOCATED < STATIC_CODE_VERIFIED < STATIC_ONLY < PCODE_VERIFIED`). Consumer impact: `decompiled_colocated` traces drop `0.50 → 0.45` (-0.05); `priority_score` weights and `STATIC_CODE_VERIFIED_CAP=0.55` (cve_scan) unchanged. ROC thresholds previously pinned at 0.50 should be retuned to 0.45 to preserve pre-v2.7.1 recall. Rationale: the v2.4.0 external review (`docs/upgrade_plz.md` Gap C) flagged the prior value as over-confident relative to the body-text-only evidence it represents; the new value reflects evidence-level parity with `SYMBOL_COOCCURRENCE` (0.40) plus +0.05 because decompilation exposes inlined CALLs absent from symbol tables.
+
+### Fixed
+
+- **Phase 2C++.2 — legacy `addr_diff > 16` residues removed** (`ghidra_analysis.py`, `ghidra_scripts/pcode_taint.py`, `tests/test_ghidra_dead_code_removed.py`). The v2.4.0 external review (`docs/upgrade_plz.md` Gap B) flagged a byte-offset heuristic in P-code taint CALL matching. Commit `3352783` (v2.4.1, 2026-04-11) replaced that primary path with callee-name resolution via `_resolve_call_target()` but left two residues: a standalone `trace_pcode_forward()` helper inside `_PYGHIDRA_SCRIPT` that was never invoked (dead within the script), and an unreachable `else: addr_diff = abs(...)` fallback in `ghidra_scripts/pcode_taint.py` protected only by `if source_api_name:` (and `run()` always passes `source_api_name=source_api`). Both are now physically removed; `_trace_forward_pcode`'s `source_api_name` parameter is now required (no default). No runtime behaviour change — the real Strategy 1 loop has resolved callees by name since v2.4.1. New guard-rail tests in `tests/test_ghidra_dead_code_removed.py` pin the removal.
+
 ## [2.7.1] — 2026-04-22
 
 ### Added

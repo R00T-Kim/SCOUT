@@ -15,37 +15,90 @@ import json
 import time
 
 # --- Source APIs: functions that introduce external/untrusted data ---
-SOURCE_APIS = frozenset([
-    "recv", "recvfrom", "recvmsg", "read", "fread", "fgets", "gets",
-    "getenv", "nvram_get", "nvram_safe_get", "acosNvramConfig_get",
-    "websGetVar", "httpGetEnv", "wp_getVar", "getParameter",
-    "scanf", "sscanf", "fscanf",
-    "cJSON_GetObjectItem", "json_object_get_string",
-    "cJSON_Parse", "json_tokener_parse",
-])
+SOURCE_APIS = frozenset(
+    [
+        "recv",
+        "recvfrom",
+        "recvmsg",
+        "read",
+        "fread",
+        "fgets",
+        "gets",
+        "getenv",
+        "nvram_get",
+        "nvram_safe_get",
+        "acosNvramConfig_get",
+        "websGetVar",
+        "httpGetEnv",
+        "wp_getVar",
+        "getParameter",
+        "scanf",
+        "sscanf",
+        "fscanf",
+        "cJSON_GetObjectItem",
+        "json_object_get_string",
+        "cJSON_Parse",
+        "json_tokener_parse",
+    ]
+)
 
 # --- Sink APIs: functions where tainted data causes harm ---
-SINK_APIS = frozenset([
-    "system", "popen", "execve", "execv", "execl", "execlp", "execle",
-    "strcpy", "strcat", "sprintf", "vsprintf", "gets",
-    "memcpy", "memmove",
-    "doSystemCmd", "twsystem", "doSystem",
-])
+SINK_APIS = frozenset(
+    [
+        "system",
+        "popen",
+        "execve",
+        "execv",
+        "execl",
+        "execlp",
+        "execle",
+        "strcpy",
+        "strcat",
+        "sprintf",
+        "vsprintf",
+        "gets",
+        "memcpy",
+        "memmove",
+        "doSystemCmd",
+        "twsystem",
+        "doSystem",
+    ]
+)
 
 # --- Sanitizer APIs: functions that convert tainted data to safe types ---
-SANITIZER_APIS = frozenset([
-    "atoi", "atol", "atoll",
-    "strtol", "strtoul", "strtoll", "strtoull",
-    "strtod", "strtof",
-    "inet_aton", "inet_addr", "inet_pton",
-    "isValidIpAddr",
-])
+SANITIZER_APIS = frozenset(
+    [
+        "atoi",
+        "atol",
+        "atoll",
+        "strtol",
+        "strtoul",
+        "strtoll",
+        "strtoull",
+        "strtod",
+        "strtof",
+        "inet_aton",
+        "inet_addr",
+        "inet_pton",
+        "isValidIpAddr",
+    ]
+)
 
 # High-risk sinks that indicate command injection / code execution
-HIGH_RISK_SINKS = frozenset([
-    "system", "popen", "execve", "execv", "execl", "execlp", "execle",
-    "doSystemCmd", "twsystem", "doSystem",
-])
+HIGH_RISK_SINKS = frozenset(
+    [
+        "system",
+        "popen",
+        "execve",
+        "execv",
+        "execl",
+        "execlp",
+        "execle",
+        "doSystemCmd",
+        "twsystem",
+        "doSystem",
+    ]
+)
 
 _MAX_FUNCTIONS = 100
 _FUNCTION_TIMEOUT_S = 10
@@ -82,11 +135,18 @@ def _resolve_symbol_refs(prog, sym_table, ref_mgr, fm, api_names):
     return call_sites
 
 
-def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis, source_api_name=""):
+def _trace_forward_pcode(
+    high_func, source_call_addr, sink_apis, sanitizer_apis, source_api_name
+):
     """Forward taint trace using P-code SSA varnodes.
 
-    Starting from the output varnode of a source call, follow def-use chains
-    to see if tainted data reaches a sink call parameter.
+    Starting from the output varnode of the CALL whose callee matches
+    `source_api_name`, follow def-use chains to see if tainted data reaches a
+    sink call parameter.
+
+    Callee resolution is by name (via `_resolve_call_target`) rather than by
+    byte-offset proximity to `source_call_addr`. `source_call_addr` is retained
+    for provenance in the emitted trace records.
 
     Returns list of trace dicts if taint reaches sink, empty list otherwise.
     """
@@ -112,24 +172,21 @@ def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis,
         if out is not None:
             ops_by_output[out.getUniqueId()] = op
 
-    # Find CALL ops that call the source API by name (or by address fallback)
+    # Find CALL ops whose callee matches `source_api_name`. Matching by name is
+    # robust against compiler optimisations (inlining, instruction alignment,
+    # thumb-vs-arm64 variability) where byte-offset proximity to
+    # `source_call_addr` was fragile. The old `addr_diff > 16` fallback was
+    # dropped in Phase 2C++.2 (v2.7.2) after confirming every caller passes a
+    # non-empty `source_api_name` (see `run()` below: `source_api_name=source_api`).
     source_output_varnodes = []
     for op in all_ops:
         opcode = op.getOpcode()
         # CALL = 4, CALLIND = 5
         if opcode not in (4, 5):
             continue
-        # Match by callee function name (robust against compiler optimizations)
-        if source_api_name:
-            callee_name = _resolve_call_target(op, high_func)
-            if callee_name != source_api_name:
-                continue
-        else:
-            # Fallback: address proximity (legacy behavior)
-            op_addr = op.getSeqnum().getTarget()
-            addr_diff = abs(op_addr.getOffset() - source_call_addr.getOffset())
-            if addr_diff > 16:
-                continue
+        callee_name = _resolve_call_target(op, high_func)
+        if callee_name != source_api_name:
+            continue
         out = op.getOutput()
         if out is not None:
             source_output_varnodes.append(out)
@@ -167,15 +224,18 @@ def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis,
                     # Try to resolve called function name
                     callee_name = _resolve_call_target(use_op, high_func)
                     if callee_name in sink_apis:
-                        reached_sinks.append({
-                            "sink": callee_name,
-                            "address": str(use_op.getSeqnum().getTarget()),
-                            "depth": depth,
-                        })
+                        reached_sinks.append(
+                            {
+                                "sink": callee_name,
+                                "address": str(use_op.getSeqnum().getTarget()),
+                                "depth": depth,
+                            }
+                        )
                     elif callee_name in sanitizer_apis:
                         sanitized = True
                         taint_path.append(
-                            "sanitizer:%s@%s" % (callee_name, str(use_op.getSeqnum().getTarget()))
+                            "sanitizer:%s@%s"
+                            % (callee_name, str(use_op.getSeqnum().getTarget()))
                         )
 
                 # Propagate taint through the output of this op
@@ -190,14 +250,16 @@ def _trace_forward_pcode(high_func, source_call_addr, sink_apis, sanitizer_apis,
         depth += 1
 
     for sink_info in reached_sinks:
-        traces.append({
-            "source_address": str(source_call_addr),
-            "sink": sink_info["sink"],
-            "sink_address": sink_info["address"],
-            "depth": sink_info["depth"],
-            "sanitized": sanitized,
-            "path_length": len(taint_path),
-        })
+        traces.append(
+            {
+                "source_address": str(source_call_addr),
+                "sink": sink_info["sink"],
+                "sink_address": sink_info["address"],
+                "depth": sink_info["depth"],
+                "sanitized": sanitized,
+                "path_length": len(taint_path),
+            }
+        )
 
     return traces
 
@@ -275,11 +337,13 @@ def run():
             try:
                 high_func = _get_high_function(decomp, func, _FUNCTION_TIMEOUT_S)
                 if high_func is None:
-                    results["errors"].append({
-                        "function": func.getName(),
-                        "address": str(func_entry),
-                        "error": "decompilation_failed",
-                    })
+                    results["errors"].append(
+                        {
+                            "function": func.getName(),
+                            "address": str(func_entry),
+                            "error": "decompilation_failed",
+                        }
+                    )
                     analyzed += 1
                     continue
 
@@ -289,7 +353,10 @@ def run():
                         break
 
                     traces = _trace_forward_pcode(
-                        high_func, call_addr, SINK_APIS, SANITIZER_APIS,
+                        high_func,
+                        call_addr,
+                        SINK_APIS,
+                        SANITIZER_APIS,
                         source_api_name=source_api,
                     )
 
@@ -305,11 +372,13 @@ def run():
                         total_traces += 1
 
             except Exception as e:
-                results["errors"].append({
-                    "function": func.getName() if func else "unknown",
-                    "address": str(func_entry),
-                    "error": str(e),
-                })
+                results["errors"].append(
+                    {
+                        "function": func.getName() if func else "unknown",
+                        "address": str(func_entry),
+                        "error": str(e),
+                    }
+                )
 
             analyzed += 1
 
