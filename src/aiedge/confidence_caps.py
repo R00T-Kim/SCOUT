@@ -2,10 +2,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+# Evidence-level confidence caps (ordered ascending).
+#
+# - SYMBOL_COOCCURRENCE (0.40): symbol co-occurrence only, no code path confirmed.
+# - DECOMPILED_COLOCATED (0.45): body-text co-occurrence in decompiled function;
+#   evidence-level parity with SYMBOL_COOCCURRENCE, +0.05 because decompilation
+#   exposes inlined CALLs absent from symbol tables. Strictly below
+#   STATIC_CODE_VERIFIED — no SSA def-use proof.
+# - STATIC_CODE_VERIFIED (0.55): decompiled code inspected but no LLM taint trace.
+# - STATIC_ONLY (0.60): static-only observation ceiling for static_reference refs.
+# - PCODE_VERIFIED (0.75): P-code SSA dataflow confirmed source→sink path.
+SYMBOL_COOCCURRENCE_CAP = 0.40
+DECOMPILED_COLOCATED_CAP = 0.45
+STATIC_CODE_VERIFIED_CAP = 0.55
 STATIC_ONLY_CAP = 0.60
-SYMBOL_COOCCURRENCE_CAP = 0.40  # symbol co-occurrence only: no code path confirmed
-STATIC_CODE_VERIFIED_CAP = 0.55  # decompiled code inspected but no LLM taint trace
-PCODE_VERIFIED_CAP = 0.75  # P-code SSA dataflow confirmed source→sink path
+PCODE_VERIFIED_CAP = 0.75
 EVIDENCE_LEVELS: tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4")
 
 

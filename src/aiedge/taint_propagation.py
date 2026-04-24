@@ -18,6 +18,7 @@ from typing import cast
 from ._typing_helpers import safe_float, safe_int
 from .code_slicing import maybe_slice
 from .confidence_caps import (
+    DECOMPILED_COLOCATED_CAP,
     PCODE_VERIFIED_CAP,
     STATIC_CODE_VERIFIED_CAP,
     SYMBOL_COOCCURRENCE_CAP,
@@ -572,9 +573,9 @@ class TaintPropagationStage:
                 elif trace_method == "pcode_colocated":
                     conf = min(conf, 0.65)  # P-code verified colocated
                 elif trace_method == "decompiled_colocated":
-                    conf = min(
-                        conf, 0.50
-                    )  # body text heuristic, slightly above co-occurrence(0.40)
+                    # Body-text co-occurrence in decompiled function.
+                    # See confidence_caps.py for evidence-level rationale.
+                    conf = min(conf, DECOMPILED_COLOCATED_CAP)
                 elif trace_method == "decompiled_interprocedural":
                     conf = min(
                         conf, 0.60

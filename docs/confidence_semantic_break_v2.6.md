@@ -94,3 +94,40 @@ README / status / results overview에서는:
 - `confidence`를 exploitability 또는 business priority로 설명하지 않는다.
 - exploitability / triage ordering은 `priority_score` 또는 future pair-eval lane으로 설명한다.
 - ROC / threshold 문맥에서는 `confidence`와 `priority_score`를 섞어 쓰지 않는다.
+
+---
+
+## v2.7.2 후속: `DECOMPILED_COLOCATED_CAP` 분리 (Phase 2C++.1)
+
+v2.7.2는 `confidence` 의미는 그대로 두고 **cap 계층만 5단계로 확장**했다. 이전에는 `taint_propagation.decompiled_colocated`가 inline 리터럴 `0.50`을 사용해 semantic이 `confidence_caps.py` 밖에 흩어져 있었다.
+
+### 변경 전/후
+
+| 버전 | decompiled_colocated cap | 근거 |
+|---|---|---|
+| v2.4–v2.7.1 | 0.50 (inline literal) | 주석 "slightly above co-occurrence(0.40)" — 유일한 문서화 |
+| v2.7.2+ | 0.45 (`DECOMPILED_COLOCATED_CAP`) | 상수 + docstring + unit test로 고정 |
+
+### 새 cap 계층 (5 tier ascending)
+
+```
+SYMBOL_COOCCURRENCE       0.40   심볼 공존만. 코드 경로 미확인
+DECOMPILED_COLOCATED      0.45   디컴파일 body 내 공존. inline CALL 노출 분 +0.05
+STATIC_CODE_VERIFIED      0.55   디컴파일 코드 검토됨, LLM taint trace는 없음
+STATIC_ONLY               0.60   static_reference observation ceiling
+PCODE_VERIFIED            0.75   P-code SSA dataflow로 source→sink 확증
+```
+
+### 왜 0.45인가 (v2.4.0 외부 리뷰 반영)
+
+v2.4.0 외부 리뷰(`docs/upgrade_plz.md`)는 Strategy 3 `decompiled_colocated`의 confidence 0.60이 symbol co-occurrence(0.40)과 evidence 수준이 본질적으로 같은데 +0.20 bonus를 받는다고 지적했다. v2.5–v2.7.1 동안 inline 값이 0.50으로 낮아졌지만 cap 계층 밖에 있어 semantic이 흐렸다. v2.7.2는:
+
+1. `confidence_caps.py`에 별도 상수 분리 → semantic ladder 외부 인용 가능
+2. 0.50 → **0.45** 추가 하향 — SYMBOL_COOCCURRENCE(0.40) 바로 위 위치가 "증거 수준 동등 + inline CALL 노출분 +0.05"를 정확히 표현
+3. STATIC_CODE_VERIFIED(0.55) 아래 유지 — SSA def-use proof 없음을 명시
+
+### Consumer 영향
+
+- `v2.7.1 이전 결과에서 decompiled_colocated confidence 0.50을 봐왔던 downstream consumer`: v2.7.2부터 동일 evidence class가 0.45로 보고됨. ROC threshold가 0.50에 고정돼 있었다면 **true positive 일부가 아래로 밀려날 수 있음**.
+- 완화: `priority_score`는 이 cap 변화에 영향받지 않음 (weights 재계산 없음). detection threshold를 0.45로 조정하면 v2.7.1 이전과 recall 동일.
+- CVE finding은 `cve_scan.py`에서 `STATIC_CODE_VERIFIED_CAP=0.55`를 그대로 쓰므로 영향 없음.
