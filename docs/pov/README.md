@@ -48,6 +48,34 @@ as they existed at PoV time.
    `analyst_digest.exploitability_verdict.state == "VERIFIED"` with
    `["VERIFIED_ALL_GATES_PASSED", "VERIFIED_REPRO_3_OF_3"]`.
 
+## Privileged executor setup (required for real-run verified_chain)
+
+`dynamic_validation` captures network pcap + firewall ruleset via
+`tcpdump`, `iptables-save`, `ip6tables-save`, and `nft list ruleset`.
+All four require root. SCOUT resolves a privileged executor via:
+
+1. `AIEDGE_PRIV_RUNNER` env var (split via `shlex`) if set and
+   executable.
+2. Fallback: `sudo -n <cmd>` if `sudo` is on PATH.
+3. Fallback: no-op (emits `privileged_executor_missing` /
+   `sudo_nopasswd_required` limitations, which map to `boot_flaky` in
+   `scripts/build_verified_chain.py` and block `state=pass`).
+
+To reach `state=pass` on a real run, either configure `AIEDGE_PRIV_RUNNER`
+to a wrapper that does the escalation, or install a `/etc/sudoers.d/`
+NOPASSWD entry restricted to exactly these four commands. Example
+installed on the 2026-04-25 reference workstation:
+
+```
+# /etc/sudoers.d/scout-priv
+rootk1m ALL=(root) NOPASSWD: /usr/sbin/iptables-save, /usr/sbin/ip6tables-save, /usr/sbin/nft, /usr/bin/tcpdump
+```
+
+Install with `visudo -c -f <file>` validation first, then
+`sudo install -m 0440 -o root -g root <file> /etc/sudoers.d/scout-priv`.
+Paths may differ across distros; run `which tcpdump iptables-save` to
+confirm before writing the sudoers entry.
+
 ## File naming convention
 
 `<ISO-date>_<vendor_device>_verified.json` — e.g. `2026-04-24_r7000_verified.json`.
