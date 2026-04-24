@@ -6,8 +6,9 @@ LABEL maintainer="SCOUT AIEdge <scout@aiedge.local>" \
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# FirmAE commit SHA — pin for reproducible builds; override with --build-arg
-ARG FIRMAE_COMMIT=2e8b5c1e7f4a3d6c9b0e2f1a4d7c8b5e3f2a1d9c
+# FirmAE commit SHA -- pin for reproducible builds; override with --build-arg.
+# Current pin: pr0v3rbs/FirmAE master HEAD as of 2026-04-24.
+ARG FIRMAE_COMMIT=4030f2421b2432ff1d3ddb6fe0fc40296ff53dbf
 
 # All FirmAE dependencies (from install.sh) + QEMU + network tools
 RUN apt-get update && apt-get install -y \
@@ -29,7 +30,11 @@ RUN apt-get update && apt-get install -y \
     net-tools iproute2 iputils-ping iptables bridge-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --no-cache-dir psycopg2-binary coloredlogs python-magic
+# apt already provides python3-psycopg2 and python3-magic; we only need
+# coloredlogs (FirmAE run.sh imports it). Adding --break-system-packages is
+# necessary on Ubuntu 22.04 images that ship PEP 668 markers, harmless elsewhere.
+RUN python3 -m pip install --no-cache-dir --break-system-packages coloredlogs || \
+    python3 -m pip install --no-cache-dir coloredlogs
 
 # Install binwalk (required by FirmAE extractor)
 RUN wget -q https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.gz \
