@@ -1,0 +1,190 @@
+{
+  "chain_id": "chain-cred-mgmt-takeover",
+  "demo_scope": "mechanical PoV -- private_exploits override + VERIFIED verdict end-to-end",
+  "evidence_bundle": {
+    "artifacts": {
+      "execution_logs": [
+        "exploits/chain_chain-cred-mgmt-takeover/execution_log_1.txt",
+        "exploits/chain_chain-cred-mgmt-takeover/execution_log_2.txt",
+        "exploits/chain_chain-cred-mgmt-takeover/execution_log_3.txt"
+      ],
+      "network_capture": "exploits/chain_chain-cred-mgmt-takeover/network_capture.pcap",
+      "poc_sha256": "exploits/chain_chain-cred-mgmt-takeover/poc_sha256.txt"
+    },
+    "attempts": [
+      {
+        "attempt": 1,
+        "proof_evidence": "autopoc_mode=analyst_authored candidate_id=private:chain-cred-mgmt-takeover summary=R7000 unauthenticated device-config read via currentsetting.htm probe=http_get_unauth target=127.0.0.1:8090 bytes=226 readback_hash=c372b4348a4e9389291e0339338693c721ffd7ff72db192a1d149d1d07021319 marker_hit=1 socket_error=none",
+        "proof_type": "arbitrary_read",
+        "reason_code": "attempt_pass",
+        "status": "pass",
+        "timestamp": "2026-04-24T08:28:53Z"
+      },
+      {
+        "attempt": 2,
+        "proof_evidence": "autopoc_mode=analyst_authored candidate_id=private:chain-cred-mgmt-takeover summary=R7000 unauthenticated device-config read via currentsetting.htm probe=http_get_unauth target=127.0.0.1:8090 bytes=226 readback_hash=c372b4348a4e9389291e0339338693c721ffd7ff72db192a1d149d1d07021319 marker_hit=1 socket_error=none",
+        "proof_type": "arbitrary_read",
+        "reason_code": "attempt_pass",
+        "status": "pass",
+        "timestamp": "2026-04-24T08:28:53Z"
+      },
+      {
+        "attempt": 3,
+        "proof_evidence": "autopoc_mode=analyst_authored candidate_id=private:chain-cred-mgmt-takeover summary=R7000 unauthenticated device-config read via currentsetting.htm probe=http_get_unauth target=127.0.0.1:8090 bytes=226 readback_hash=c372b4348a4e9389291e0339338693c721ffd7ff72db192a1d149d1d07021319 marker_hit=1 socket_error=none",
+        "proof_type": "arbitrary_read",
+        "reason_code": "attempt_pass",
+        "status": "pass",
+        "timestamp": "2026-04-24T08:28:53Z"
+      }
+    ],
+    "chain_id": "chain-cred-mgmt-takeover",
+    "exploitability_tier": "dynamic_repro",
+    "generated_at": "2026-04-24T08:28:53Z",
+    "pcap": {
+      "reason": "tcpdump_capture_empty",
+      "status": "placeholder"
+    },
+    "policy": {
+      "private_plugin_path_recorded": false,
+      "source_copied_to_run_dir": false
+    },
+    "reproducibility": {
+      "attempted": 3,
+      "passed": 3,
+      "reason_code": "repro_pass",
+      "requested": 3,
+      "status": "pass"
+    },
+    "runtime": {
+      "cleanup_error": "",
+      "setup_error": "",
+      "target_ip": "127.0.0.1",
+      "target_port": 8090
+    },
+    "schema_version": "exploit-evidence-v1"
+  },
+  "firmware_input_sha256": "b28bf08e9d2c32d12d5a7bda45a93066d8bdf97274defc30f15fc36a437d02fb",
+  "firmware_label": "R7000-V1.0.11.136_10.2.120.chk",
+  "plugin_source_path": "private_exploits/chain-cred-mgmt-takeover.py",
+  "target_mock": "127.0.0.1:8090 (synthetic R7000 httpd)",
+  "verified_chain": {
+    "attempts": [
+      {
+        "attempt": 1,
+        "bundle_dir": "exploits/chain_chain-cred-mgmt-takeover",
+        "evidence_refs": [
+          "exploits/chain_chain-cred-mgmt-takeover/evidence_bundle.json",
+          "exploits/chain_chain-cred-mgmt-takeover/execution_log_1.txt",
+          "exploits/chain_chain-cred-mgmt-takeover/network_capture.pcap"
+        ],
+        "finished_at": "2026-04-24T08:28:53Z",
+        "started_at": "2026-04-24T08:28:53Z",
+        "status": "pass"
+      },
+      {
+        "attempt": 2,
+        "bundle_dir": "exploits/chain_chain-cred-mgmt-takeover",
+        "evidence_refs": [
+          "exploits/chain_chain-cred-mgmt-takeover/evidence_bundle.json",
+          "exploits/chain_chain-cred-mgmt-takeover/execution_log_2.txt",
+          "exploits/chain_chain-cred-mgmt-takeover/network_capture.pcap"
+        ],
+        "finished_at": "2026-04-24T08:28:53Z",
+        "started_at": "2026-04-24T08:28:53Z",
+        "status": "pass"
+      },
+      {
+        "attempt": 3,
+        "bundle_dir": "exploits/chain_chain-cred-mgmt-takeover",
+        "evidence_refs": [
+          "exploits/chain_chain-cred-mgmt-takeover/evidence_bundle.json",
+          "exploits/chain_chain-cred-mgmt-takeover/execution_log_3.txt",
+          "exploits/chain_chain-cred-mgmt-takeover/network_capture.pcap"
+        ],
+        "finished_at": "2026-04-24T08:28:53Z",
+        "started_at": "2026-04-24T08:28:53Z",
+        "status": "pass"
+      }
+    ],
+    "dynamic_validation": {
+      "bundle_dir": "stages/dynamic_validation",
+      "evidence_refs": [
+        "stages/dynamic_validation/dynamic_validation.json",
+        "stages/dynamic_validation/firmae/boot.log",
+        "stages/dynamic_validation/isolation/firewall_snapshot.txt",
+        "stages/dynamic_validation/network/interfaces.json",
+        "stages/dynamic_validation/network/ports.json",
+        "stages/dynamic_validation/pcap/dynamic_validation.pcap",
+        "stages/dynamic_validation/probes/http.json",
+        "stages/dynamic_validation/qemu_user/argv.json",
+        "stages/dynamic_validation/qemu_user/proof.json",
+        "stages/dynamic_validation/qemu_user/qemu_user.log"
+      ],
+      "isolation_verified": true
+    },
+    "evidence_refs": [
+      "manifest.json",
+      "stages/dynamic_validation/dynamic_validation.json",
+      "stages/dynamic_validation/firmae/boot.log",
+      "stages/dynamic_validation/isolation/firewall_snapshot.txt",
+      "stages/dynamic_validation/network/interfaces.json",
+      "stages/dynamic_validation/network/ports.json",
+      "stages/dynamic_validation/pcap/dynamic_validation.pcap",
+      "stages/dynamic_validation/probes/http.json",
+      "stages/dynamic_validation/qemu_user/argv.json",
+      "stages/dynamic_validation/qemu_user/proof.json",
+      "stages/dynamic_validation/qemu_user/qemu_user.log",
+      "exploits/chain_chain-cred-mgmt-takeover/evidence_bundle.json",
+      "exploits/chain_chain-cred-mgmt-takeover/execution_log_1.txt",
+      "exploits/chain_chain-cred-mgmt-takeover/network_capture.pcap",
+      "exploits/chain_chain-cred-mgmt-takeover/execution_log_2.txt",
+      "exploits/chain_chain-cred-mgmt-takeover/execution_log_3.txt"
+    ],
+    "execution": {
+      "max_workers": 1,
+      "mode": "sequential"
+    },
+    "firmware": {
+      "profile": "exploit",
+      "sha256": "b28bf08e9d2c32d12d5a7bda45a93066d8bdf97274defc30f15fc36a437d02fb"
+    },
+    "generated_at": "2026-04-24T08:29:56Z",
+    "run_id": "2026-04-13_1014_sha256-b28bf08e9d2c",
+    "schema_version": "verified-chain-v1",
+    "timestamps": {
+      "finished_at": "2026-04-13T10:26:13.659876Z",
+      "started_at": "2026-04-13T10:26:12.699201Z"
+    },
+    "tool_versions": {
+      "firmae_commit": "unknown",
+      "firmae_version": "unknown",
+      "iproute2": "ip utility, iproute2-6.1.0, libbpf 1.3.0",
+      "tcpdump": "tcpdump version 4.99.4"
+    },
+    "verdict": {
+      "evidence_refs": [
+        "stages/dynamic_validation/dynamic_validation.json",
+        "stages/dynamic_validation/firmae/boot.log",
+        "stages/dynamic_validation/isolation/firewall_snapshot.txt",
+        "stages/dynamic_validation/network/interfaces.json",
+        "stages/dynamic_validation/network/ports.json",
+        "stages/dynamic_validation/pcap/dynamic_validation.pcap",
+        "stages/dynamic_validation/probes/http.json",
+        "stages/dynamic_validation/qemu_user/argv.json",
+        "stages/dynamic_validation/qemu_user/proof.json",
+        "stages/dynamic_validation/qemu_user/qemu_user.log",
+        "exploits/chain_chain-cred-mgmt-takeover/evidence_bundle.json",
+        "exploits/chain_chain-cred-mgmt-takeover/execution_log_1.txt",
+        "exploits/chain_chain-cred-mgmt-takeover/network_capture.pcap",
+        "exploits/chain_chain-cred-mgmt-takeover/execution_log_2.txt",
+        "exploits/chain_chain-cred-mgmt-takeover/execution_log_3.txt",
+        "manifest.json"
+      ],
+      "reason_codes": [
+        "isolation_verified",
+        "repro_3_of_3"
+      ],
+      "state": "pass"
+    }
+  }
+}
