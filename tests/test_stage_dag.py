@@ -174,6 +174,10 @@ def test_stage_deps_exploitability_dossier_requires_er605_style_inputs() -> None
     assert "chain_construction" in STAGE_DEPS["exploitability_dossier"]
     assert "cve_scan" in STAGE_DEPS["exploitability_dossier"]
     assert "firmware_profile" in STAGE_DEPS["exploitability_dossier"]
+    assert "exploitability_dossier" in STAGE_DEPS["protocol_model"]
+    assert "protocol_model" in STAGE_DEPS["exploit_state_machine"]
+    assert "exploit_state_machine" in STAGE_DEPS["primitive_verifier"]
+    assert "exploit_state_machine" in STAGE_DEPS["exploit_autopoc"]
     assert "exploitability_dossier" in STAGE_DEPS["exploit_autopoc"]
 
 

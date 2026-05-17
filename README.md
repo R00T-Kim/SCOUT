@@ -14,7 +14,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
-[![Stages](https://img.shields.io/badge/Pipeline-43_Stages-blueviolet?style=for-the-badge)]()
+[![Stages](https://img.shields.io/badge/Pipeline-46_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
 [![Version](https://img.shields.io/badge/Version-2.7.2-red?style=for-the-badge)]()
 
@@ -84,7 +84,7 @@
 ## How It Works
 
 ```
-  firmware.bin  ──>  43-stage pipeline  ──>  SARIF findings       ──>  Web viewer
+  firmware.bin  ──>  46-stage pipeline  ──>  SARIF findings       ──>  Web viewer
                      (auto Ghidra)          CycloneDX SBOM+VEX       TUI dashboard
                      (auto CVE match)       Evidence chain            GitHub/VS Code
                      (optional LLM)         Exploitability dossier    MCP for AI agents
@@ -149,7 +149,7 @@
 | :compass: | **Explainability Surface** *(v2.6.1)* | `reasoning_trail` persisted across findings, analyst Markdown, TUI, and web viewer so reviewers can inspect matched evidence lineage — not just a final score. Advocate / critic / decision / pattern-hit entries with 200-char excerpt redaction |
 | :inbox_tray: | **Analyst-in-the-loop Channel** *(v2.6.1)* | 4 MCP tools for reasoning lookup, hint injection, verdict override, and category filtering. Hints loop back into next-run advocate prompt via `AIEDGE_FEEDBACK_DIR` (opt-in, `fcntl.flock`-safe) |
 | :triangular_ruler: | **Detection vs Priority Separation** *(v2.6.0)* | `confidence` stays evidence-bound (≤0.55 static cap); `priority_score` / `priority_inputs` capture EPSS, reachability, backport, and CVSS as ranking signals. See [`docs/scoring_calibration.md`](docs/scoring_calibration.md) |
-| :speedboat: | **Parallel DAG Execution** *(v2.6.0, PoC)* | `--experimental-parallel [N]` opt-in level-wise stage parallelism (ThreadPoolExecutor + Kahn topo levels). 15 levels / max-width 7 on the 43-stage pipeline. Sequential path unchanged |
+| :speedboat: | **Parallel DAG Execution** *(v2.6.0, PoC)* | `--experimental-parallel [N]` opt-in level-wise stage parallelism (ThreadPoolExecutor + Kahn topo levels). 15 levels / max-width 7 on the 46-stage pipeline. Sequential path unchanged |
 | :shield: | **Security Assessment** | X.509 cert scan, boot service audit, filesystem permission checks, credential mapping, hardcoded secret detection |
 | :test_tube: | **Fuzzing** *(optional)* | AFL++ with CMPLOG, persistent mode, NVRAM faker, harness generation, crash triage |
 | :bug: | **Emulation** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs inspection) + GDB remote debug |
@@ -179,7 +179,7 @@
 - SCOUT is **not** positioned as a fully autonomous exploit agent in v2.6.1.
 - Multi-agent exploit chains, pair-grounded evaluation loops, and autonomous fuzz harness generation remain **Phase 2D / reviewer-eval lane** work.
 
-## Pipeline (43 Stages)
+## Pipeline (46 Stages)
 
 ```
 Firmware --> Unpack --> Profile --> Inventory --> Ghidra --> Semantic Classification
@@ -189,13 +189,14 @@ Firmware --> Unpack --> Profile --> Inventory --> Ghidra --> Semantic Classifica
     --> Graph --> Attack Surface --> Findings
     --> LLM Triage --> LLM Synthesis --> Emulation --> [Fuzzing]
     --> PoC Refinement --> Chain Construction --> Exploitability Dossier
+    --> Protocol Model --> Exploit State Machine --> Primitive Verifier
     --> Exploit Chain --> PoC --> Verification
 ```
 
 Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require optional external tools (AFL++/Docker).
 
 <details>
-<summary><strong>Pipeline Stages Reference (43)</strong></summary>
+<summary><strong>Pipeline Stages Reference (46)</strong></summary>
 
 | Stage | Module | Purpose | LLM? | Cost |
 |-------|--------|---------|------|------|
@@ -232,6 +233,9 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | `poc_refinement` | `poc_refinement.py` | Iterative PoC generation (5 attempts) | Yes | Medium |
 | `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
 | `exploitability_dossier` | `exploitability_dossier.py` | ER605-style analysis-only exploitability decision log | No | $0 |
+| `protocol_model` | `protocol_model.py` | Run-local RAG protocol/input model + safe encoder skeleton | Optional | Low |
+| `exploit_state_machine` | `exploit_state_machine.py` | Candidate-level reachability/trigger/leak/control proof DAG | No | $0 |
+| `primitive_verifier` | `primitive_verifier.py` | Verifier-backed primitive classification from bundles/crashes/GDB traces | No | $0 |
 | `exploit_gate` | `stage_registry.py` | Exploit promotion gate | No | $0 |
 | `exploit_chain` | `exploit_chain.py` | Exploit chain validation | No | $0 |
 | `exploit_autopoc` | `exploit_autopoc.py` | Automated PoC orchestration | Yes | Medium |
@@ -348,7 +352,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for full version history and [`docs/scoring_c
 
 | Command | Description |
 |---------|-------------|
-| `./scout analyze <firmware>` | Full 43-stage analysis pipeline |
+| `./scout analyze <firmware>` | Full 46-stage analysis pipeline |
 | `./scout analyze <firmware> --quiet` | Suppress real-time progress output (CI/scripted use) |
 | `./scout analyze-8mb <firmware>` | Truncated 8MB canonical track |
 | `./scout stages <run_dir> --stages X,Y` | Rerun specific stages |

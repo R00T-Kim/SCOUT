@@ -649,6 +649,42 @@ def _make_exploitability_dossier_stage(
     return ExploitabilityDossierStage()
 
 
+def _make_protocol_model_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .protocol_model import ProtocolModelStage
+
+    _ = info, source_input_path, remaining_s
+    return ProtocolModelStage(no_llm=no_llm)
+
+
+def _make_exploit_state_machine_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .exploit_state_machine import ExploitStateMachineStage
+
+    _ = info, source_input_path, remaining_s, no_llm
+    return ExploitStateMachineStage()
+
+
+def _make_primitive_verifier_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .primitive_verifier import PrimitiveVerifierStage
+
+    _ = info, source_input_path, remaining_s, no_llm
+    return PrimitiveVerifierStage()
+
+
 def _make_csource_identification_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -715,6 +751,9 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "poc_refinement": _make_poc_refinement_stage,
     "chain_construction": _make_chain_construction_stage,
     "exploitability_dossier": _make_exploitability_dossier_stage,
+    "protocol_model": _make_protocol_model_stage,
+    "exploit_state_machine": _make_exploit_state_machine_stage,
+    "primitive_verifier": _make_primitive_verifier_stage,
     "exploit_gate": _make_exploit_gate_stage,
     "exploit_chain": _make_exploit_chain_stage,
     "exploit_autopoc": _make_exploit_autopoc_stage,
