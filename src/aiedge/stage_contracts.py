@@ -401,6 +401,35 @@ def _validate_poc_validation_json(
         _append_error(errors, path, "verification_reason_codes must be list")
 
 
+def _validate_exploitability_dossier_json(
+    path: Path, payload: dict[str, object], errors: list[str]
+) -> None:
+    if payload.get("schema_version") != "exploitability-dossier-v1":
+        _append_error(errors, path, "schema_version must equal 'exploitability-dossier-v1'")
+    if not isinstance(payload.get("status"), str):
+        _append_error(errors, path, "status must be string")
+    if not isinstance(payload.get("claim_boundary"), str):
+        _append_error(errors, path, "claim_boundary must be string")
+    if not isinstance(payload.get("target_context"), dict):
+        _append_error(errors, path, "target_context must be object")
+    for key in (
+        "input_surface_map",
+        "decision_logs",
+        "chain_hypotheses",
+        "patch_variant_questions",
+        "limitations",
+    ):
+        if not isinstance(payload.get(key), list):
+            _append_error(errors, path, f"{key} must be list")
+    refs_any = payload.get("evidence_refs")
+    if not isinstance(refs_any, list):
+        _append_error(errors, path, "evidence_refs must be list")
+    else:
+        _validate_path_list(cast(list[object], refs_any), path=path, field="evidence_refs", errors=errors)
+    if not isinstance(payload.get("summary"), dict):
+        _append_error(errors, path, "summary must be object")
+
+
 def _validate_semantic_classification_json(
     path: Path, payload: dict[str, object], errors: list[str]
 ) -> None:
@@ -534,6 +563,7 @@ _ARTIFACT_VALIDATORS: dict[str, Callable[[Path, dict[str, object], list[str]], N
     "fs.json": _validate_ota_fs_json,
     "payload.json": _validate_ota_payload_json,
     "poc_validation.json": _validate_poc_validation_json,
+    "exploitability_dossier.json": _validate_exploitability_dossier_json,
     "classified_functions.json": _validate_semantic_classification_json,
     "web_ui.json": _validate_web_ui_json,
     "lineage.json": _validate_firmware_lineage_json,

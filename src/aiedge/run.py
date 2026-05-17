@@ -2352,6 +2352,11 @@ def analyze_run(
         cls = cast(Any, getattr(mod, "ChainConstructorStage"))
         return cast(Stage, cls(no_llm=no_llm))
 
+    def _make_exploitability_dossier() -> Stage:
+        mod = importlib.import_module("aiedge.exploitability_dossier")
+        cls = cast(Any, getattr(mod, "ExploitabilityDossierStage"))
+        return cast(Stage, cls())
+
     extraction_default_timeout_s = 600
     extraction_timeout_s: int | None
     budget_limits: list[str] = []
@@ -4186,6 +4191,37 @@ def analyze_run(
             list(existing_limits_after_llm) + list(llm_synthesis_limits),
         )
 
+    try:
+        dossier_stage = _make_exploitability_dossier()
+        dossier_rep = run_stages([dossier_stage], ctx, on_progress=on_progress)
+        _write_stage_manifests(
+            ctx=ctx,
+            stages=[dossier_stage],
+            report=dossier_rep,
+        )
+        for stage_result in dossier_rep.stage_results:
+            _apply_stage_result_to_report(report, stage_result, budget_s=budget_s)
+        if dossier_rep.limitations:
+            existing_limits_after_dossier = normalize_limitations_list(
+                report.get("limitations")
+            )
+            report["limitations"] = cast(
+                list[JsonValue],
+                list(existing_limits_after_dossier) + list(dossier_rep.limitations),
+            )
+    except Exception as exc:
+        existing_limits_after_dossier_err = normalize_limitations_list(
+            report.get("limitations")
+        )
+        report["limitations"] = cast(
+            list[JsonValue],
+            list(existing_limits_after_dossier_err)
+            + [
+                "exploitability_dossier execution failed: "
+                + f"{type(exc).__name__}: {exc}"
+            ],
+        )
+
     if manifest_profile == "exploit":
         try:
             from .exploit_autopoc import ExploitAutoPoCStage
@@ -4219,6 +4255,45 @@ def analyze_run(
                     + f"{type(exc).__name__}: {exc}"
                 ],
             )
+
+        for post_autopoc_stage_name in ("poc_validation", "exploit_policy"):
+            try:
+                if post_autopoc_stage_name == "poc_validation":
+                    from .poc_validation import PocValidationStage
+
+                    post_stage: Stage = PocValidationStage()
+                else:
+                    from .exploit_policy import ExploitEvidencePolicyStage
+
+                    post_stage = ExploitEvidencePolicyStage()
+                post_rep = run_stages([post_stage], ctx, on_progress=on_progress)
+                _write_stage_manifests(
+                    ctx=ctx,
+                    stages=[post_stage],
+                    report=post_rep,
+                )
+                for stage_result in post_rep.stage_results:
+                    _apply_stage_result_to_report(report, stage_result, budget_s=budget_s)
+                if post_rep.limitations:
+                    existing_limits_after_post = normalize_limitations_list(
+                        report.get("limitations")
+                    )
+                    report["limitations"] = cast(
+                        list[JsonValue],
+                        list(existing_limits_after_post) + list(post_rep.limitations),
+                    )
+            except Exception as exc:
+                existing_limits_after_post_err = normalize_limitations_list(
+                    report.get("limitations")
+                )
+                report["limitations"] = cast(
+                    list[JsonValue],
+                    list(existing_limits_after_post_err)
+                    + [
+                        f"{post_autopoc_stage_name} post-autopoc execution failed: "
+                        + f"{type(exc).__name__}: {exc}"
+                    ],
+                )
 
     report["exploit_assessment"] = _build_exploit_assessment(
         profile=manifest_profile, report=report, run_dir=info.run_dir

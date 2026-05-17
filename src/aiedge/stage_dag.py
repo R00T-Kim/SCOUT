@@ -63,9 +63,12 @@ STAGE_DEPS: dict[str, frozenset[str]] = {
     "fuzzing": frozenset({"dynamic_validation"}),
     "poc_refinement": frozenset({"fuzzing", "adversarial_triage"}),
     "chain_construction": frozenset({"adversarial_triage", "graph"}),
+    "exploitability_dossier": frozenset(
+        {"attack_surface", "chain_construction", "cve_scan", "firmware_profile", "inventory"}
+    ),
     "exploit_gate": frozenset({"chain_construction"}),
     "exploit_chain": frozenset({"exploit_gate"}),
-    "exploit_autopoc": frozenset({"exploit_chain"}),
+    "exploit_autopoc": frozenset({"exploit_chain", "exploitability_dossier"}),
     "poc_validation": frozenset({"exploit_autopoc", "exploit_chain"}),
     "exploit_policy": frozenset({"poc_validation"}),
     "compliance_report": frozenset({"exploit_policy", "sbom", "cve_scan"}),

@@ -10,7 +10,11 @@ SCOUT의 stage contract는 두 층으로 나뉜다.
    - 대표 JSON artifact에 대해 top-level shape를 확인한다.
    - 예: `inventory.json`, `firmware_profile.json`, `sbom.json`,
      `cve_matches.json`, `taint_results.json`, `verified_alerts.json`,
-     `triaged_findings.json`, `findings.json`, `communication_graph.json`
+     `triaged_findings.json`, `findings.json`, `communication_graph.json`,
+     `exploitability_dossier.json`
+
+`exploitability_dossier.json`의 세부 의미론은
+[`docs/exploitability_dossier_contract.md`](exploitability_dossier_contract.md)에 정의한다.
 
 ## CLI
 

@@ -637,6 +637,18 @@ def _make_chain_construction_stage(
     return ChainConstructorStage(no_llm=no_llm)
 
 
+def _make_exploitability_dossier_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .exploitability_dossier import ExploitabilityDossierStage
+
+    _ = info, source_input_path, remaining_s, no_llm
+    return ExploitabilityDossierStage()
+
+
 def _make_csource_identification_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -702,6 +714,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "fuzzing": _make_fuzzing_stage,
     "poc_refinement": _make_poc_refinement_stage,
     "chain_construction": _make_chain_construction_stage,
+    "exploitability_dossier": _make_exploitability_dossier_stage,
     "exploit_gate": _make_exploit_gate_stage,
     "exploit_chain": _make_exploit_chain_stage,
     "exploit_autopoc": _make_exploit_autopoc_stage,

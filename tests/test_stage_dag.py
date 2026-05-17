@@ -167,6 +167,16 @@ def test_stage_deps_ipc_chain_from_docs() -> None:
     assert "graph" in STAGE_DEPS["attack_surface"]
 
 
+def test_stage_deps_exploitability_dossier_requires_er605_style_inputs() -> None:
+    """Dossier must run after the evidence needed for ER605-style decision logs."""
+
+    assert "attack_surface" in STAGE_DEPS["exploitability_dossier"]
+    assert "chain_construction" in STAGE_DEPS["exploitability_dossier"]
+    assert "cve_scan" in STAGE_DEPS["exploitability_dossier"]
+    assert "firmware_profile" in STAGE_DEPS["exploitability_dossier"]
+    assert "exploitability_dossier" in STAGE_DEPS["exploit_autopoc"]
+
+
 def test_stage_deps_topo_levels_cover_all_registered() -> None:
     """topo_levels over the full registered set visits every stage exactly once."""
     registered = set(stage_factories().keys())
