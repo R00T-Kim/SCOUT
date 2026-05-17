@@ -2372,6 +2372,11 @@ def analyze_run(
         cls = cast(Any, getattr(mod, "PrimitiveVerifierStage"))
         return cast(Stage, cls())
 
+    def _make_crash_replay_stage() -> Stage:
+        mod = importlib.import_module("aiedge.crash_replay")
+        cls = cast(Any, getattr(mod, "CrashReplayStage"))
+        return cast(Stage, cls())
+
     extraction_default_timeout_s = 600
     extraction_timeout_s: int | None
     budget_limits: list[str] = []
@@ -4240,6 +4245,7 @@ def analyze_run(
     exploit_dag_stages: list[Stage] = [
         _make_protocol_model_stage(),
         _make_exploit_state_machine_stage(),
+        _make_crash_replay_stage(),
         _make_primitive_verifier_stage(),
     ]
     try:

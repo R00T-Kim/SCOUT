@@ -6,7 +6,7 @@ Enforces:
 2. No "2-tier confidence" or "3-tier confidence" (use 4-tier)
 3. No bare "CRA compliant" or "compliance" (use "compatible with")
 4. All percentage claims must be followed by baseline metadata in same paragraph
-5. Stage count must be 42, 43, or 46 (not 34, 41)
+5. Stage count must be 42, 43, 46, or 47 (not 34, 41)
 
 Exit 0 = clean. Exit 1 = violations.
 """
@@ -126,7 +126,7 @@ def check_cra_compliance(text: str, file: str) -> list[Violation]:
 
 
 def check_stage_count(text: str, file: str) -> list[Violation]:
-    """Rule 5: Stage count must be 42, 43, or 46 (not 34, 35, 41)."""
+    """Rule 5: Stage count must be 42, 43, 46, or 47 (not 34, 35, 41)."""
     violations = []
     # Match "N-stage" or "N stages" where N is 30-41
     pattern = re.compile(r"\b(3[0-9]|4[01])[-\s]stages?\b")
@@ -139,7 +139,7 @@ def check_stage_count(text: str, file: str) -> list[Violation]:
                     line_no=i,
                     line=line.strip(),
                     rule="stage_count",
-                    message=f"'{m.group(0)}' stage count, use '42-stage', '43-stage', or '46-stage'",
+                    message=f"'{m.group(0)}' stage count, use '42-stage', '43-stage', '46-stage', or '47-stage'",
                 )
             )
     return violations

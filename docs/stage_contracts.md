@@ -12,7 +12,8 @@ SCOUT의 stage contract는 두 층으로 나뉜다.
      `cve_matches.json`, `taint_results.json`, `verified_alerts.json`,
      `triaged_findings.json`, `findings.json`, `communication_graph.json`,
      `exploitability_dossier.json`, `protocol_model.json`,
-     `exploit_state_machine.json`, `primitive_verifier.json`
+     `exploit_state_machine.json`, `crash_replay.json`,
+     `primitive_verifier.json`
 
 `exploitability_dossier.json`의 세부 의미론은
 [`docs/exploitability_dossier_contract.md`](exploitability_dossier_contract.md)에 정의한다.

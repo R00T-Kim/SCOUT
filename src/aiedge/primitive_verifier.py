@@ -181,8 +181,39 @@ def _bundle_for_chain(run_dir: Path, chain_id: str) -> dict[str, object] | None:
     return None
 
 
+def _crash_replay_attempt_for_chain(run_dir: Path, chain_id: str) -> dict[str, object] | None:
+    obj = _load_json(run_dir / "stages" / "crash_replay" / "crash_replay.json")
+    if obj is None:
+        return None
+    for attempt in _list_dict(obj.get("attempts")):
+        if _clean_str(attempt.get("chain_id")) == chain_id:
+            return attempt
+    return None
+
+
+def _crash_replay_verdict(
+    attempt: dict[str, object]
+) -> tuple[str, str, list[str], list[dict[str, JsonValue]]]:
+    status = _clean_str(attempt.get("status"), "unknown")
+    refs = _clean_refs(attempt.get("evidence_refs"))
+    offsets_raw = attempt.get("cyclic_offsets")
+    offsets = _list_dict(offsets_raw)
+    if status == "crash_observed" and offsets:
+        return "control_influence_candidate", "pc_or_register_control", list(refs), offsets[:12]
+    if status == "crash_observed":
+        return "crash_observed", "dos_or_memory_corruption_candidate", list(refs), []
+    if status in {"planned_no_binary", "planned_qemu_missing", "skipped_gate"}:
+        return "planned_no_dynamic_evidence", "unknown", list(refs), []
+    return "runner_attempted_nonpass", "unknown", list(refs), []
+
+
 def _read_dynamic_texts(run_dir: Path) -> list[tuple[str, str]]:
-    roots = [run_dir / "stages" / "fuzzing", run_dir / "stages" / "dynamic_validation", run_dir / "logs"]
+    roots = [
+        run_dir / "stages" / "crash_replay",
+        run_dir / "stages" / "fuzzing",
+        run_dir / "stages" / "dynamic_validation",
+        run_dir / "logs",
+    ]
     out: list[tuple[str, str]] = []
     for root in roots:
         if not root.exists():
@@ -268,6 +299,9 @@ class PrimitiveVerifierStage:
             offsets: list[dict[str, JsonValue]] = []
             if bundle is not None:
                 status, primitive, evidence, offsets = _bundle_verdict(bundle)
+                refs.extend(evidence)
+            elif (crash_attempt := _crash_replay_attempt_for_chain(run_dir, machine.chain_id)) is not None:
+                status, primitive, evidence, offsets = _crash_replay_verdict(crash_attempt)
                 refs.extend(evidence)
             else:
                 status, primitive, evidence, offsets = _crash_verdict(dynamic_texts)

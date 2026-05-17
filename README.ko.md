@@ -14,7 +14,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
-[![Stages](https://img.shields.io/badge/Pipeline-46_Stages-blueviolet?style=for-the-badge)]()
+[![Stages](https://img.shields.io/badge/Pipeline-47_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
 [![Version](https://img.shields.io/badge/Version-2.7.2-red?style=for-the-badge)]()
 
@@ -84,7 +84,7 @@
 ## 작동 방식
 
 ```
-  firmware.bin  ──>  46단계 파이프라인  ──>  SARIF findings       ──>  웹 뷰어
+  firmware.bin  ──>  47단계 파이프라인  ──>  SARIF findings       ──>  웹 뷰어
                      (Ghidra 자동 감지)     CycloneDX SBOM+VEX       TUI 대시보드
                      (CVE 자동 매칭)        증거 체인                  GitHub/VS Code
                      (LLM 선택적)           Exploitability dossier    AI 에이전트 MCP
@@ -149,7 +149,7 @@
 | :compass: | **Explainability Surface** *(v2.6.1)* | finding / analyst markdown / TUI / 웹 뷰어에 `reasoning_trail`과 evidence lineage를 보존해, 왜 downgrade/uphold/priority 결정이 났는지 바로 추적 가능. advocate / critic / decision / pattern-hit 엔트리, raw response 200자 redaction |
 | :inbox_tray: | **Analyst-in-the-loop Channel** *(v2.6.1)* | reasoning 조회, hint injection, verdict override, category filter 4개 tool. `AIEDGE_FEEDBACK_DIR` opt-in으로 hint가 다음 런 advocate 프롬프트에 주입됨 (`fcntl.flock` 기반 쓰기 안전) |
 | :triangular_ruler: | **Detection vs Priority 분리** *(v2.6.0)* | `confidence`는 증거 강도만 (≤0.55 static cap), `priority_score` / `priority_inputs`는 EPSS·reachability·backport·CVSS 기반 운영 우선순위 신호만 담당. [`docs/scoring_calibration.md`](docs/scoring_calibration.md) 참조 |
-| :speedboat: | **병렬 DAG 실행** *(v2.6.0, PoC)* | `--experimental-parallel [N]` 기반 opt-in level-wise stage 병렬 실행 (ThreadPoolExecutor + Kahn topo). 46-stage 기준 15 level / max-width 7. 기존 순차 경로 무수정 |
+| :speedboat: | **병렬 DAG 실행** *(v2.6.0, PoC)* | `--experimental-parallel [N]` 기반 opt-in level-wise stage 병렬 실행 (ThreadPoolExecutor + Kahn topo). 47-stage 기준 15 level / max-width 7. 기존 순차 경로 무수정 |
 | :shield: | **보안 평가** | X.509 인증서 스캔, 부트 서비스 감사, 파일시스템 권한, 자격 증명 매핑, hardcoded secret 탐지 |
 | :test_tube: | **퍼징** *(선택)* | AFL++ CMPLOG, persistent mode, NVRAM faker, 하니스 생성, crash triage |
 | :bug: | **에뮬레이션** | 4-tier (FirmAE / Pandawan+FirmSolo / QEMU user-mode / rootfs 검사) + GDB 원격 디버깅 |
@@ -179,7 +179,7 @@
 - v2.6.1의 SCOUT는 **완전자율 exploit agent**로 포지셔닝하지 않는다.
 - multi-agent exploit chain, pair-grounded eval loop, LLM fuzz harness는 **Phase 2D / reviewer eval lane** 범위다.
 
-## 파이프라인 (46단계)
+## 파이프라인 (47단계)
 
 ```
 펌웨어 --> 언패킹 --> 프로파일 --> 인벤토리 --> Ghidra --> 시맨틱 분류
@@ -189,14 +189,14 @@
     --> 그래프 --> 공격 표면 --> Findings
     --> LLM 트리아지 --> LLM 합성 --> 에뮬레이션 --> [퍼징]
     --> PoC 개선 --> 체인 구성 --> Exploitability Dossier
-    --> Protocol Model --> Exploit State Machine --> Primitive Verifier
+    --> Protocol Model --> Exploit State Machine --> Crash Replay --> Primitive Verifier
     --> 익스플로잇 체인 --> PoC --> 검증
 ```
 
 Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이지는 선택적 외부 도구 필요 (AFL++/Docker).
 
 <details>
-<summary><strong>파이프라인 스테이지 레퍼런스 (46개)</strong></summary>
+<summary><strong>파이프라인 스테이지 레퍼런스 (47개)</strong></summary>
 
 | 스테이지 | 모듈 | 목적 | LLM | 비용 |
 |---------|------|------|-----|------|
@@ -235,6 +235,7 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | `exploitability_dossier` | `exploitability_dossier.py` | ER605-style analysis-only exploitability decision log | 아니오 | $0 |
 | `protocol_model` | `protocol_model.py` | run-local RAG 기반 protocol/input model + safe encoder skeleton | 선택 | 낮음 |
 | `exploit_state_machine` | `exploit_state_machine.py` | 후보별 reachability/trigger/leak/control proof DAG | 아니오 | $0 |
+| `crash_replay` | `crash_replay.py` | lab-gated QEMU/cyclic crash replay + GDB script 수집 | 아니오 | $0 |
 | `primitive_verifier` | `primitive_verifier.py` | evidence bundle/crash/GDB trace 기반 primitive 분류 | 아니오 | $0 |
 | `exploit_gate` | `stage_registry.py` | exploit 승격 게이트 | 아니오 | $0 |
 | `exploit_chain` | `exploit_chain.py` | exploit 체인 검증 | 아니오 | $0 |
@@ -317,7 +318,7 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 |                                                                    |
 |  --> 에뮬레이션 --> [퍼징] --> 익스플로잇 체인 --> PoC --> 검증       |
 |                                                                    |
-|  46단계 . SHA-256 매니페스트 . 4-tier 신뢰도 상한 (0.40/0.55/0.60/0.75)     |
+|  47단계 . SHA-256 매니페스트 . 4-tier 신뢰도 상한 (0.40/0.55/0.60/0.75)     |
 |  출력: SARIF + CycloneDX VEX + SLSA L2 + Markdown 보고서            |
 +--------------------------------------------------------------------+
 |                    핸드오프 (firmware_handoff.json)                 |
@@ -329,7 +330,7 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 
 | 계층 | 역할 | 결정적? |
 |:-----|:-----|:------:|
-| **SCOUT** | 증거 생산 (46단계) | 예 |
+| **SCOUT** | 증거 생산 (47단계) | 예 |
 | **핸드오프** | 엔진-오케스트레이터 JSON 계약 | 예 |
 | **Terminator** | LLM 심판, 동적 검증, 익스플로잇 개발 | 아니오 (감사 가능) |
 
@@ -352,7 +353,7 @@ _이 섹션은 위 carry-over corpus baseline과 별개로, 릴리즈 후 실펌
 
 | 명령어 | 설명 |
 |--------|------|
-| `./scout analyze <firmware>` | 전체 46단계 분석 파이프라인 |
+| `./scout analyze <firmware>` | 전체 47단계 분석 파이프라인 |
 | `./scout analyze <firmware> --quiet` | 진행 상황 출력 억제 (CI/스크립트 환경) |
 | `./scout analyze-8mb <firmware>` | 8MB 정규형 트랙 분석 |
 | `./scout stages <run_dir> --stages X,Y` | 특정 스테이지 재실행 |

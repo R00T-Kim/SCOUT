@@ -685,6 +685,18 @@ def _make_primitive_verifier_stage(
     return PrimitiveVerifierStage()
 
 
+def _make_crash_replay_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .crash_replay import CrashReplayStage
+
+    _ = info, source_input_path, remaining_s, no_llm
+    return CrashReplayStage()
+
+
 def _make_csource_identification_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -753,6 +765,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "exploitability_dossier": _make_exploitability_dossier_stage,
     "protocol_model": _make_protocol_model_stage,
     "exploit_state_machine": _make_exploit_state_machine_stage,
+    "crash_replay": _make_crash_replay_stage,
     "primitive_verifier": _make_primitive_verifier_stage,
     "exploit_gate": _make_exploit_gate_stage,
     "exploit_chain": _make_exploit_chain_stage,

@@ -471,6 +471,19 @@ def _validate_primitive_verifier_json(
         _append_error(errors, path, "summary must be object")
 
 
+def _validate_crash_replay_json(
+    path: Path, payload: dict[str, object], errors: list[str]
+) -> None:
+    if payload.get("schema_version") != "crash-replay-v1":
+        _append_error(errors, path, "schema_version must equal 'crash-replay-v1'")
+    if not isinstance(payload.get("status"), str):
+        _append_error(errors, path, "status must be string")
+    if not isinstance(payload.get("attempts"), list):
+        _append_error(errors, path, "attempts must be list")
+    if not isinstance(payload.get("summary"), dict):
+        _append_error(errors, path, "summary must be object")
+
+
 def _validate_semantic_classification_json(
     path: Path, payload: dict[str, object], errors: list[str]
 ) -> None:
@@ -607,6 +620,7 @@ _ARTIFACT_VALIDATORS: dict[str, Callable[[Path, dict[str, object], list[str]], N
     "exploitability_dossier.json": _validate_exploitability_dossier_json,
     "protocol_model.json": _validate_protocol_model_json,
     "exploit_state_machine.json": _validate_exploit_state_machine_json,
+    "crash_replay.json": _validate_crash_replay_json,
     "primitive_verifier.json": _validate_primitive_verifier_json,
     "classified_functions.json": _validate_semantic_classification_json,
     "web_ui.json": _validate_web_ui_json,
