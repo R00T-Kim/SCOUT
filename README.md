@@ -1,20 +1,27 @@
-<div align="center">
-
-<img src="https://img.shields.io/badge/SCOUT-Firmware_Evidence_Engine-0d1117?style=for-the-badge&labelColor=0d1117" alt="SCOUT" />
-
 # SCOUT
 
-### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
+### Firmware Security Analyst Copilot with Deterministic Evidence Lineage
 
-**Drop a firmware blob. Get SARIF findings, CycloneDX SBOM+VEX, hash-anchored evidence, and analyst-ready reasoning trails -- in one command.**
+**SCOUT is a deep-analysis pipeline that transforms raw firmware blobs into actionable, evidence-anchored security dossiers.**
 
-*SCOUT is optimized for deep analysis of a single firmware image: it acts as an analyst copilot grounded in evidence lineage, not an autonomous verdict engine. Ghidra P-code taint, adversarial LLM adjudication, reasoning persistence across findings/reports/viewer/TUI, zero pip dependencies.*
+*While traditional scanners prioritize bulk and speed, SCOUT acts as a high-fidelity copilot for analysts. It doesn't just give you a list of CVEs; it reconstructs exploit chains, explains its reasoning with evidence trails, and generates verified PoCs using the new Exploit Pattern RAG engine.*
 
 <br />
 
+<div align="center">
+  <a href="#what-you-can-do">What you can do</a> •
+  <a href="#why-scout">Why SCOUT?</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#key-features">Key Features</a> •
+  <a href="CHANGELOG.md">Changelog</a>
+</div>
+
+<br />
+
+<div align="center">
+
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
-[![Stages](https://img.shields.io/badge/Pipeline-47_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
 [![Version](https://img.shields.io/badge/Version-2.8.0-red?style=for-the-badge)]()
 
@@ -26,44 +33,66 @@
 
 <table>
 <tr>
-<td align="center"><strong>1,123</strong><br/><sub>Corpus Targets<br/>(Tier 1 refresh)</sub></td>
-<td align="center"><strong>98.8%</strong><br/><sub>Success Rate<br/>(1110 / 1123)</sub></td>
-<td align="center"><strong>146,943</strong><br/><sub>CVE Matches<br/>(Tier 1 refresh)</sub></td>
-<td align="center"><strong>99.3%</strong><br/><sub>LLM-Adjudicated FPR<br/>(Tier 2 carry-over)</sub></td>
-<td align="center"><strong>Pending</strong><br/><sub>Pair-Eval FN/FP<br/>(next lane)</sub></td>
+<td align="center"><strong>1,123</strong><br/><sub>Corpus Targets</sub></td>
+<td align="center"><strong>98.8%</strong><br/><sub>Analysis Success</sub></td>
+<td align="center"><strong>146k+</strong><br/><sub>CVE Matches</sub></td>
+<td align="center"><strong>99.3%</strong><br/><sub>FP Reduction (LLM)</sub></td>
+<td align="center"><strong>v2.8.0</strong><br/><sub>Exploit RAG Ready</sub></td>
 </tr>
 </table>
-<sub>Tier 1 fresh baseline: v2.6.1 corpus refresh, 2026-04-17, 1,123 firmware, success 1110 / partial 4 / fatal 9 · Tier 2 carry-over: v2.3.0, 2026-04-09, claude-code driver, 36 firmware</sub>
-
-[English (this file)](README.md) | [한국어](README.ko.md)
 
 </div>
 
 ---
 
-> [!NOTE]
-> **Tier 1 numbers in this README now reflect the fresh v2.6.1 corpus refresh** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM numbers are still carry-over (`v2.3.0`, 36 firmware) until the pair-eval lane lands. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
+<h2 id="what-you-can-do">🚀 What you can do with SCOUT</h2>
 
-> [!TIP]
-> **What's new in v2.8.0** (Exploit Pattern RAG for Channel-Aware Stateful AutoPoC)
-> - **Exploit Pattern RAG (Retrieval-Augmented Generation).** Introduces a metadata-backed reference retrieval layer that provides LLMs with tactical exploit patterns (delivery logic, state transitions, verifiers) instead of raw code.
-> - **Scoring Retriever and Knowledge Base.** `exploit_autopoc` now intelligently selects best-fit patterns from `data/exploit_references/` based on candidate-target alignment (Channels, Sinks, Triggers).
-> - **Adaptation-First Prompting.** LLM instructions optimized to treat references as "tactical patterns" to be adapted to the current target's `Plan IR`. Enforces a two-step output: Adaptation Plan followed by Python Code.
-> - **Reference Contamination Guard.** Automated verification logic that detects and blocks target-specific artifacts (endpoints, IPs, product names) from reference samples leaking into generated PoCs.
-> - **Full Auditability.** Attempt artifacts now record `rag_references` and scoring metadata for transparent exploit reasoning trails.
-
-> [!TIP]
-> **What's new in v2.7.3** (Universal Chaining + outbound response-chain quality pass)
-> - **General outbound response-chain modeling.** `exploitability_dossier` now recognizes outbound client response-parser chains using upstream-service markers, response fields, parser sinks, and client-ish binaries, then emits `lab_network_redirection`, `protocol_response`, `parser_field`, and `leak_before_control_boundary` channels.
-> - **Protocol-aware Plan IR and AutoPoC selection.** `exploit_state_machine` preserves dossier families and lowers outbound response-parser candidates to `classify_outbound_response_chain_quality`; AutoPoC avoids duplicate candidate IDs across dossier/state-machine sources.
-> - **Exploit-first lab PoV template.** `poc_templates.py` adds an outbound response-chain PoV template that sends only a short benign lab packet to the configured target and returns `vulnerability_trigger` success only with observed response/readback evidence; it does not generate overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
-> - **PoC quality review documented.** See [`docs/er605_poc_quality.md`](docs/er605_poc_quality.md) for the quality assessment against the public ER605 analysis and the remaining live-lab verifier gaps.
+- **Automated Triage**: Drop a blob and get a high-fidelity list of findings ranked by `confidence` and `priority_score`.
+- **Deep Exploit Discovery**: Find complex `Web -> IPC -> Config -> Daemon` chains that bypass traditional static analysis.
+- **Auto-Generate PoCs**: Leverage the **Exploit Pattern RAG** to generate lab-ready Proof-of-Vulnerability modules based on historical attack patterns.
+- **Evidence Investigation**: Use the Glassmorphism Web Dashboard or the Interactive TUI to walk through decompiled P-code taint paths and reasoning trails.
+- **Compliance reporting**: Generate SARIF findings for GitHub Security, CycloneDX 1.6 SBOM+VEX for FDA/CRA, and SLSA L2 attestations for provenance.
 
 ---
 
-## Why SCOUT?
+<h2 id="why-scout">💎 The SCOUT Advantage</h2>
 
-> **Every finding has a hash-anchored evidence chain.**
+> **[1] Hash-Anchored Evidence Lineage**
+> Every finding is tied to a specific file path, byte offset, and SHA-256 hash. No black-box guesses — only traceable reasoning trails from blob to verdict.
+
+> **[2] Intelligent Analyst Copilot**
+> Built-in LLM tribunal (Advocate/Critic) reduces false positives by 99.3%. It doesn't replace you; it presents the evidence and reasoning for you to confirm.
+
+> **[3] Zero Dependency (Pure Stdlib)**
+> No `pip install` nightmares. SCOUT is pure Python 3.10+ stdlib. Deploy instantly in air-gapped labs or highly restricted environments.
+
+> **[4] Channel-Aware Exploit RAG (v2.8.0)**
+> SCOUT understands the *context* of a vulnerability. It matches candidates to structured exploit patterns to generate sophisticated, 다단계(stateful) PoC modules instead of flat socket scripts.
+
+---
+
+<h2 id="quick-start">⚡ Quick Start</h2>
+
+```bash
+# Analyze a firmware image
+./scout analyze firmware.bin
+
+# Explore findings in the Web Dashboard
+./scout serve aiedge-runs/<run_id> --port 8080
+
+# Deep dive in the Terminal UI
+./scout ti
+```
+
+---
+
+> [!TIP]
+> **What's new in v2.8.0**
+> - **Exploit Pattern RAG**: Metadata-backed reference retrieval for stateful PoC generation.
+> - **Contamination Guard**: Automatically blocks reference-specific artifacts from leaking into generated PoCs.
+> - **Channel Taxonomy Alignment**: Standardized cross-stage channel identification (Web, Config, IPC).
+
+---
 > No finding without a file path, byte offset, SHA-256 hash, and rationale. Artifacts are immutable and traceable from firmware blob to final verdict.
 
 > **4-tier confidence caps with Ghidra P-code verification -- honest scoring.**

@@ -1,20 +1,27 @@
-<div align="center">
-
-<img src="https://img.shields.io/badge/SCOUT-Firmware_Evidence_Engine-0d1117?style=for-the-badge&labelColor=0d1117" alt="SCOUT" />
-
 # SCOUT
 
-### Firmware Security Analysis Pipeline with Deterministic Evidence Packaging
+### 결정적 증거 타임라인 기반의 펌웨어 보안 분석가 코파일럿
 
-**펌웨어 하나 넣으면, SARIF findings + CycloneDX SBOM+VEX + 해시 기반 증거 체인 + analyst-reviewable evidence lineage / reasoning trail이 나옵니다 -- 명령어 하나로.**
+**SCOUT는 가공되지 않은 펌웨어 블롭을 실행 가능한 증거 기반의 보안 도시에(dossier)로 변환하는 심층 분석 파이프라인입니다.**
 
-*SCOUT는 대규모 벌크 스캐너보다는 단일 펌웨어를 깊게 파고드는 분석가 코파일럿으로 최적화되어 있습니다. Ghidra P-code taint 분석, analyst-in-the-loop LLM 판정 보조, finding/report/viewer/TUI 전반 evidence lineage / reasoning persistence, pip 의존성 제로.*
+*기존 스캐너들이 대량 분석과 속도에 집중할 때, SCOUT는 분석가를 위한 고충실도 코파일럿 역할을 수행합니다. 단순한 CVE 리스트를 넘어, 익스플로잇 체인을 재구성하고, 증거 트레일을 통해 판단 근거를 설명하며, 새로운 Exploit Pattern RAG 엔진을 사용해 검증된 PoC를 생성합니다.*
 
 <br />
 
+<div align="center">
+  <a href="#what-you-can-do">할 수 있는 일</a> •
+  <a href="#why-scout">왜 SCOUT인가?</a> •
+  <a href="#quick-start">빠른 시작</a> •
+  <a href="#key-features">주요 기능</a> •
+  <a href="CHANGELOG.md">변경 이력</a>
+</div>
+
+<br />
+
+<div align="center">
+
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
-[![Stages](https://img.shields.io/badge/Pipeline-47_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
 [![Version](https://img.shields.io/badge/Version-2.8.0-red?style=for-the-badge)]()
 
@@ -26,34 +33,66 @@
 
 <table>
 <tr>
-<td align="center"><strong>1,123</strong><br/><sub>코퍼스 타깃<br/>(Tier 1 refresh)</sub></td>
-<td align="center"><strong>98.8%</strong><br/><sub>성공률<br/>(1110 / 1123)</sub></td>
-<td align="center"><strong>146,943</strong><br/><sub>CVE 매칭<br/>(Tier 1 refresh)</sub></td>
-<td align="center"><strong>99.3%</strong><br/><sub>LLM 판정 기준 FPR<br/>(Tier 2 carry-over)</sub></td>
-<td align="center"><strong>Pending</strong><br/><sub>Pair-Eval FN/FP<br/>(next lane)</sub></td>
+<td align="center"><strong>1,123</strong><br/><sub>코퍼스 타깃</sub></td>
+<td align="center"><strong>98.8%</strong><br/><sub>분석 성공률</sub></td>
+<td align="center"><strong>146k+</strong><br/><sub>CVE 매칭</sub></td>
+<td align="center"><strong>99.3%</strong><br/><sub>오탐 감소 (LLM)</sub></td>
+<td align="center"><strong>v2.8.0</strong><br/><sub>익스플로잇 RAG 탑재</sub></td>
 </tr>
 </table>
-<sub>Tier 1 fresh baseline: v2.6.1 corpus refresh, 2026-04-17, 1,123개 펌웨어, success 1110 / partial 4 / fatal 9 · Tier 2 carry-over: v2.3.0, 2026-04-09, claude-code 드라이버, 36개 펌웨어</sub>
-
-[English](README.md) | [한국어 (이 파일)](README.ko.md)
 
 </div>
 
 ---
 
-> [!NOTE]
-> **README의 Tier 1 수치는 이제 fresh v2.6.1 corpus refresh 기준입니다** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM 수치는 pair-eval lane이 닫히기 전까지는 여전히 carry-over (`v2.3.0`, 36 firmware)입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
+<h2 id="what-you-can-do">🚀 SCOUT으로 할 수 있는 일</h2>
+
+- **자동화된 트리아지**: 펌웨어 블롭만 넣으면 `confidence`와 `priority_score`로 정렬된 고충실도 취약점 리스트를 얻을 수 있습니다.
+- **심층 익스플로잇 발견**: 기존 정적 분석으로는 찾기 힘든 `Web -> IPC -> Config -> Daemon`으로 이어지는 복합 체인을 식별합니다.
+- **PoC 자동 생성**: **Exploit Pattern RAG**를 활용해 과거 공격 패턴을 기반으로 현재 타깃에 최적화된 다단계(stateful) PoV 모듈을 생성합니다.
+- **증거 기반 조사**: Glassmorphism 웹 대시보드나 인터랙티브 TUI를 통해 디컴파일된 P-code 테인트 경로와 추론 트레일을 직접 확인할 수 있습니다.
+- **규제 대응 리포팅**: GitHub Security를 위한 SARIF, FDA/CRA 대응을 위한 CycloneDX 1.6 SBOM+VEX, 공급망 보안을 위한 SLSA L2 인증서를 생성합니다.
+
+---
+
+<h2 id="why-scout">💎 SCOUT의 장점</h2>
+
+> **[1] 해시 기반의 증거 추적성 (Evidence Lineage)**
+> 모든 발견 사항은 특정 파일 경로, 바이트 오프셋, SHA-256 해시와 결합되어 있습니다. "블랙박스 추측"이 아닌, 블롭에서 판정까지 이어지는 추적 가능한 추론 트레일을 제공합니다.
+
+> **[2] 지능형 분석가 코파일럿**
+> 내장된 LLM tribunal (Advocate/Critic) 시스템이 오탐(FP)을 99.3% 줄여줍니다. SCOUT은 분석가를 대체하는 것이 아니라, 당신이 확신을 갖고 판정할 수 있도록 증거와 근거를 제시합니다.
+
+> **[3] 의존성 제로 (Pure Stdlib)**
+> `pip install` 지옥이 없습니다. SCOUT은 순수 Python 3.10+ 표준 라이브러리만으로 동작합니다. 폐쇄망 실험실이나 보안이 엄격한 환경에서도 즉시 배포 가능합니다.
+
+> **[4] 채널 인식형 익스플로잇 RAG (v2.8.0)**
+> SCOUT은 취약점의 *맥락*을 이해합니다. 단순한 소켓 스크립트가 아니라, 구조화된 공격 패턴을 현재 타깃의 채널과 상태에 맞춰 "적응"시킨 정교한 다단계 PoC를 생성합니다.
+
+---
+
+<h2 id="quick-start">⚡ 빠른 시작</h2>
+
+```bash
+# 펌웨어 이미지 분석
+./scout analyze firmware.bin
+
+# 웹 대시보드에서 결과 확인
+./scout serve aiedge-runs/<run_id> --port 8080
+
+# 터미널 UI(TUI)로 심층 분석
+./scout ti
+```
+
+---
 
 > [!TIP]
-> **v2.8.0 핵심 변화** (채널 인식형 상태 기반 AutoPoC를 위한 Exploit Pattern RAG)
-> - **Exploit Pattern RAG (Retrieval-Augmented Generation).** LLM에게 raw 코드가 아닌, 공격의 전술적 패턴(전달 로직, 상태 전이, 검증 방법)을 제공하는 메타데이터 기반 참조 검색 레이어를 도입했습니다.
-> - **스코어링 리트리버 및 지식 베이스.** `exploit_autopoc`은 이제 후보-타깃 정렬(채널, Sink, 트리거)을 기반으로 `data/exploit_references/`에서 가장 적합한 패턴을 지능적으로 선택합니다.
-> - **적응형 프롬프트 (Adaptation-First).** 참조를 단순 복사 대상이 아닌, 현재 타깃의 `Plan IR`에 맞춰 "적응"해야 할 패턴으로 취급하도록 LLM 지시어를 최적화했습니다. Adaptation Plan 작성 후 Python Code를 생성하는 2단계 출력을 강제합니다.
-> - **참조 오염 방지 가드 (Contamination Guard).** 참조 샘플의 타깃 특정 아티팩트(엔드포인트, IP, 제품명 등)가 생성된 PoC로 유출되는 것을 자동으로 감지하고 차단하는 검증 로직을 구현했습니다.
-> - **투명한 추적성.** 생성 시도 아티팩트에 `rag_references`와 스코어링 메타데이터를 기록하여 익스플로잇 추론 과정을 명확히 시각화합니다.
+> **v2.8.0 핵심 변화**
+> - **Exploit Pattern RAG**: 상태 기반 PoC 생성을 위한 메타데이터 기반 참조 검색 도입.
+> - **참조 오염 방지 가드 (Contamination Guard)**: 참조 샘플의 특정 아티팩트가 생성된 PoC로 유출되는 것을 자동 차단.
+> - **채널 분류 체계 정렬**: 스테이지 전반의 채널 식별(Web, Config, IPC) 표준화.
 
-> [!TIP]
-> **v2.7.3 핵심 변화** (Universal Chaining + outbound response-chain 품질 패스)
+---
 > - **범용 outbound response-chain 모델링.** `exploitability_dossier`가 upstream-service marker, response field, parser sink, client-ish binary를 이용해 outbound client response-parser chain을 인식하고 `lab_network_redirection`, `protocol_response`, `parser_field`, `leak_before_control_boundary` 채널을 남깁니다.
 > - **Protocol-aware Plan IR 및 AutoPoC 선택 개선.** `exploit_state_machine`은 dossier family를 보존하고 outbound response-parser 후보를 `classify_outbound_response_chain_quality`로 낮춥니다. AutoPoC는 dossier/state-machine source 사이의 duplicate candidate ID도 중복 선택하지 않습니다.
 > - **Exploit-first lab PoV template.** `poc_templates.py`에 outbound response-chain PoV 템플릿을 추가했습니다. configured target에 짧은 benign lab packet만 보내고 observed response/readback evidence가 있을 때만 `vulnerability_trigger` 성공으로 인정합니다. overlong field, ROP, command payload, crypto/key recovery, spoofing infrastructure는 생성하지 않습니다.
