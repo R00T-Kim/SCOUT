@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-47_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.7.3-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.8.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -43,6 +43,14 @@
 
 > [!NOTE]
 > **Tier 1 numbers in this README now reflect the fresh v2.6.1 corpus refresh** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM numbers are still carry-over (`v2.3.0`, 36 firmware) until the pair-eval lane lands. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
+
+> [!TIP]
+> **What's new in v2.8.0** (Exploit Pattern RAG for Channel-Aware Stateful AutoPoC)
+> - **Exploit Pattern RAG (Retrieval-Augmented Generation).** Introduces a metadata-backed reference retrieval layer that provides LLMs with tactical exploit patterns (delivery logic, state transitions, verifiers) instead of raw code.
+> - **Scoring Retriever and Knowledge Base.** `exploit_autopoc` now intelligently selects best-fit patterns from `data/exploit_references/` based on candidate-target alignment (Channels, Sinks, Triggers).
+> - **Adaptation-First Prompting.** LLM instructions optimized to treat references as "tactical patterns" to be adapted to the current target's `Plan IR`. Enforces a two-step output: Adaptation Plan followed by Python Code.
+> - **Reference Contamination Guard.** Automated verification logic that detects and blocks target-specific artifacts (endpoints, IPs, product names) from reference samples leaking into generated PoCs.
+> - **Full Auditability.** Attempt artifacts now record `rag_references` and scoring metadata for transparent exploit reasoning trails.
 
 > [!TIP]
 > **What's new in v2.7.3** (Universal Chaining + outbound response-chain quality pass)

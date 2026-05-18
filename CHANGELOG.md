@@ -3,9 +3,21 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [2.8.0] — 2026-05-18
 
-_No unreleased changes yet._
+### Added
+
+- **Exploit Pattern RAG (Retrieval-Augmented Generation)**: Introduces a metadata-backed reference retrieval layer for channel-aware stateful AutoPoC generation.
+    - **Knowledge Base**: Structured patterns stored in `data/exploit_references/` including YAML metadata, exploit reasoning, and reference PoC samples.
+    - **Scoring Retriever**: Multi-axis matching engine that selects the best-fit patterns based on vulnerability family, input channels (Web, Config, IPC), sink types (popen, system), and trigger models.
+    - **Adaptation-First Prompting**: LLM instructions optimized to treat references as "tactical patterns" rather than code to be copied. Enforces a two-step output: Adaptation Plan followed by Python Code.
+    - **Reference Contamination Guard**: Automated verification logic that detects and blocks target-specific artifacts (endpoints, IPs, product names) from references leaking into generated PoCs.
+    - **RAG Metadata Recording**: Attempt artifacts now include `rag_references` and score breakdown for full auditability.
+
+### Fixed
+
+- **RAG-Induced Hallucination**: Reduced target-agnostic endpoint copying by sanitizing the few-shot prompt to exclude full reference source code and enforcing strict adaptation contracts.
+- **Channel Mapping Alignment**: Standardized `config_file` vs `config` channel taxonomy between the dossier scanner and RAG retriever.
 
 ## [2.7.3] — 2026-05-18
 

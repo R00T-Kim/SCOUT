@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=for-the-badge)](LICENSE)
 [![Stages](https://img.shields.io/badge/Pipeline-47_Stages-blueviolet?style=for-the-badge)]()
 [![Zero Deps](https://img.shields.io/badge/Dependencies-Zero_(stdlib)-orange?style=for-the-badge)]()
-[![Version](https://img.shields.io/badge/Version-2.7.3-red?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-2.8.0-red?style=for-the-badge)]()
 
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-blue?style=for-the-badge&logo=github)]()
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX_1.6+VEX-brightgreen?style=for-the-badge)]()
@@ -43,6 +43,14 @@
 
 > [!NOTE]
 > **README의 Tier 1 수치는 이제 fresh v2.6.1 corpus refresh 기준입니다** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM 수치는 pair-eval lane이 닫히기 전까지는 여전히 carry-over (`v2.3.0`, 36 firmware)입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
+
+> [!TIP]
+> **v2.8.0 핵심 변화** (채널 인식형 상태 기반 AutoPoC를 위한 Exploit Pattern RAG)
+> - **Exploit Pattern RAG (Retrieval-Augmented Generation).** LLM에게 raw 코드가 아닌, 공격의 전술적 패턴(전달 로직, 상태 전이, 검증 방법)을 제공하는 메타데이터 기반 참조 검색 레이어를 도입했습니다.
+> - **스코어링 리트리버 및 지식 베이스.** `exploit_autopoc`은 이제 후보-타깃 정렬(채널, Sink, 트리거)을 기반으로 `data/exploit_references/`에서 가장 적합한 패턴을 지능적으로 선택합니다.
+> - **적응형 프롬프트 (Adaptation-First).** 참조를 단순 복사 대상이 아닌, 현재 타깃의 `Plan IR`에 맞춰 "적응"해야 할 패턴으로 취급하도록 LLM 지시어를 최적화했습니다. Adaptation Plan 작성 후 Python Code를 생성하는 2단계 출력을 강제합니다.
+> - **참조 오염 방지 가드 (Contamination Guard).** 참조 샘플의 타깃 특정 아티팩트(엔드포인트, IP, 제품명 등)가 생성된 PoC로 유출되는 것을 자동으로 감지하고 차단하는 검증 로직을 구현했습니다.
+> - **투명한 추적성.** 생성 시도 아티팩트에 `rag_references`와 스코어링 메타데이터를 기록하여 익스플로잇 추론 과정을 명확히 시각화합니다.
 
 > [!TIP]
 > **v2.7.3 핵심 변화** (Universal Chaining + outbound response-chain 품질 패스)
