@@ -48,7 +48,7 @@
 > **What's new in v2.7.3** (Universal Chaining + outbound response-chain quality pass)
 > - **General outbound response-chain modeling.** `exploitability_dossier` now recognizes outbound client response-parser chains using upstream-service markers, response fields, parser sinks, and client-ish binaries, then emits `lab_network_redirection`, `protocol_response`, `parser_field`, and `leak_before_control_boundary` channels.
 > - **Protocol-aware Plan IR and AutoPoC selection.** `exploit_state_machine` preserves dossier families and lowers outbound response-parser candidates to `classify_outbound_response_chain_quality`; AutoPoC avoids duplicate candidate IDs across dossier/state-machine sources.
-> - **Non-weaponized response blueprint template.** `poc_templates.py` adds a outbound response-chain quality template that records safe packet/Plan-IR hashes and quality checks without generating overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
+> - **Exploit-first lab PoV template.** `poc_templates.py` adds an outbound response-chain PoV template that sends only a short benign lab packet to the configured target and returns `vulnerability_trigger` success only with observed response/readback evidence; it does not generate overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
 > - **PoC quality review documented.** See [`docs/er605_poc_quality.md`](docs/er605_poc_quality.md) for the quality assessment against the public ER605 analysis and the remaining live-lab verifier gaps.
 
 > [!TIP]

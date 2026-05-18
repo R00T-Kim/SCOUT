@@ -164,7 +164,7 @@ The first quality pass overfit the naming and docs to ER605/Comexe/DDNS. This fo
 
 3. **Non-weaponized quality template**
    * `poc_templates.py` adds an `outbound_protocol_response` deterministic template.
-   * The generated plugin emits a safe blueprint-only packet hash and quality checklist.
+   * The generated plugin is exploit-first but lab-bounded: it sends only short benign proof packets to the configured lab target and succeeds as `vulnerability_trigger` only with observed response/readback evidence.
    * It does not generate overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
 
 4. **Selection hygiene**

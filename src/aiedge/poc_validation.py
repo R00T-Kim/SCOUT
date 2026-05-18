@@ -22,7 +22,9 @@ _REASON_NON_WEAPONIZED_ONLY = "POLICY_NON_WEAPONIZED_BOUNDED_CHECKS_ONLY"
 _REASON_REPRODUCIBILITY_NO_SUCCESS = (
     "POLICY_REPRODUCIBILITY_NO_SUCCESSFUL_ATTEMPTS"
 )
-_ALLOWED_PROOF_TYPES = frozenset({"shell", "arbitrary_read", "arbitrary_write"})
+_ALLOWED_PROOF_TYPES = frozenset(
+    {"shell", "arbitrary_read", "arbitrary_write", "vulnerability_trigger"}
+)
 
 
 def _read_manifest(run_dir: Path) -> dict[str, object] | None:

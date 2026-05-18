@@ -48,7 +48,7 @@
 > **v2.7.3 핵심 변화** (Universal Chaining + outbound response-chain 품질 패스)
 > - **범용 outbound response-chain 모델링.** `exploitability_dossier`가 upstream-service marker, response field, parser sink, client-ish binary를 이용해 outbound client response-parser chain을 인식하고 `lab_network_redirection`, `protocol_response`, `parser_field`, `leak_before_control_boundary` 채널을 남깁니다.
 > - **Protocol-aware Plan IR 및 AutoPoC 선택 개선.** `exploit_state_machine`은 dossier family를 보존하고 outbound response-parser 후보를 `classify_outbound_response_chain_quality`로 낮춥니다. AutoPoC는 dossier/state-machine source 사이의 duplicate candidate ID도 중복 선택하지 않습니다.
-> - **Non-weaponized response blueprint template.** `poc_templates.py`에 outbound response-chain 품질 템플릿을 추가했습니다. safe packet/Plan-IR hash와 quality check를 기록하지만 overlong field, ROP, command payload, crypto/key recovery, spoofing infrastructure는 생성하지 않습니다.
+> - **Exploit-first lab PoV template.** `poc_templates.py`에 outbound response-chain PoV 템플릿을 추가했습니다. configured target에 짧은 benign lab packet만 보내고 observed response/readback evidence가 있을 때만 `vulnerability_trigger` 성공으로 인정합니다. overlong field, ROP, command payload, crypto/key recovery, spoofing infrastructure는 생성하지 않습니다.
 > - **PoC 품질 리뷰 문서화.** 공개 ER605 분석 기준 품질 평가와 남은 live-lab verifier gap은 [`docs/er605_poc_quality.md`](docs/er605_poc_quality.md)에 정리했습니다.
 
 > [!TIP]

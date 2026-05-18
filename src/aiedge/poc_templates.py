@@ -760,6 +760,7 @@ def _generate_outbound_protocol_response_probe(ctx: PoCContext) -> str:
         import base64
         import hashlib
         import json
+        import socket
         from datetime import datetime, timezone
 
 
@@ -785,7 +786,8 @@ def _generate_outbound_protocol_response_probe(ctx: PoCContext) -> str:
                 "keeps_fields_short_and_non_overlong",
                 "records_encoding_or_crypto_as_protocol_gap_without_reimplementing_payload",
                 "requires_leak_before_control_flow_claim",
-                "requires_live_lab_pcap_for_dynamic_upgrade",
+                "returns_success_only_on_observed_lab_trigger",
+                "requires_live_lab_pcap_or_response_readback_for_dynamic_upgrade",
             ]
 
             def setup(self, target_ip: str, target_port: int, *, context: dict[str, object]) -> None:
@@ -816,21 +818,48 @@ def _generate_outbound_protocol_response_probe(ctx: PoCContext) -> str:
                 packet_hash = hashlib.sha256(packet).hexdigest()
                 plan_hash = hashlib.sha256(json.dumps(self._PLAN_IR, sort_keys=True).encode()).hexdigest()
                 channel_count = len(self._CHANNELS) if isinstance(self._CHANNELS, list) else 0
-                evidence = (
+                evidence_prefix = (
                     "autopoc_mode=deterministic_nonweaponized "
                     + "candidate_id="
                     + {candidate_literal}
                     + " summary="
                     + {summary_literal}
-                    + " probe=outbound_protocol_response_blueprint"
+                    + " probe=outbound_protocol_response_pov"
                     + f" target={{self.target_ip}}:{{self.target_port}}"
-                    + f" safe_packet_bytes={{len(packet)}} readback_hash={{packet_hash}}"
+                    + f" safe_packet_bytes={{len(packet)}} packet_hash={{packet_hash}}"
                     + f" plan_hash={{plan_hash}} channel_count={{channel_count}}"
-                    + " result=blueprint_only_no_network_send"
                     + " quality_checks="
                     + ",".join(self._QUALITY_CHECKS)
                 )
-                return PoCResult(False, "protocol_blueprint", evidence, timestamp)
+
+                try:
+                    sock = socket.create_connection((self.target_ip, int(self.target_port)), timeout=2.0)
+                    sock.settimeout(2.0)
+                    sock.sendall(packet)
+                    observed = sock.recv(512)
+                    sock.close()
+                    if observed:
+                        readback_hash = hashlib.sha256(observed).hexdigest()
+                        evidence = (
+                            evidence_prefix
+                            + f" observed_bytes={{len(observed)}} readback_hash={{readback_hash}}"
+                            + " trigger_observed=1 result=lab_trigger_observed"
+                        )
+                        return PoCResult(True, "vulnerability_trigger", evidence, timestamp)
+                    evidence = (
+                        evidence_prefix
+                        + " observed_bytes=0 readback_hash=none "
+                        + "trigger_observed=0 result=sent_without_readback"
+                    )
+                    return PoCResult(False, "vulnerability_trigger", evidence, timestamp)
+                except Exception as exc:
+                    evidence = (
+                        evidence_prefix
+                        + " observed_bytes=0 readback_hash=none "
+                        + f"trigger_observed=0 result=requires_live_lab_service_emulator "
+                        + f"network_error={{type(exc).__name__}}:{{exc}}"
+                    )
+                    return PoCResult(False, "vulnerability_trigger", evidence, timestamp)
 
             def cleanup(self) -> None:
                 return

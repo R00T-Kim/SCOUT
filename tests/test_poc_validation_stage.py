@@ -258,6 +258,69 @@ def test_poc_validation_does_not_count_failed_hashes_as_reproducible(
     )
 
 
+def test_poc_validation_counts_vulnerability_trigger_as_reproducible_pov(
+    tmp_path: Path,
+) -> None:
+    fw = _write_firmware(tmp_path)
+    info = create_run(
+        str(fw),
+        case_id="case-poc-vulnerability-trigger",
+        ack_authorization=True,
+        runs_root=tmp_path / "runs",
+    )
+    _set_profile_exploit(info.manifest_path)
+
+    prereq_rep = run_subset(
+        info,
+        ["exploit_gate", "exploit_chain"],
+        time_budget_s=5,
+        no_llm=True,
+    )
+    assert prereq_rep.status in ("ok", "partial")
+
+    digest = "b" * 64
+    bundle_dir = info.run_dir / "exploits" / "chain_vulnerability_trigger"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    _ = (bundle_dir / "evidence_bundle.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "exploit-evidence-v1",
+                "chain_id": "vulnerability_trigger",
+                "attempts": [
+                    {
+                        "attempt": i,
+                        "status": "pass",
+                        "reason_code": "attempt_pass",
+                        "proof_type": "vulnerability_trigger",
+                        "proof_evidence": (
+                            "probe=outbound_protocol_response_pov "
+                            "channel_count=4 trigger_observed=1 "
+                            f"readback_hash={digest}"
+                        ),
+                    }
+                    for i in range(1, 4)
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rep = run_subset(info, ["poc_validation"], time_budget_s=5, no_llm=True)
+    assert rep.status in ("ok", "partial")
+
+    validation_json = info.run_dir / "stages" / "poc_validation" / "poc_validation.json"
+    validation_obj = cast(
+        dict[str, object], json.loads(validation_json.read_text(encoding="utf-8"))
+    )
+    repro = cast(list[object], validation_obj.get("reproducibility"))
+    first = cast(dict[str, object], repro[0])
+    assert first.get("status") == "consistent"
+    assert first.get("readback_hash") == digest
+
+
 def test_exploit_policy_scans_poc_validation_artifacts(tmp_path: Path) -> None:
     fw = _write_firmware(tmp_path)
     info = create_run(

@@ -5,13 +5,33 @@ bundles for audit review. Each file name encodes the date and firmware/chain
 target; the payload contains the full `evidence_bundle.json` + `verified_chain.json`
 as they existed at PoV time.
 
+
+## Exploit-first boundary
+
+SCOUT is exploit-first in the sense that a finding should be driven toward a
+reproducible Proof-of-Vulnerability, not stop at static ranking or blueprint
+planning. The allowed proof ladder is:
+
+1. `vulnerability_trigger` — bounded lab input produces observed parser/crash/side-effect evidence and stable readback hash.
+2. `arbitrary_read` / `arbitrary_write` — benign read/write primitive proof with readback.
+3. `shell` — harmless command-output proof such as `id`/`whoami`/nonce echo.
+
+Blueprint-only artifacts are useful planning evidence but do not pass PoV
+validation. Indiscriminate weaponization remains out of scope: no persistence,
+no destructive writes, no third-party callbacks, no overlong/ROP payloads unless
+they are analyst-private and explicitly authorized in an isolated lab.
+
 ## Reproducing a PoV run
 
-1. **Author a weaponized plugin** at `private_exploits/<chain_id>.py` that conforms
+1. **Author a lab-only PoV plugin** at `private_exploits/<chain_id>.py` that conforms
    to the `PoCInterfaceRuntime` Protocol in `exploit_runner.py`. The plugin's
    `execute()` must return a `PoCResult` with
-   `proof_type in {"shell", "arbitrary_read", "arbitrary_write"}` and an
-   evidence string containing a `readback_hash=<sha256>` token. `private_exploits/`
+   `proof_type in {"shell", "arbitrary_read", "arbitrary_write", "vulnerability_trigger"}` and an
+   evidence string containing a `readback_hash=<sha256>` token. Use
+   `vulnerability_trigger` for a non-weaponized but working PoV that proves an
+   observed crash/parser/side-effect trigger without claiming shell/read/write.
+   Such evidence must include `trigger_observed=1` and channel context such as
+   `channel_count`, `plan_hash`, `response`, or `parser`. `private_exploits/`
    is gitignored; treat it as analyst-private.
 
 2. **Narrow candidate selection to a single chain**:

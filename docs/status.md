@@ -8,7 +8,7 @@
 - `exploitability_dossier`: ER605 글에서 배운 분석 프로세스를 제품/프로토콜 특화가 아니라 일반 `outbound_protocol_response_parser` 후보 감지로 재정렬. upstream-service marker, response field, parser sink, client-ish binary 기반으로 `lab_network_redirection` / `protocol_response` / `parser_field` / `leak_before_control_boundary` channel을 산출.
 - `exploit_state_machine`: dossier family 보존 및 outbound response-parser 후보를 `classify_outbound_response_chain_quality` Plan IR로 lowering.
 - `exploit_autopoc`: duplicate candidate ID 선택 방지, protocol-aware Plan IR fallback.
-- `poc_templates`: non-weaponized outbound protocol response blueprint template 추가. 안전한 field blueprint hash와 quality checklist만 기록하며 overlong field/ROP/command/crypto key recovery/spoofing server는 생성하지 않음.
+- `poc_templates`: exploit-first lab-bounded outbound protocol response PoV template으로 전환. 짧은 benign packet만 configured lab target에 보내며 observed response/readback이 있을 때만 `vulnerability_trigger` 성공으로 인정. overlong field/ROP/command/crypto key recovery/spoofing server는 생성하지 않음.
 - `exploit_runner`: Plan IR 기반 `transition_evidence[]` 유지.
 - 문서: `docs/er605_poc_quality.md`, `docs/exploit_dag_contract.md`, `HANDOFF_UNIVERSAL_CHAINING.md`, README/README.ko/CHANGELOG 갱신.
 - 검증: targeted regression, ER605 artifact E2E subset, full `PYTHONPATH=src pytest -q`, gnosis lint/sync/strict build.

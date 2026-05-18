@@ -44,8 +44,8 @@ The core implementation is now expressed as generic outbound response-chain mode
   - Avoids duplicate candidate IDs across dossier and state-machine sources.
 
 - `poc_templates.py`
-  - Adds a non-weaponized `outbound_protocol_response` blueprint template.
-  - Records packet/Plan-IR hashes and quality checks.
+  - Adds an exploit-first, lab-bounded `outbound_protocol_response` PoV template.
+  - Sends only short benign proof packets to the configured lab target and records packet/Plan-IR hashes plus quality checks.
   - Does **not** generate overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
 
 ## E2E evidence
@@ -62,18 +62,18 @@ Observed:
 
 - `exploitability_dossier`: detects outbound response-parser chain candidates in the ER605 fixture.
 - `exploit_state_machine`: emits `classify_outbound_response_chain_quality` Plan IR for those candidates.
-- `exploit_autopoc`: emits blueprint-only probes with transition evidence.
+- `exploit_autopoc`: emits lab-bounded PoV probes; `vulnerability_trigger` passes only with observed response/readback evidence.
 - `poc_validation`: ok. AutoPoC remains `partial` without live target marker/readback, which is expected and honest.
 
 ## Current quality verdict
 
-**Medium-high for generic safe reproduction planning / analyst handoff.**
+**Medium-high for generic safe reproduction planning / analyst handoff; stronger than blueprint-only because observed lab triggers are now first-class PoV evidence.**
 
 The generated artifacts now encode the ER605-like analysis process without making DDNS or a specific vendor the feature. They are suitable to guide an analyst toward a lab harness and parser verifier for other outbound response-chain cases.
 
 ## Next quality upgrades
 
 1. Add generic upstream-service-emulator harness descriptors for DNS/DHCP/HTTP/UDP/TCP response chains.
-2. Add parser-only replay under QEMU/GDB to upgrade blueprint transitions to observed parser evidence.
+2. Add parser-only replay under QEMU/GDB to upgrade lab trigger evidence to observed parser evidence.
 3. Recover field bounds from vulnerable/patched diffs and encode only safe boundary checks.
 4. Add live verifier support that upgrades `lab_network_redirection`, `protocol_response`, and `leak_before_control_boundary` transitions from planned to observed without weaponized payload generation.
