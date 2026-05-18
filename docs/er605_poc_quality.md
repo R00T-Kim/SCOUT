@@ -1,59 +1,54 @@
-# ER605 PoC Quality Review — Universal Chaining
+# ER605-Inspired PoC Quality Review — Generalized Chaining Process
 
 Source basis: Out of Bounds' ER605 write-up, "TP-Link ER605 DDNS Pre-Auth RCE: Chaining CVE-2024-5242, CVE-2024-5243, CVE-2024-5244" (2026-02-04), plus SCOUT's `aiedge-runs/2026-05-17_1347_sha256-db84e89cd312-1` ER605 artifact.
 
-## What the public analysis requires
+## Intent
 
-The practical ER605 chain is not a flat inbound HTTP/socket bug. The write-up describes a `cmxddnsd` Comexe DDNS client chain with these properties:
+The ER605 article is used as a **process benchmark**, not as a reason to hardcode one product or one protocol. The reusable lesson is: deep firmware exploitability often emerges when an outbound client trusts an upstream service response, parses encoded/delimited fields, and later turns that state into a leak, memory corruption primitive, config mutation, or command sink.
 
-1. The router periodically communicates with Comexe DDNS servers (`Dns1.comexe.net` / `.cn`) over a custom UDP protocol.
-2. The attacker needs a lab WAN/MITM position, usually by controlling routing/DNS in the test network.
-3. The protocol has a plaintext outer `Data` field containing an inner encrypted/custom-Base64 payload.
-4. Inner fields include `OK`, `MSG`, `ErrorCode`, and `UpdateSvr1/2`, delimited by `0x01`.
-5. A realistic chain is two-stage: `UpdateSvr1`-style state corruption for an info leak, then `ErrorCode` stack overflow classification/control. Dynamic RCE requires leak-derived addresses and build-specific constraints.
+## General process extracted from the article
+
+A high-quality SCOUT chain scaffold should model these dimensions for any firmware/protocol family:
+
+1. **Boundary inversion**: input may arrive through an outbound client response, not an inbound LAN/WAN service.
+2. **Lab network control**: proof may require authorized DNS/DHCP/routing or service emulation in an isolated lab.
+3. **Protocol reconstruction**: response fields may be encoded, encrypted, delimited, compressed, or checksummed.
+4. **Stateful staging**: one response may set up a leak/readback or state mutation before a later control-flow claim.
+5. **Patch-diff focus**: patched builds should be compared for field lengths, delimiter handling, auth/state checks, and copy bounds.
+6. **Verifier boundary**: static evidence and blueprint hashes do not equal exploit proof; live parser traces or marker/readback evidence are required.
 
 ## Previous SCOUT PoC quality
 
-Before this pass, SCOUT produced useful but incomplete PoC scaffolding:
+Before this correction, SCOUT had two qualities:
 
-- **Strengths**
-  - It found config-derived command-execution candidates in ER605 artifacts.
-  - It propagated `channels[]` and `plan_ir` into deterministic templates.
-  - It stayed non-weaponized and lab-gated.
+- **Good**: ranked config/parser candidates and propagated Plan IR/channel metadata.
+- **Insufficiently general**: the first v2.7.3 pass made the ER605/Comexe/DDNS instance too prominent in code and docs.
 
-- **Quality gaps against the public ER605 analysis**
-  - It modeled `cmxddnsd` too much like a generic config parser or direct service probe.
-  - It did not represent the Comexe-specific DDNS protocol spoofing/MITM prerequisite.
-  - It did not distinguish `UpdateSvr1` leak setup from `ErrorCode` control-flow classification.
-  - It had no explicit quality checks for `Data`, custom Base64/DES reconstruction gaps, `0x01` delimiter constraints, or leak-before-control proof requirements.
+That was the wrong abstraction level. The right feature is not "better DDNS analysis"; it is **generic deep-chain discovery for outbound response parsers and other multi-boundary state machines**.
 
-**Quality verdict before improvement:** good triage artifact, weak exploit-specific PoC scaffold for this article. It should be treated as a lead-ranking probe, not as a reproduction-quality ER605 PoC.
+## Corrected implementation model
 
-## Improvements implemented
-
-This pass adds a non-weaponized ER605/Comexe DDNS quality path:
+The core implementation is now expressed as generic outbound response-chain modeling:
 
 - `exploitability_dossier.py`
-  - Detects Comexe DDNS parser candidates using `cmxddnsd`, Comexe server names, `Data`, `ErrorCode`, `UpdateSvr1/2`, and parser sink markers.
-  - Emits `comexe_ddns_protocol`, `ddns_response_parser`, `protocol_spoofing_required`, `info_leak_chain_candidate`, and `bounded_protocol_probe` families.
-  - Emits channels for `dns_mitm`, `udp_ddns_response`, `parser_field`, and `info_leak_then_control`.
-  - Enriches controllability with `0x01` delimiter and `0x00`/`0x01` bad-byte constraints.
+  - Detects `outbound_response_parser_chain:*` candidates using upstream-service markers, response field names, parser sinks, and client-ish binary names.
+  - Emits generic families: `outbound_protocol_response_parser`, `stateful_response_parser`, `memory_corruption_candidate`, `info_leak_chain_candidate`, `lab_service_emulation_required`, `bounded_protocol_probe`.
+  - Emits generic channels: `lab_network_redirection`, `protocol_response`, `parser_field`, `leak_before_control_boundary`.
 
 - `exploit_state_machine.py`
-  - Preserves dossier families into state-machine seeds.
-  - Lowers Comexe candidates to `classify_ddns_protocol_chain_quality` Plan IR.
-  - Uses protocol-aware actions such as `emulate_protocol_channel`, `stage_bounded_field_probe`, and `validate_leak_before_control_boundary`.
+  - Lowers these candidates to `classify_outbound_response_chain_quality` Plan IR.
+  - Uses generic actions: `emulate_protocol_channel`, `stage_bounded_field_probe`, and `validate_leak_before_control_boundary`.
 
 - `exploit_autopoc.py`
-  - Avoids selecting duplicate candidate IDs from dossier and state-machine sources.
-  - Synthesizes protocol-aware Plan IR when only channel metadata is present.
+  - Synthesizes protocol-aware Plan IR from channel metadata.
+  - Avoids duplicate candidate IDs across dossier and state-machine sources.
 
 - `poc_templates.py`
-  - Adds `comexe_ddns_protocol` deterministic template.
-  - Generates a safe blueprint-only probe with short benign fields and a packet hash.
-  - Does **not** implement the overlong fields, ROP layout, command execution, DES key recovery, or network spoofing server.
+  - Adds a non-weaponized `outbound_protocol_response` blueprint template.
+  - Records packet/Plan-IR hashes and quality checks.
+  - Does **not** generate overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
 
-## Current E2E evidence
+## E2E evidence
 
 Run: `aiedge-runs/2026-05-17_1347_sha256-db84e89cd312-1`
 
@@ -65,34 +60,20 @@ chain_construction -> exploitability_dossier -> protocol_model -> exploit_state_
 
 Observed:
 
-- `exploitability_dossier`: 53 candidates, including 2 `comexe_ddns_parser_chain:cmxddnsd:*` candidates.
-- Comexe candidates contain channel sequence:
-  - `dns_mitm`
-  - `udp_ddns_response`
-  - `parser_field`
-  - `info_leak_then_control`
-- `exploit_state_machine`: 52 machines, Comexe machines use goal `classify_ddns_protocol_chain_quality`.
-- `exploit_autopoc`: selected 5 distinct candidate IDs/chains, including 2 Comexe DDNS blueprint probes.
-- Comexe evidence bundles contain 21 transition rows each (7 Plan IR transitions x 3 repro attempts).
-- `poc_validation`: ok. AutoPoC remains `partial` because there is no live lab target/marker readback; this is expected and honest.
+- `exploitability_dossier`: detects outbound response-parser chain candidates in the ER605 fixture.
+- `exploit_state_machine`: emits `classify_outbound_response_chain_quality` Plan IR for those candidates.
+- `exploit_autopoc`: emits blueprint-only probes with transition evidence.
+- `poc_validation`: ok. AutoPoC remains `partial` without live target marker/readback, which is expected and honest.
 
 ## Current quality verdict
 
-**Quality after improvement: medium-high for safe reproduction planning, intentionally not weaponized.**
+**Medium-high for generic safe reproduction planning / analyst handoff.**
 
-The generated Comexe PoC is now structurally aligned with the public analysis: it models MITM/DDNS response spoofing, protocol field staging, and leak-before-control boundaries. It is suitable for analyst handoff and lab harness planning.
-
-It is still not a full exploit reproduction because SCOUT deliberately does not generate:
-
-- overlong `UpdateSvr1` or `ErrorCode` payloads,
-- ROP gadgets or command strings,
-- DES/key-transform implementation sufficient for valid malicious packets,
-- DHCP/DNS spoofing infrastructure,
-- live leak parsing or libc-base calculation.
+The generated artifacts now encode the ER605-like analysis process without making DDNS or a specific vendor the feature. They are suitable to guide an analyst toward a lab harness and parser verifier for other outbound response-chain cases.
 
 ## Next quality upgrades
 
-1. Add a lab harness role that emulates the Comexe server and captures router DDNS traffic in an isolated test network.
-2. Add parser-only replay against an instrumented `cmxddnsd` under QEMU/GDB to upgrade blueprint transitions to observed parser evidence.
-3. Recover field bounds from patched/vulnerable diffs and encode only safe boundary checks, not exploit payload bytes.
-4. Add a live verifier that can mark `dns_mitm`, `udp_ddns_response`, and `info_leak_then_control` transitions as observed without crossing into weaponized payload generation.
+1. Add generic upstream-service-emulator harness descriptors for DNS/DHCP/HTTP/UDP/TCP response chains.
+2. Add parser-only replay under QEMU/GDB to upgrade blueprint transitions to observed parser evidence.
+3. Recover field bounds from vulnerable/patched diffs and encode only safe boundary checks.
+4. Add live verifier support that upgrades `lab_network_redirection`, `protocol_response`, and `leak_before_control_boundary` transitions from planned to observed without weaponized payload generation.

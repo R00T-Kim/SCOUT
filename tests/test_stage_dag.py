@@ -168,7 +168,7 @@ def test_stage_deps_ipc_chain_from_docs() -> None:
 
 
 def test_stage_deps_exploitability_dossier_requires_er605_style_inputs() -> None:
-    """Dossier must run after the evidence needed for ER605-style decision logs."""
+    """Dossier must run after the evidence needed for deep-chain decision logs."""
 
     assert "attack_surface" in STAGE_DEPS["exploitability_dossier"]
     assert "chain_construction" in STAGE_DEPS["exploitability_dossier"]

@@ -746,7 +746,7 @@ def _generate_config_state_machine_probe(ctx: PoCContext) -> str:
     )
 
 
-def _generate_comexe_ddns_protocol_probe(ctx: PoCContext) -> str:
+def _generate_outbound_protocol_response_probe(ctx: PoCContext) -> str:
     chain_literal = json.dumps(ctx.chain_id)
     service_literal = json.dumps(ctx.target_service)
     candidate_literal = json.dumps(ctx.candidate_id)
@@ -781,9 +781,9 @@ def _generate_comexe_ddns_protocol_probe(ctx: PoCContext) -> str:
             _CHANNELS = {channels_literal}
             _PLAN_IR = {plan_ir_literal}
             _QUALITY_CHECKS = [
-                "models_ddns_server_spoofing_not_inbound_router_socket",
+                "models_upstream_service_emulation_not_inbound_socket",
                 "keeps_fields_short_and_non_overlong",
-                "records_custom_base64_des_as_protocol_gap_without_reimplementing_payload",
+                "records_encoding_or_crypto_as_protocol_gap_without_reimplementing_payload",
                 "requires_leak_before_control_flow_claim",
                 "requires_live_lab_pcap_for_dynamic_upgrade",
             ]
@@ -794,14 +794,14 @@ def _generate_comexe_ddns_protocol_probe(ctx: PoCContext) -> str:
                 self.context = context
 
             def _safe_inner_fields(self) -> bytes:
-                # Short benign field blueprint only. 0x01 is the Comexe-style
-                # field delimiter observed by analysis; no overlong ErrorCode
-                # or ROP/control payload is generated here.
+                # Short benign field blueprint only. Delimiters/encodings are
+                # placeholders for parser-shape planning; no overlong field,
+                # ROP/control payload, or command string is generated here.
                 fields = [
-                    b"OK=0",
-                    b"MSG=SCOUT_PROBE",
-                    b"ErrorCode=7",
-                    b"UpdateSvr1=scout.invalid",
+                    b"status=0",
+                    b"message=SCOUT_PROBE",
+                    b"error_code=7",
+                    b"next_server=scout.invalid",
                 ]
                 return b"\\x01".join(fields)
 
@@ -822,7 +822,7 @@ def _generate_comexe_ddns_protocol_probe(ctx: PoCContext) -> str:
                     + {candidate_literal}
                     + " summary="
                     + {summary_literal}
-                    + " probe=comexe_ddns_protocol_blueprint"
+                    + " probe=outbound_protocol_response_blueprint"
                     + f" target={{self.target_ip}}:{{self.target_port}}"
                     + f" safe_packet_bytes={{len(packet)}} readback_hash={{packet_hash}}"
                     + f" plan_hash={{plan_hash}} channel_count={{channel_count}}"
@@ -844,16 +844,16 @@ def _generate_comexe_ddns_protocol_probe(ctx: PoCContext) -> str:
 
 register_template(
     PoCTemplate(
-        vuln_type="comexe_ddns_protocol",
+        vuln_type="outbound_protocol_response",
         families=frozenset({
-            "comexe_ddns_protocol",
-            "ddns_response_parser",
-            "protocol_spoofing_required",
+            "outbound_protocol_response_parser",
+            "stateful_response_parser",
+            "lab_service_emulation_required",
             "info_leak_chain_candidate",
             "bounded_protocol_probe",
         }),
-        description="Non-weaponized Comexe DDNS protocol blueprint quality probe",
-        generate=_generate_comexe_ddns_protocol_probe,
+        description="Non-weaponized outbound protocol response blueprint quality probe",
+        generate=_generate_outbound_protocol_response_probe,
     )
 )
 

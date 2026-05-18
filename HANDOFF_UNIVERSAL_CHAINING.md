@@ -143,33 +143,37 @@ Observed result:
 * Add richer UCI/NVRAM schema parsing to name config fields more precisely.
 * Add lab harness support for explicit config reload/readback endpoints so `planned_or_unproven` transition rows can be upgraded to observed proof rows.
 
-## 9. 2026-05-18 ER605 PoC Quality Pass
+## 9. 2026-05-18 Generalized Deep-Chain Quality Pass
 
-The public Out of Bounds ER605 analysis showed that the real cmxddnsd chain is not a flat inbound socket or generic config-write bug. It requires Comexe DDNS protocol manipulation, lab WAN/MITM routing, field-delimited DDNS response parsing, a leak-oriented UpdateSvr path, and separate ErrorCode control-flow classification.
+The Out of Bounds ER605 article is now treated as a process benchmark, not as a product/protocol feature request. The reusable target is: discover deep chains where attacker influence crosses non-obvious boundaries such as outbound client responses, config state, IPC, parser fields, daemon reloads, and leak-before-control stages.
 
-### Added in this pass
+### Correction after v2.7.3 first pass
 
-1. **Comexe DDNS candidate detection**
-   * `exploitability_dossier.py` now detects `cmxddnsd` candidates from Comexe server names, `Data`, `ErrorCode`, `UpdateSvr1/2`, and unsafe parser sink markers.
-   * New families: `comexe_ddns_protocol`, `ddns_response_parser`, `protocol_spoofing_required`, `info_leak_chain_candidate`, `bounded_protocol_probe`.
-   * New channels: `dns_mitm`, `udp_ddns_response`, `parser_field`, `info_leak_then_control`.
+The first quality pass overfit the naming and docs to ER605/Comexe/DDNS. This follow-up re-centers the code on generic outbound response-parser chains. ER605 remains a fixture/example for quality evaluation only.
+
+### Generalized model
+
+1. **Outbound response-chain detection**
+   * `exploitability_dossier.py` detects `outbound_response_parser_chain:*` candidates from upstream-service markers, response fields, parser sinks, and client-ish binaries.
+   * New generic families: `outbound_protocol_response_parser`, `stateful_response_parser`, `lab_service_emulation_required`, `info_leak_chain_candidate`, `bounded_protocol_probe`.
+   * New generic channels: `lab_network_redirection`, `protocol_response`, `parser_field`, `leak_before_control_boundary`.
 
 2. **Protocol-aware Plan IR**
-   * `exploit_state_machine.py` now preserves dossier families and lowers Comexe candidates to `classify_ddns_protocol_chain_quality`.
+   * `exploit_state_machine.py` lowers these candidates to `classify_outbound_response_chain_quality`.
    * Plan actions include `emulate_protocol_channel`, `stage_bounded_field_probe`, and `validate_leak_before_control_boundary`.
 
 3. **Non-weaponized quality template**
-   * `poc_templates.py` adds a `comexe_ddns_protocol` deterministic template.
+   * `poc_templates.py` adds an `outbound_protocol_response` deterministic template.
    * The generated plugin emits a safe blueprint-only packet hash and quality checklist.
-   * It does not generate overlong fields, ROP, command payloads, DES/key recovery, or spoofing infrastructure.
+   * It does not generate overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
 
 4. **Selection hygiene**
-   * `exploit_autopoc.py` now avoids duplicate candidate IDs across dossier/state-machine sources, in addition to duplicate chain IDs.
+   * `exploit_autopoc.py` avoids duplicate candidate IDs across dossier/state-machine sources, in addition to duplicate chain IDs.
 
 ### Quality verdict
 
-* Previous quality: good triage, weak article-specific PoC scaffold.
-* Current quality: medium-high for safe reproduction planning and analyst handoff, intentionally non-weaponized.
-* Remaining dynamic gap: a live isolated lab harness is needed to upgrade blueprint transitions into observed DDNS/MITM/parser evidence.
+* Previous quality: good triage, but too instance-specific after the first ER605 quality pass.
+* Current quality: medium-high for generic safe reproduction planning and analyst handoff.
+* Remaining dynamic gap: isolated lab harnesses and parser verifiers are needed to upgrade blueprint transitions into observed evidence.
 
-See `docs/er605_poc_quality.md` for the detailed quality review.
+See `docs/er605_poc_quality.md` for the detailed process-based quality review.

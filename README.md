@@ -45,10 +45,10 @@
 > **Tier 1 numbers in this README now reflect the fresh v2.6.1 corpus refresh** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM numbers are still carry-over (`v2.3.0`, 36 firmware) until the pair-eval lane lands. See [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), and [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json).
 
 > [!TIP]
-> **What's new in v2.7.3** (Universal Chaining + ER605 Comexe DDNS quality pass)
-> - **ER605/Comexe DDNS chain modeling.** `exploitability_dossier` now recognizes `cmxddnsd` candidates using Comexe server names, `Data`, `ErrorCode`, `UpdateSvr1/2`, and parser sink markers, then emits `dns_mitm`, `udp_ddns_response`, `parser_field`, and `info_leak_then_control` channels.
-> - **Protocol-aware Plan IR and AutoPoC selection.** `exploit_state_machine` preserves dossier families and lowers Comexe candidates to `classify_ddns_protocol_chain_quality`; AutoPoC avoids duplicate candidate IDs across dossier/state-machine sources.
-> - **Non-weaponized DDNS blueprint template.** `poc_templates.py` adds a Comexe DDNS quality template that records safe packet/Plan-IR hashes and quality checks without generating overlong fields, ROP, command payloads, DES key recovery, or spoofing infrastructure.
+> **What's new in v2.7.3** (Universal Chaining + outbound response-chain quality pass)
+> - **General outbound response-chain modeling.** `exploitability_dossier` now recognizes outbound client response-parser chains using upstream-service markers, response fields, parser sinks, and client-ish binaries, then emits `lab_network_redirection`, `protocol_response`, `parser_field`, and `leak_before_control_boundary` channels.
+> - **Protocol-aware Plan IR and AutoPoC selection.** `exploit_state_machine` preserves dossier families and lowers outbound response-parser candidates to `classify_outbound_response_chain_quality`; AutoPoC avoids duplicate candidate IDs across dossier/state-machine sources.
+> - **Non-weaponized response blueprint template.** `poc_templates.py` adds a outbound response-chain quality template that records safe packet/Plan-IR hashes and quality checks without generating overlong fields, ROP, command payloads, crypto/key recovery, or spoofing infrastructure.
 > - **PoC quality review documented.** See [`docs/er605_poc_quality.md`](docs/er605_poc_quality.md) for the quality assessment against the public ER605 analysis and the remaining live-lab verifier gaps.
 
 > [!TIP]
@@ -82,7 +82,7 @@
 > **Built for analyst-in-the-loop firmware review.**
 > SCOUT is strongest when used to start deep review on a single firmware image quickly, expose evidence paths, and preserve matched reasoning lineage across triage and reporting surfaces. Analyst hints loop back into next-run LLM adjudication via MCP, while final verdict ownership stays with the reviewer.
 
-> **ER605-style exploitability dossiers.**
+> **Deep-chain exploitability dossiers.**
 > The `exploitability_dossier` stage converts findings into an analysis-only decision log: target context, input surface, reachability, controllability, primitive hypothesis, mitigation friction, chain candidates, and patch/variant questions. It ranks exploit leads without generating payloads or claiming verified exploitability.
 > In the gated `profile=exploit` lane, those ranked leads can seed `exploit_autopoc`, which generates lab-only proof plugins and verifies them through `exploit_runner`, `poc_validation`, and `exploit_policy`.
 
@@ -239,7 +239,7 @@ Ghidra is auto-detected and enabled by default. Stages in `[brackets]` require o
 | `fuzzing` | `fuzz_*.py` | AFL++ fuzzing with NVRAM faker | No | $0 |
 | `poc_refinement` | `poc_refinement.py` | Iterative PoC generation (5 attempts) | Yes | Medium |
 | `chain_construction` | `chain_constructor.py` | Same-binary + cross-binary IPC exploit chains | No | $0 |
-| `exploitability_dossier` | `exploitability_dossier.py` | ER605-style analysis-only exploitability decision log | No | $0 |
+| `exploitability_dossier` | `exploitability_dossier.py` | deep-chain analysis-only exploitability decision log | No | $0 |
 | `protocol_model` | `protocol_model.py` | Run-local RAG protocol/input model + safe encoder skeleton | Optional | Low |
 | `exploit_state_machine` | `exploit_state_machine.py` | Candidate-level reachability/trigger/leak/control proof DAG | No | $0 |
 | `crash_replay` | `crash_replay.py` | Lab-gated QEMU/cyclic crash replay and GDB script collector | No | $0 |

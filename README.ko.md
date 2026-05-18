@@ -45,10 +45,10 @@
 > **README의 Tier 1 수치는 이제 fresh v2.6.1 corpus refresh 기준입니다** (`docs/carry_over_benchmark_v2.6.md`): 1,123 targets, **1110 success / 4 partial / 9 fatal**. Tier 2 LLM 수치는 pair-eval lane이 닫히기 전까지는 여전히 carry-over (`v2.3.0`, 36 firmware)입니다. [`docs/benchmark_governance.md`](docs/benchmark_governance.md), [`docs/carry_over_benchmark_v2.6.md`](docs/carry_over_benchmark_v2.6.md), [`benchmarks/baselines/v2.5.0/manifest.json`](benchmarks/baselines/v2.5.0/manifest.json) 참조.
 
 > [!TIP]
-> **v2.7.3 핵심 변화** (Universal Chaining + ER605 Comexe DDNS 품질 패스)
-> - **ER605/Comexe DDNS 체인 모델링.** `exploitability_dossier`가 Comexe 서버명, `Data`, `ErrorCode`, `UpdateSvr1/2`, parser sink marker를 이용해 `cmxddnsd` 후보를 인식하고 `dns_mitm`, `udp_ddns_response`, `parser_field`, `info_leak_then_control` 채널을 남깁니다.
-> - **Protocol-aware Plan IR 및 AutoPoC 선택 개선.** `exploit_state_machine`은 dossier family를 보존하고 Comexe 후보를 `classify_ddns_protocol_chain_quality`로 낮춥니다. AutoPoC는 dossier/state-machine source 사이의 duplicate candidate ID도 중복 선택하지 않습니다.
-> - **Non-weaponized DDNS blueprint template.** `poc_templates.py`에 Comexe DDNS 품질 템플릿을 추가했습니다. safe packet/Plan-IR hash와 quality check를 기록하지만 overlong field, ROP, command payload, DES key recovery, spoofing infrastructure는 생성하지 않습니다.
+> **v2.7.3 핵심 변화** (Universal Chaining + outbound response-chain 품질 패스)
+> - **범용 outbound response-chain 모델링.** `exploitability_dossier`가 upstream-service marker, response field, parser sink, client-ish binary를 이용해 outbound client response-parser chain을 인식하고 `lab_network_redirection`, `protocol_response`, `parser_field`, `leak_before_control_boundary` 채널을 남깁니다.
+> - **Protocol-aware Plan IR 및 AutoPoC 선택 개선.** `exploit_state_machine`은 dossier family를 보존하고 outbound response-parser 후보를 `classify_outbound_response_chain_quality`로 낮춥니다. AutoPoC는 dossier/state-machine source 사이의 duplicate candidate ID도 중복 선택하지 않습니다.
+> - **Non-weaponized response blueprint template.** `poc_templates.py`에 outbound response-chain 품질 템플릿을 추가했습니다. safe packet/Plan-IR hash와 quality check를 기록하지만 overlong field, ROP, command payload, crypto/key recovery, spoofing infrastructure는 생성하지 않습니다.
 > - **PoC 품질 리뷰 문서화.** 공개 ER605 분석 기준 품질 평가와 남은 live-lab verifier gap은 [`docs/er605_poc_quality.md`](docs/er605_poc_quality.md)에 정리했습니다.
 
 > [!TIP]
@@ -82,7 +82,7 @@
 > **Analyst-in-the-loop 펌웨어 리뷰용으로 설계됨.**
 > SCOUT는 단일 펌웨어 이미지를 빠르게 깊이 파고들고, evidence 경로와 finding-level lineage를 드러내며, triage와 reporting 표면 전반에 reasoning을 보존할 때 가장 강합니다. 자율 추론 에이전트라기보다 분석가의 검토 루프를 보조하는 도구이며, MCP를 통해 분석가 hint가 다음 런의 LLM 판단에 피드백됩니다.
 
-> **ER605-style exploitability dossier.**
+> **Deep-chain exploitability dossier.**
 > `exploitability_dossier` stage는 finding을 target context, input surface, reachability, controllability, primitive hypothesis, mitigation friction, chain candidate, patch/variant question으로 구성된 analysis-only decision log로 변환합니다. payload를 만들거나 verified exploitability를 주장하지 않고, 수동 분석 우선순위를 정합니다.
 > 단, gated `profile=exploit` lane에서는 이 ranking된 lead를 `exploit_autopoc` 입력으로 사용해 lab-only proof plugin을 만들고 `exploit_runner`, `poc_validation`, `exploit_policy`로 검증합니다.
 
@@ -239,7 +239,7 @@ Ghidra는 자동 감지되어 기본 활성화됩니다. `[대괄호]` 스테이
 | `fuzzing` | `fuzz_*.py` | NVRAM faker 포함 AFL++ 퍼징 | 아니오 | $0 |
 | `poc_refinement` | `poc_refinement.py` | 반복 PoC 생성 (5회 시도) | 예 | 중간 |
 | `chain_construction` | `chain_constructor.py` | 동일 바이너리 + 크로스 바이너리 IPC 익스플로잇 체인 | 아니오 | $0 |
-| `exploitability_dossier` | `exploitability_dossier.py` | ER605-style analysis-only exploitability decision log | 아니오 | $0 |
+| `exploitability_dossier` | `exploitability_dossier.py` | deep-chain analysis-only exploitability decision log | 아니오 | $0 |
 | `protocol_model` | `protocol_model.py` | run-local RAG 기반 protocol/input model + safe encoder skeleton | 선택 | 낮음 |
 | `exploit_state_machine` | `exploit_state_machine.py` | 후보별 reachability/trigger/leak/control proof DAG | 아니오 | $0 |
 | `crash_replay` | `crash_replay.py` | lab-gated QEMU/cyclic crash replay + GDB script 수집 | 아니오 | $0 |
