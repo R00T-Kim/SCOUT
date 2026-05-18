@@ -3,6 +3,11 @@
 All notable changes to SCOUT are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- _No unreleased changes yet._
+
 ## [2.8.0] — 2026-05-18
 
 ### Added
