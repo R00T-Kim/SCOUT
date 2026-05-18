@@ -21,6 +21,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **v2.8.0 release gate close-out**: synchronized `aiedge.__version__` with `pyproject.toml`, pinned RAG retriever/prompt/contamination guard tests, and kept RAG verification wording within lab-only `vulnerability_trigger` PoV semantics.
+
 - **RAG-Induced Hallucination**: Reduced target-agnostic endpoint copying by sanitizing the few-shot prompt to exclude full reference source code and enforcing strict adaptation contracts.
 - **Channel Mapping Alignment**: Standardized `config_file` vs `config` channel taxonomy between the dossier scanner and RAG retriever.
 

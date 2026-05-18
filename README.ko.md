@@ -1,3 +1,5 @@
+[English](README.md) | [한국어 (이 파일)](README.ko.md)
+
 # SCOUT
 
 ### 결정적 증거 타임라인 기반의 펌웨어 보안 분석가 코파일럿

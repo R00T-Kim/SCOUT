@@ -1,3 +1,5 @@
+[English (this file)](README.md) | [한국어](README.ko.md)
+
 # SCOUT
 
 ### Firmware Security Analyst Copilot with Deterministic Evidence Lineage

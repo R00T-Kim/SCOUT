@@ -3,6 +3,14 @@
 이 문서는 "현재 구현 상태"를 솔직하게 기록합니다.
 
 
+## v2.8.0 업데이트 (2026-05-18, Exploit Pattern RAG)
+
+- `data/exploit_references/`: channel-aware exploit pattern KB 추가. 현재 `config_derived_cmd_injection` 패턴은 Web/API -> Config -> delayed daemon parse -> shell command sink 흐름을 메타데이터/추론 문서/참조 PoC 형태로 보존한다.
+- `exploit_autopoc`: 후보 family, channel, sink, trigger model 기반 scored retriever 추가. 선택된 pattern은 LLM prompt에 "복사할 코드"가 아니라 adaptation tactic으로 주입된다.
+- RAG prompt는 `ADAPTATION PLAN`을 강제하고, reference endpoint/credential/magic constant 재사용 금지 및 `vulnerability_trigger` lab PoV semantics를 명시한다.
+- Contamination guard는 reference PoC의 target-specific endpoint가 생성 코드에 누출되면 fallback/validation reason으로 차단한다.
+- E2E: ER605 artifact subset에서 config-derived command injection 후보가 `rag_references=["config_derived_cmd_injection"]`로 기록됨.
+
 ## v2.7.3 업데이트 (2026-05-18, Universal Chaining + outbound response-chain quality)
 
 - `exploitability_dossier`: ER605 글에서 배운 분석 프로세스를 제품/프로토콜 특화가 아니라 일반 `outbound_protocol_response_parser` 후보 감지로 재정렬. upstream-service marker, response field, parser sink, client-ish binary 기반으로 `lab_network_redirection` / `protocol_response` / `parser_field` / `leak_before_control_boundary` channel을 산출.
