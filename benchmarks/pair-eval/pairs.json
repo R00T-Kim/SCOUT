@@ -64,12 +64,15 @@
       "cve_id": "CVE-2017-5521",
       "vulnerable": {
         "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.7.12_1.2.5.zip",
-        "sha256": "0865872b7a9bd132263092f8b32a7bdab2548d5402cfbb166c215e23250a7cd0"
+        "sha256": "0865872b7a9bd132263092f8b32a7bdab2548d5402cfbb166c215e23250a7cd0",
+        "source_url": "https://www.downloads.netgear.com/files/GDC/R7000/R7000-V1.0.7.12_1.2.5.zip"
       },
       "patched": {
         "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.9.34_10.2.36.zip",
-        "sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e"
-      }
+        "sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+        "source_url": "https://www.downloads.netgear.com/files/GDC/R7000/R7000-V1.0.9.34_10.2.36.zip"
+      },
+      "source_note": "Official NETGEAR CDN URLs verified 2026-05-21 KST; used to reproduce real-firmware acquisition before AEG E2E proof."
     },
     {
       "pair_id": "tplink-archerc7v2-cve-2017-13772",
@@ -106,12 +109,15 @@
       "cve_id": "CVE-2019-17621",
       "vulnerable": {
         "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_1.05B03.zip",
-        "sha256": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0"
+        "sha256": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0",
+        "source_url": "http://legacyfiles.us.dlink.com/DIR-859/REVA/FIRMWARE/DIR-859_REVA_FIRMWARE_1.05B03.zip"
       },
       "patched": {
         "firmware_path": "aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_1.07B03_HOTFIX.zip",
-        "sha256": "0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664"
-      }
+        "sha256": "0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664",
+        "source_url": "http://legacyfiles.us.dlink.com/DIR-859/REVA/FIRMWARE/DIR-859_REVA_FIRMWARE_1.07B03_HOTFIX.zip"
+      },
+      "source_note": "Official D-Link legacy file URLs verified 2026-05-21 KST; HTTPS certificate chain failed locally, HTTP endpoint served expected SHA-256 bytes."
     },
     {
       "pair_id": "dlink-dir878-buffer-overflow-hotfix",

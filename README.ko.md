@@ -72,6 +72,8 @@ SCOUT v3.0.0-rc1의 1순위는 감사 리포팅이 아니라 **AEG(Automated Exp
 | 공개 RAG card | `memory_stateful_probe`, `cgi_param_cmd_injection`, `config_derived_cmd_injection` |
 | Synthetic vulnerable/control pair | 3개 card 모두 통과 |
 | Real known-vulnerable/patched firmware pair | 아직 0개 — broad AEG release claim 전 필수 |
+| 공식 펌웨어 pair 확보 | NETGEAR R7000(CVE-2017-5521), D-Link DIR-859(CVE-2019-17621) official URL + SHA-256 manifest 기록됨 |
+| 실제 펌웨어 AEG 실행 상태 | R7000은 real firmware에서 RAG/AutoPoC 후보까지 도달했지만 동적 runner pass 0, DIR-859는 `sasquatch` 부재로 squashfs extraction 차단 |
 | PoC-in-GitHub 사용 방식 | CVE/repo metadata seed → 사람이 검토한 draft pattern card → retriever |
 | 금지 사항 | raw PoC clone/실행, raw PoC 전체 prompt 주입, reference endpoint/payload 복붙 |
 
@@ -86,6 +88,8 @@ python scripts/check_exploit_pattern_evidence.py --require-real-firmware-pair
 ```
 
 현재 `--require-all`은 synthetic pair evidence 기준으로 통과하지만, `--require-real-firmware-pair`는 실제 펌웨어 pair 증거가 기록되기 전까지 실패하는 것이 정상입니다.
+
+실제 펌웨어 pair는 **다운로드 가능성**과 **취약성 검증**을 분리해서 다룹니다. `benchmarks/pair-eval/pairs.json`에는 공식 펌웨어 URL과 기대 SHA-256을 기록하고, `scripts/fetch_pair_firmware.py`가 다운로드/기존 파일 검증을 담당합니다. 그러나 이 단계는 "입력 확보"일 뿐이며, `real_firmware_pair` 증거로 승격하려면 vulnerable run은 AEG E2E gate를 통과하고 patched/control run은 fail-closed를 입증해야 합니다.
 
 ---
 
@@ -122,6 +126,14 @@ python scripts/import_poc_in_github_candidates.py --dry-run
 
 # 후보 하나를 human-review-required pattern card 초안으로 변환
 python scripts/draft_exploit_pattern_card.py data/exploit_references/candidates/poc_in_github/cve-2024-1781.json --print-json
+
+# 공식 known-vulnerable/patched 펌웨어 pair를 다운로드하거나 기존 파일 SHA-256 검증
+python scripts/fetch_pair_firmware.py --dry-run \
+  --pair-id netgear-r7000-cve-2017-5521 \
+  --pair-id dlink-dir859-cve-2019-17621
+python scripts/fetch_pair_firmware.py \
+  --pair-id netgear-r7000-cve-2017-5521 \
+  --pair-id dlink-dir859-cve-2019-17621
 
 # 실제 승인된 lab run 이후 동적 증거 + FP/FPR gate 강제
 python scripts/aeg_e2e_gate.py aiedge-runs/<run_id>
