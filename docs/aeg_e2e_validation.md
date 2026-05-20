@@ -53,10 +53,11 @@ cat /tmp/scout-aeg-synthetic-pair/synthetic_aeg_pair_summary.json
 ```
 
 The synthetic pair is a CI-safe regression proxy. It proves the AEG gate can
-separate a reproducible lab proof from a patched/control false positive. It does
-not replace a real firmware known-vulnerable/patched pair before release claims.
+separate a reproducible lab proof from a patched/control false positive. Real
+firmware release claims must cite a known-vulnerable/patched firmware pair in
+addition to this synthetic regression.
 
-The harness currently validates `memory_stateful_probe`, `cgi_param_cmd_injection`, and `config_derived_cmd_injection` as synthetic pair evidence. Inspect card-level readiness with:
+The harness currently validates `memory_stateful_probe`, `cgi_param_cmd_injection`, and `config_derived_cmd_injection` as synthetic pair evidence. The first real firmware pair is `netgear_passwordrecovered_auth_bypass` for Netgear R7000 CVE-2017-5521, with the stable report at `docs/pov/netgear-r7000-cve-2017-5521_real_pair.json`. Inspect card-level readiness with:
 
 ```bash
 python scripts/check_exploit_pattern_evidence.py

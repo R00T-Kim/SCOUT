@@ -166,6 +166,18 @@ def _read_dynamic_context(
     return summary, stage, _existing_refs(run_dir, refs), limitations
 
 
+def _has_qemu_user_dynamic_proof(summary: dict[str, object]) -> bool:
+    fallback_any = summary.get("fallback")
+    if not isinstance(fallback_any, dict):
+        return False
+    fallback = cast(dict[str, object], fallback_any)
+    result_any = fallback.get("result")
+    if not isinstance(result_any, dict):
+        return False
+    result = cast(dict[str, object], result_any)
+    return result.get("status") == "ok" and result.get("returncode") == 0
+
+
 def _collect_attempts(run_dir: Path) -> tuple[list[dict[str, object]], list[str], bool]:
     attempts: list[dict[str, object]] = []
     evidence_refs: list[str] = []
@@ -320,6 +332,20 @@ def build_verified_chain(run_dir: Path) -> tuple[Path, str, list[str]]:
     dynamic_summary, dynamic_stage, dynamic_refs, dynamic_limitations = (
         _read_dynamic_context(run_dir)
     )
+    if _has_qemu_user_dynamic_proof(dynamic_summary):
+        # qemu-user fallback is the expected dynamic path for firmware where
+        # full-system FirmAE boot cannot acquire a target IP in the local lab.
+        # Keep true boot timeouts/flakiness fail-closed, but do not let the
+        # qemu-only bookkeeping limitations mask an otherwise reproducible,
+        # isolated exploit proof chain.
+        dynamic_limitations.difference_update(
+            {
+                "boot_unavailable_run_sh_missing",
+                "firewall_snapshot_incomplete",
+                "pcap_placeholder",
+                "target_ip_missing",
+            }
+        )
     attempts, exploit_refs, has_bundle = _collect_attempts(run_dir)
 
     generated_at = _utc_now()

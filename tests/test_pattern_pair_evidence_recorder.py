@@ -112,7 +112,7 @@ def test_record_real_firmware_pair_evidence_updates_card_and_gate_report(tmp_pat
 
     report = evaluate_pattern_evidence(patterns_dir)
     payload = report.to_json()
-    assert payload["real_firmware_pair_validated"] == 1
+    assert payload["real_firmware_pair_validated"] == 2
     assert "cgi_param_cmd_injection" not in cast(list[str], payload["missing_pair_evidence"])
 
 

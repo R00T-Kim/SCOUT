@@ -296,6 +296,72 @@ def test_dynamic_validation_marks_sudo_nopasswd_required(
     assert "sudo_nopasswd_required" in out.limitations
 
 
+def test_dynamic_validation_qemu_fallback_uses_env_nonstatic_qemu_with_rootfs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _ctx(tmp_path)
+    rootfs = ctx.run_dir / "stages" / "extraction" / "rootfs"
+    bin_dir = rootfs / "bin"
+    bin_dir.mkdir(parents=True)
+    # Minimal 32-bit little-endian ARM ELF header; the fake qemu below only
+    # needs SCOUT to identify the architecture and include the rootfs via -L.
+    elf = bytearray(b"\x7fELF" + bytes([1, 1, 1]) + bytes(9) + b"\x02\x00\x28\x00")
+    busybox = bin_dir / "busybox"
+    _ = busybox.write_bytes(bytes(elf))
+    busybox.chmod(0o755)
+
+    inv_dir = ctx.run_dir / "stages" / "inventory"
+    inv_dir.mkdir(parents=True)
+    _ = (inv_dir / "inventory.json").write_text(
+        json.dumps(
+            {
+                "roots": ["stages/extraction/rootfs"],
+                "extracted_dir": "stages/extraction/rootfs",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    qemu_dir = tmp_path / "qemu"
+    qemu_dir.mkdir()
+    qemu = qemu_dir / "qemu-arm"
+    qemu.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\" > \"$AIEDGE_QEMU_ARGV_CAPTURE\"\n"
+        "echo 'qemu fake usage'\n",
+        encoding="utf-8",
+    )
+    qemu.chmod(0o755)
+    argv_capture = tmp_path / "qemu-argv.txt"
+    monkeypatch.setenv("AIEDGE_QEMU_USER_DIR", str(qemu_dir))
+    monkeypatch.setenv("AIEDGE_QEMU_ARGV_CAPTURE", str(argv_capture))
+
+    def fake_which(name: str) -> str | None:
+        if name == "git":
+            return "/usr/bin/git"
+        return None
+
+    monkeypatch.setattr("aiedge.dynamic_validation.shutil.which", fake_which)
+
+    out = DynamicValidationStage(firmae_root=str(tmp_path / "missing-FirmAE"), max_retries=1).run(ctx)
+
+    assert out.status == "partial"
+    proof = json.loads(
+        (
+            ctx.run_dir
+            / "stages"
+            / "dynamic_validation"
+            / "qemu_user"
+            / "proof.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert proof["status"] == "ok"
+    captured = argv_capture.read_text(encoding="utf-8").splitlines()
+    assert captured[:2] == ["-L", str(rootfs)]
+    assert captured[2] == str(busybox.resolve())
+
+
 def test_dynamic_validation_uses_env_privileged_runner_for_boot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -131,7 +131,10 @@ def test_real_firmware_pair_gate_promotable_when_vuln_passes_and_control_fails_c
     assert payload["verdict"] == "promotable"
     assert payload["promotable_real_firmware_pair"] is True
     assert payload["blocked_reasons"] == []
+    assert payload["pattern_id"] == "cgi_param_cmd_injection"
     assert "record_pattern_pair_evidence.py" in payload["record_command"]
+    assert "--evidence-id vendor_model_cve_0000_0001_real_pair" in payload["record_command"]
+    assert "--target-family cgi_param_cmd_injection" in payload["record_command"]
     assert json.loads(capsys.readouterr().out)["schema_version"] == "real-firmware-pair-aeg-gate-v1"
 
 

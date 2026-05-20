@@ -22,6 +22,7 @@ from urllib import error as url_error
 from urllib import request as url_request
 
 from ._typing_helpers import safe_int
+from .emulation_qemu import detect_rootfs_arch
 from .path_safety import assert_under_dir
 from .schema import JsonValue
 from .stage import StageContext, StageOutcome
@@ -1347,18 +1348,73 @@ def _read_profile_arch(run_dir: Path) -> str | None:
     return None
 
 
-def _qemu_binary_for_arch(arch: str | None) -> str | None:
+def _qemu_search_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    raw = os.environ.get("AIEDGE_QEMU_USER_DIR", "").strip()
+    if raw:
+        for item in raw.split(os.pathsep):
+            if item.strip():
+                dirs.append(Path(item).expanduser())
+    return dirs
+
+
+def _which_qemu_candidate(names: Iterable[str]) -> str | None:
+    for qemu_dir in _qemu_search_dirs():
+        for name in names:
+            candidate = qemu_dir / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _qemu_binary_names_for_arch(arch: str | None) -> tuple[str, ...]:
     if not arch:
-        return None
+        return tuple()
     arch_l = arch.lower()
     if "mips" in arch_l:
-        return shutil.which("qemu-mips-static") or shutil.which("qemu-mipsel-static")
-    if "arm" in arch_l:
-        return shutil.which("qemu-arm-static") or shutil.which("qemu-aarch64-static")
+        if "el" in arch_l or "le" in arch_l:
+            return ("qemu-mipsel-static", "qemu-mipsel")
+        return ("qemu-mips-static", "qemu-mips", "qemu-mipsel-static", "qemu-mipsel")
+    if "arm" in arch_l and "aarch64" not in arch_l:
+        if "be" in arch_l:
+            return ("qemu-armeb-static", "qemu-armeb")
+        return ("qemu-arm-static", "qemu-arm", "qemu-aarch64-static", "qemu-aarch64")
+    if "aarch64" in arch_l:
+        return ("qemu-aarch64-static", "qemu-aarch64")
     if "x86_64" in arch_l or "amd64" in arch_l:
-        return shutil.which("qemu-x86_64-static")
+        return ("qemu-x86_64-static", "qemu-x86_64")
     if "i386" in arch_l or "x86" in arch_l:
-        return shutil.which("qemu-i386-static")
+        return ("qemu-i386-static", "qemu-i386")
+    return tuple()
+
+
+def _qemu_binary_for_arch(arch: str | None, *, roots: list[Path] | None = None) -> str | None:
+    qemu = _which_qemu_candidate(_qemu_binary_names_for_arch(arch))
+    if qemu:
+        return qemu
+    for root in roots or []:
+        detected = detect_rootfs_arch(root)
+        qemu = _which_qemu_candidate(_qemu_binary_names_for_arch(detected))
+        if qemu:
+            return qemu
+    return None
+
+
+def _root_for_binary(candidate: Path, roots: list[Path]) -> Path | None:
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        resolved = candidate
+    for root in roots:
+        try:
+            _ = resolved.relative_to(root.resolve())
+            return root
+        except Exception:
+            continue
     return None
 
 
@@ -1371,7 +1427,7 @@ def _run_qemu_user_fallback(
 ) -> tuple[dict[str, JsonValue], list[str]]:
     limitations: list[str] = []
     arch = _read_profile_arch(run_dir)
-    qemu_bin = _qemu_binary_for_arch(arch)
+    qemu_bin = _qemu_binary_for_arch(arch, roots=roots)
     candidates = _scan_roots_for_binary(roots)
 
     attempt_limit = max(1, int(_QEMU_MAX_ATTEMPTS))
@@ -1458,7 +1514,11 @@ def _run_qemu_user_fallback(
         for attempt_args in _QEMU_ATTEMPT_ARGS:
             if len(attempt_records) >= attempt_limit:
                 break
-            argv = [qemu_bin, str(selected)] + list(attempt_args)
+            rootfs = _root_for_binary(selected, roots)
+            argv = [qemu_bin]
+            if rootfs is not None:
+                argv.extend(["-L", str(rootfs)])
+            argv.extend([str(selected), *list(attempt_args)])
             res = _run_command(argv, timeout_s=timeout_s)
             safe_argv = _sanitize_argv_for_output(argv, run_dir=run_dir)
             attempt_record: dict[str, JsonValue] = {

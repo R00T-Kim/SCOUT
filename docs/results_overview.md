@@ -40,7 +40,7 @@ The Tier 1 corpus refresh and the first local-7 reviewer eval lane are now compl
 
 | Pair family | Vuln / patched label | Binary / archive source | Status |
 | --- | --- | --- | --- |
-| Netgear R7000 | `CVE-2017-5521` | `R7000-V1.0.7.12 -> V1.0.9.34` | local-7 complete |
+| Netgear R7000 | `CVE-2017-5521` | `R7000-V1.0.5.70 -> V1.0.9.34` | local-7 complete; AEG real-pair gate promoted |
 | TP-Link Archer C7 multi-version | `CVE-2017-13772`, `CVE-2019-17152` | `v2 2015->2016`, `v4 2017->2018` | local-7 complete |
 | D-Link DIR-859 | `CVE-2019-17621` | `pre-1.06B01 -> 1.06B01` | gap / not yet sourced |
 
@@ -104,7 +104,7 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
 - Full candidate list and CVE mapping is in `docs/pair_corpus_candidates.md` (10 candidate pairs + 2 gaps documented).
 - **v2.7.1 12-pair set** (current, 12 pairs / 24 runs): v2.7.0 local-7 + five new vendor/model entries — D-Link DIR-859 (CVE-2019-17621), D-Link DIR-878 (vendor advisory), ASUS RT-AC68U (CVE-2020-15498), Linksys WRT1900AC v2 (progression), Linksys EA6700 (progression). See `benchmarks/pair-eval/pairs.json` and `docs/v2.7.1_release_plan.md`.
 - **Legacy local-7 set** (v2.6.1/v2.7.0 baseline, 7 pairs / 14 runs):
-  - Netgear R7000 V1.0.7.12 → V1.0.9.34 (CVE-2017-5521)
+  - Netgear R7000 V1.0.5.70 → V1.0.9.34 (CVE-2017-5521)
   - D-Link DIR-868L K02 → K04 (CVE-2018-10970 ref)
   - D-Link DIR-850L FW105 → FW115 (CVE-2019-20213 / CVE-2019-6258 ref)
   - D-Link DIR-825 B1 FW201 → FW202 (CVE-2017-6190 ref)
@@ -117,6 +117,7 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
 - **Exclusions**: any pair whose vuln-side fails extraction (`partial` or worse) must be held back; only `extraction=ok` subset feeds the pair-labeled recall/FPR calculation. This aligns with the "pipeline capable ≠ value delivered" framing.
 - **Pair type**: all M0 pairs are **version-paired** within the same vendor model line. Patch-level pairs (minor build number diffs) are parked under §5 of `docs/pair_corpus_candidates.md` as P3 future expansion.
 - **Local-7 actual numbers are now populated** from `benchmark-results/pair-eval/pair_eval_summary.json`. Gap pairs (e.g. DIR-859) remain a follow-on expansion step.
+- **AEG real-pair proof**: Netgear R7000 CVE-2017-5521 now has a stable known-vulnerable/patched promotion report at `docs/pov/netgear-r7000-cve-2017-5521_real_pair.json`; the vulnerable V1.0.5.70 run passes AutoPoC, reproducible PoC validation, verified-chain, and FP/FPR gates while patched V1.0.9.34 fails closed on dynamic proof checks.
 
 ## 5) Calibration
 

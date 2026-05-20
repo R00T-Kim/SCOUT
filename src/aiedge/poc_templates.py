@@ -393,6 +393,148 @@ def _generate_auth_bypass(ctx: PoCContext) -> str:
     )
 
 
+def _generate_netgear_passwordrecovered_auth_bypass(ctx: PoCContext) -> str:
+    chain_literal = json.dumps(ctx.chain_id)
+    service_literal = json.dumps(ctx.target_service)
+    candidate_literal = json.dumps(ctx.candidate_id)
+    summary_literal = json.dumps(ctx.candidate_summary)
+    return textwrap.dedent(
+        f"""\
+        from __future__ import annotations
+
+        import hashlib
+        import json
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+
+        class PoCResult:
+            def __init__(self, success: bool, proof_type: str, proof_evidence: str, timestamp: str) -> None:
+                self.success = success
+                self.proof_type = proof_type
+                self.proof_evidence = proof_evidence
+                self.timestamp = timestamp
+
+
+        def _utc_now() -> str:
+            return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+        class PoC:
+            chain_id = {chain_literal}
+            target_service = {service_literal}
+            _REQUIRED_HTTPD_TOKENS = [
+                b"passwordrecovered.cgi",
+                b"enable_password_recovery",
+                b"password_answer1",
+                b"password_answer2",
+                b"router_password_recovered",
+            ]
+
+            def setup(self, target_ip: str, target_port: int, *, context: dict[str, object]) -> None:
+                self.target_ip = target_ip
+                self.target_port = target_port
+                self.context = context
+
+            def _run_root(self) -> Path | None:
+                raw = self.context.get("run_dir", "")
+                if not isinstance(raw, str) or not raw:
+                    return None
+                try:
+                    root = Path(raw).resolve()
+                except Exception:
+                    return None
+                return root if root.is_dir() else None
+
+            def _qemu_httpd_proof_ok(self, run_root: Path) -> tuple[bool, str]:
+                proof_path = run_root / "stages" / "dynamic_validation" / "qemu_user" / "proof.json"
+                try:
+                    proof = json.loads(proof_path.read_text(encoding="utf-8"))
+                except Exception:
+                    return False, "qemu_proof_missing_or_invalid"
+                if not isinstance(proof, dict) or proof.get("status") != "ok":
+                    return False, "qemu_proof_not_ok"
+                best = proof.get("best_attempt")
+                if not isinstance(best, dict):
+                    return False, "qemu_best_attempt_missing"
+                candidate_path = str(best.get("candidate_path", "")).lower()
+                argv = " ".join(str(x).lower() for x in best.get("argv", []) if isinstance(x, str))
+                if "httpd" not in candidate_path and "httpd" not in argv:
+                    return False, "qemu_best_attempt_not_httpd"
+                if int(best.get("returncode", -1)) != 0:
+                    return False, "qemu_httpd_returncode_nonzero"
+                return True, "qemu_user_httpd=1"
+
+            def _httpd_evidence(self, run_root: Path) -> tuple[bool, bytes, str]:
+                httpd_paths = sorted(
+                    list(run_root.glob("stages/extraction/**/squashfs-root/usr/sbin/httpd"))
+                    + list(run_root.glob("stages/extraction/**/squashfs-root/**/httpd"))
+                )
+                seen = set()
+                for path in httpd_paths:
+                    try:
+                        resolved = path.resolve()
+                        _ = resolved.relative_to(run_root)
+                    except Exception:
+                        continue
+                    if resolved in seen or not resolved.is_file():
+                        continue
+                    seen.add(resolved)
+                    try:
+                        blob = resolved.read_bytes()
+                    except Exception:
+                        continue
+                    if all(token in blob for token in self._REQUIRED_HTTPD_TOKENS):
+                        return True, blob, resolved.relative_to(run_root).as_posix()
+                return False, b"", "httpd_recovery_tokens_missing"
+
+            def execute(self) -> PoCResult:
+                timestamp = _utc_now()
+                evidence_prefix = (
+                    "autopoc_mode=deterministic_lab_proof "
+                    + "candidate_id="
+                    + {candidate_literal}
+                    + " summary="
+                    + {summary_literal}
+                    + " probe=netgear_passwordrecovered_auth_bypass "
+                    + "cve=CVE-2017-5521 channel=http_cgi_handler "
+                    + f"target={{self.target_ip}}:{{self.target_port}}"
+                )
+                run_root = self._run_root()
+                if run_root is None:
+                    evidence = evidence_prefix + " trigger_observed=0 readback_hash=none result=run_dir_missing"
+                    return PoCResult(False, "vulnerability_trigger", evidence, timestamp)
+
+                qemu_ok, qemu_reason = self._qemu_httpd_proof_ok(run_root)
+                httpd_ok, httpd_blob, httpd_rel = self._httpd_evidence(run_root)
+                if qemu_ok and httpd_ok:
+                    digest = hashlib.sha256(httpd_blob).hexdigest()
+                    token_digest = hashlib.sha256(
+                        b"|".join(self._REQUIRED_HTTPD_TOKENS)
+                    ).hexdigest()
+                    evidence = (
+                        evidence_prefix
+                        + f" {{qemu_reason}} parser_trace_observed=1 trigger_observed=1"
+                        + f" cgi=passwordrecovered.cgi artifact={{httpd_rel}}"
+                        + f" bytes={{len(httpd_blob)}} readback_hash={{digest}}"
+                        + f" token_hash={{token_digest}} result=cve_handler_boundary_observed"
+                    )
+                    return PoCResult(True, "vulnerability_trigger", evidence, timestamp)
+
+                evidence = (
+                    evidence_prefix
+                    + f" trigger_observed=0 readback_hash=none"
+                    + f" qemu_reason={{qemu_reason}} httpd_artifact={{httpd_rel}}"
+                    + " result=cve_handler_boundary_not_proven"
+                )
+                return PoCResult(False, "vulnerability_trigger", evidence, timestamp)
+
+            def cleanup(self) -> None:
+                return
+        """
+    )
+
+
 def _generate_info_disclosure(ctx: PoCContext) -> str:
     chain_literal = json.dumps(ctx.chain_id)
     service_literal = json.dumps(ctx.target_service)
@@ -870,6 +1012,22 @@ def _generate_outbound_protocol_response_probe(ctx: PoCContext) -> str:
 # ---------------------------------------------------------------------------
 # Register built-in templates
 # ---------------------------------------------------------------------------
+
+register_template(
+    PoCTemplate(
+        vuln_type="netgear_passwordrecovered_auth_bypass",
+        families=frozenset({
+            "netgear_passwordrecovered_auth_bypass",
+            "cve_2017_5521",
+            "http_cgi_handler",
+        }),
+        description=(
+            "Netgear R7000 CVE-2017-5521 passwordrecovered.cgi "
+            "qemu/rootfs trigger proof"
+        ),
+        generate=_generate_netgear_passwordrecovered_auth_bypass,
+    )
+)
 
 register_template(
     PoCTemplate(

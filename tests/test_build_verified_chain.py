@@ -324,6 +324,51 @@ def test_build_verified_chain_inconclusive_boot_flaky(tmp_path: Path) -> None:
     assert verify_res.returncode == 0
 
 
+def test_build_verified_chain_accepts_qemu_user_fallback_limitations(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_fixture(
+        tmp_path,
+        pcap_destinations=["192.168.1.10"],
+        boot_flaky=False,
+    )
+    dyn_path = run_dir / "stages" / "dynamic_validation" / "dynamic_validation.json"
+    dyn = cast(dict[str, object], json.loads(dyn_path.read_text(encoding="utf-8")))
+    dyn["status"] = "partial"
+    dyn["limitations"] = [
+        "boot_unavailable_run_sh_missing",
+        "firewall_snapshot_incomplete",
+        "pcap_placeholder",
+        "target_ip_missing",
+    ]
+    dyn["fallback"] = {
+        "proof": "stages/dynamic_validation/qemu_user/proof.json",
+        "result": {
+            "argv": ["qemu-arm", "-L", "rootfs", "rootfs/usr/sbin/httpd", "--help"],
+            "returncode": 0,
+            "status": "ok",
+        },
+    }
+    qemu_dir = run_dir / "stages" / "dynamic_validation" / "qemu_user"
+    qemu_dir.mkdir(parents=True)
+    (qemu_dir / "proof.json").write_text(
+        json.dumps({"status": "ok"}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    dyn_path.write_text(
+        json.dumps(dyn, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+
+    res = _run_builder(run_dir)
+    assert res.returncode == 0
+
+    contract = _load_contract(run_dir)
+    verdict = cast(dict[str, object], contract["verdict"])
+    assert verdict["state"] == "pass"
+    assert verdict["reason_codes"] == ["isolation_verified", "repro_3_of_3"]
+
+
 def test_build_verified_chain_fail_on_egress_violation(tmp_path: Path) -> None:
     run_dir = _write_fixture(
         tmp_path,

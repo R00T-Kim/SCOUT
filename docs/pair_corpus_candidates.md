@@ -39,7 +39,7 @@ eval lane에 넣기 위한 pair 자격 기준:
 
 | # | 모델 | Vulnerable firmware (local) | Patched firmware (local) | 매핑 참고 CVE | 로컬 상태 | 우선 |
 |---|------|----------------------------|--------------------------|---------------|----------|------|
-| 1 | Netgear R7000 | `aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.7.12_1.2.5.zip` | `aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.9.34_10.2.36.zip` | CVE-2017-5521 (admin auth bypass via `BRS_*.html`) | 둘 다 존재 | **P0** |
+| 1 | Netgear R7000 | `aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.5.70_1.1.91.zip` | `aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.9.34_10.2.36.zip` | CVE-2017-5521 (`passwordrecovered.cgi` auth bypass; pre-fix vs patched) | 둘 다 존재 | **P0** |
 | 2 | Netgear R7000 (장거리) | `aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.3.56_1.1.25.zip` | `aiedge-inputs/netgear/R7000-V1.0.11.136_10.2.120.chk` | CVE-2017-5521 + downstream patches | 둘 다 존재 (후자는 `netgear/` 원본) | P1 |
 | 3 | D-Link DIR-859 | **missing** (pre-1.06B01 요구) | `aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_PATCH_1.06B01.zip` | CVE-2019-17621 (UPnP SOAPAction 명령 주입) | vuln missing — 외부 수급 필요 | P0 (gap) |
 | 4 | D-Link DIR-868L | `aiedge-inputs/firmae-benchmark/dlink/DIR868LB1_FW200KR-K02.bin` | `aiedge-inputs/firmae-benchmark/dlink/DIR868LWB1_FW200KR-K04.bin` | CVE-2018-10970 (HNAP 인증 우회) | 둘 다 존재 | P1 |

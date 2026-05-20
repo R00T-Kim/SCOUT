@@ -63,16 +63,16 @@
       "model": "R7000",
       "cve_id": "CVE-2017-5521",
       "vulnerable": {
-        "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.7.12_1.2.5.zip",
-        "sha256": "0865872b7a9bd132263092f8b32a7bdab2548d5402cfbb166c215e23250a7cd0",
-        "source_url": "https://www.downloads.netgear.com/files/GDC/R7000/R7000-V1.0.7.12_1.2.5.zip"
+        "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.5.70_1.1.91.zip",
+        "sha256": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0",
+        "source_url": "https://www.downloads.netgear.com/files/GDC/R7000/R7000-V1.0.5.70_1.1.91.zip"
       },
       "patched": {
         "firmware_path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.9.34_10.2.36.zip",
         "sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
         "source_url": "https://www.downloads.netgear.com/files/GDC/R7000/R7000-V1.0.9.34_10.2.36.zip"
       },
-      "source_note": "Official NETGEAR CDN URLs verified 2026-05-21 KST; used to reproduce real-firmware acquisition before AEG E2E proof."
+      "source_note": "Official NETGEAR CDN URLs verified 2026-05-21 KST; vulnerable side uses pre-fix R7000 V1.0.5.70, while V1.0.7.10+ NETGEAR release notes reference fixes for password-related web GUI vulnerabilities."
     },
     {
       "pair_id": "tplink-archerc7v2-cve-2017-13772",

@@ -228,7 +228,10 @@ def build_pair_gate_report(
         "verdict": "promotable" if promotable else "blocked",
         "blocked_reasons": sorted(set(blocked)),
     }
+    if pattern_id:
+        payload["pattern_id"] = pattern_id
     if promotable and pattern_id:
+        evidence_id = f"{pair.pair_id.replace('-', '_')}_real_pair"
         payload["record_command"] = " ".join(
             [
                 "python scripts/record_pattern_pair_evidence.py",
@@ -236,10 +239,12 @@ def build_pair_gate_report(
                 "--kind real_firmware_pair",
                 f"--vulnerable-run-dir {vulnerable_run_dir}",
                 f"--control-run-dir {control_run_dir}",
+                f"--evidence-id {evidence_id}",
                 f"--artifact docs/pov/{pair.pair_id}_real_pair.json",
                 f"--vulnerable-firmware-sha256 {pair.vulnerable.sha256}",
                 f"--control-firmware-sha256 {pair.patched.sha256}",
                 f"--cve {pair.cve_id}",
+                f"--target-family {pattern_id}",
                 "--apply",
             ]
         )
