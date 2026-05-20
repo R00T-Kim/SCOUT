@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
-from scripts import fetch_pair_firmware
+
+def _load_fetch_pair_firmware() -> ModuleType:
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "fetch_pair_firmware.py"
+    spec = importlib.util.spec_from_file_location("fetch_pair_firmware", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+fetch_pair_firmware = _load_fetch_pair_firmware()
 
 
 def _write_manifest(path: Path) -> None:
