@@ -228,6 +228,28 @@ def test_runner_executes_scout_for_missing_sides_and_discovers_run_dirs(
     assert [row["status"] for row in payload["postprocess"]] == ["success", "success"]
     assert {step["kind"] for row in payload["postprocess"] for step in row["steps"]} == {
         "stages",
+        "derive_quality_metrics",
         "build_verified_chain",
     }
     assert not run_dirs
+
+
+def test_runner_derives_quality_metrics_from_fp_verification_summary(tmp_path: Path) -> None:
+    module = _load_script()
+    run_dir = tmp_path / "run"
+    _write_json(
+        run_dir / "stages/fp_verification/verified_alerts.json",
+        {
+            "status": "ok",
+            "summary": {"eligible_checked": 10, "false_positives": 1},
+            "verified_alerts": [],
+        },
+    )
+
+    result = module._derive_quality_metrics(run_dir)
+
+    assert result["status"] == "success"
+    payload = json.loads((run_dir / "quality_metrics.json").read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "aeg-derived-quality-metrics-v1"
+    assert payload["overall"]["fpr"] == 0.1
+    assert payload["source"]["kind"] == "fp_verification.summary"

@@ -93,11 +93,11 @@ python scripts/record_pattern_pair_evidence.py <pattern-id> \
 ```
 
 The run wrapper executes or reuses the selected official pair, reruns the
-required post-analysis AEG stages, rebuilds the verified evidence chain, and
-then emits a fail-closed pair report through the preflight command. It checks
-the manifest firmware SHA-256 values, re-runs the AEG E2E gate on both runs,
-lists missing gate artifacts, and only returns success when the pair is
-promotable. The
+required post-analysis AEG stages, derives run-level FP/FPR metrics from the
+FP verification artifact, rebuilds the verified evidence chain, and then emits
+a fail-closed pair report through the preflight command. It checks the manifest
+firmware SHA-256 values, re-runs the AEG E2E gate on both runs, lists missing
+gate artifacts, and only returns success when the pair is promotable. The
 recorder performs the same gate checks before mutating a card: vulnerable must
 pass, both sides must have complete gate artifacts, and patched/control must
 fail at least one dynamic proof check. For `real_firmware_pair`, the recorder

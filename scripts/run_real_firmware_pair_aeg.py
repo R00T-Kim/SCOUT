@@ -302,6 +302,92 @@ def _build_verified_chain(run_dir: Path) -> dict[str, Any]:
         }
 
 
+def _load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _as_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except Exception:
+        return None
+
+
+def _derive_quality_metrics(run_dir: Path) -> dict[str, Any]:
+    started_at = time.time()
+    fp_path = run_dir / "stages" / "fp_verification" / "verified_alerts.json"
+    fp = _load_json(fp_path)
+    if fp is None:
+        return {
+            "status": "fatal",
+            "returncode": 1,
+            "duration_s": round(time.time() - started_at, 3),
+            "error": f"missing or invalid FP verification artifact: {fp_path}",
+        }
+
+    summary = fp.get("summary") if isinstance(fp.get("summary"), dict) else {}
+    false_positives = _as_float(summary.get("false_positives")) if isinstance(summary, dict) else None
+    eligible_checked = _as_float(summary.get("eligible_checked")) if isinstance(summary, dict) else None
+    source = "fp_verification.summary"
+    if false_positives is None or eligible_checked is None:
+        alerts = fp.get("verified_alerts")
+        verified_alerts = [item for item in alerts if isinstance(item, dict)] if isinstance(alerts, list) else []
+        high_or_critical = [
+            item for item in verified_alerts if str(item.get("severity", "")).lower() in {"high", "critical"}
+        ]
+        false_positive_alerts = [
+            item for item in high_or_critical if str(item.get("fp_verdict", "")).upper() == "FP"
+        ]
+        false_positives = float(len(false_positive_alerts))
+        eligible_checked = float(len(high_or_critical))
+        source = "fp_verification.verified_alerts"
+
+    if eligible_checked <= 0:
+        return {
+            "status": "fatal",
+            "returncode": 1,
+            "duration_s": round(time.time() - started_at, 3),
+            "error": "FP verification did not include any eligible high/critical evidence for FPR derivation",
+            "source_path": str(fp_path),
+        }
+
+    fpr = false_positives / eligible_checked
+    out_path = run_dir / "quality_metrics.json"
+    payload = {
+        "schema_version": "aeg-derived-quality-metrics-v1",
+        "overall": {
+            "fpr": round(fpr, 6),
+            "false_positives": int(false_positives),
+            "eligible_checked": int(eligible_checked),
+        },
+        "source": {
+            "kind": source,
+            "path": str(fp_path.relative_to(run_dir)),
+            "note": (
+                "Derived from fail-closed FP verification output for the AEG E2E gate; "
+                "does not replace dynamic proof requirements."
+            ),
+        },
+    }
+    _write_json(out_path, payload)
+    return {
+        "status": "success",
+        "returncode": 0,
+        "duration_s": round(time.time() - started_at, 3),
+        "quality_metrics_path": str(out_path),
+        "fpr": payload["overall"]["fpr"],
+        "source": source,
+    }
+
+
 def _postprocess_run(
     *,
     pair: PairSpec,
@@ -313,6 +399,7 @@ def _postprocess_run(
     no_llm: bool,
     quiet: bool,
     skip_stages: bool,
+    skip_quality_metrics: bool,
     skip_verified_chain: bool,
     dry_run: bool,
 ) -> dict[str, Any]:
@@ -324,6 +411,7 @@ def _postprocess_run(
         "run_dir": str(run_dir) if run_dir is not None else "",
         "stages_requested": stages,
         "skip_stages": bool(skip_stages),
+        "skip_quality_metrics": bool(skip_quality_metrics),
         "skip_verified_chain": bool(skip_verified_chain),
         "dry_run": bool(dry_run),
         "steps": [],
@@ -339,6 +427,8 @@ def _postprocess_run(
             planned_steps.append(
                 {"kind": "stages", "cmd": ["./scout", "stages", str(run_dir), "--stages", stages]}
             )
+        if not skip_quality_metrics:
+            planned_steps.append({"kind": "derive_quality_metrics", "run_dir": str(run_dir)})
         if not skip_verified_chain:
             planned_steps.append({"kind": "build_verified_chain", "run_dir": str(run_dir)})
         payload["steps"] = planned_steps
@@ -360,6 +450,8 @@ def _postprocess_run(
                 ),
             }
         )
+    if not skip_quality_metrics:
+        steps.append({"kind": "derive_quality_metrics", **_derive_quality_metrics(run_dir)})
     if not skip_verified_chain:
         steps.append({"kind": "build_verified_chain", **_build_verified_chain(run_dir)})
     payload["steps"] = steps
@@ -395,6 +487,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--post-time-budget-s", type=int, default=1800)
     parser.add_argument("--skip-post-stages", action="store_true")
+    parser.add_argument("--skip-quality-metrics", action="store_true")
     parser.add_argument("--skip-verified-chain", action="store_true")
     parser.add_argument("--vulnerable-run-dir", type=Path, default=None)
     parser.add_argument("--control-run-dir", type=Path, default=None)
@@ -511,6 +604,7 @@ def main(argv: list[str] | None = None) -> int:
                     no_llm=bool(args.no_llm),
                     quiet=bool(args.quiet),
                     skip_stages=bool(args.skip_post_stages),
+                    skip_quality_metrics=bool(args.skip_quality_metrics),
                     skip_verified_chain=bool(args.skip_verified_chain),
                     dry_run=bool(args.dry_run),
                 )
