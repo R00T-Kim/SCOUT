@@ -89,6 +89,8 @@ def _build_extraction_guidance(
         timeout           -- binwalk exceeded the time budget
         no_binwalk        -- binwalk is not installed
         invalid_rootfs    -- --rootfs path is not a valid directory
+        squashfs_lzma_sasquatch
+                         -- legacy LZMA SquashFS needs a sasquatch-capable extractor
     """
     lines: list[str] = []
 
@@ -111,6 +113,11 @@ def _build_extraction_guidance(
         lines.append("binwalk is not installed; extraction was skipped.")
     elif reason_code == "invalid_rootfs":
         lines.append("The --rootfs path does not exist or is not a directory.")
+    elif reason_code == "squashfs_lzma_sasquatch":
+        lines.append(
+            "Legacy LZMA SquashFS extraction failed. This firmware likely needs "
+            "a sasquatch-compatible unsquashfs build."
+        )
     else:
         lines.append(f"Extraction failed (reason: {reason_code}).")
 
@@ -179,6 +186,18 @@ def _build_extraction_guidance(
         )
         lines.append(
             "  3. If the firmware is encrypted, check vendor_decrypt.py first."
+        )
+    elif reason_code == "squashfs_lzma_sasquatch":
+        lines.append(
+            "  1. Install or expose a sasquatch-compatible unsquashfs before re-running SCOUT."
+        )
+        lines.append(
+            "  2. Or provide a pre-extracted rootfs to bypass extraction: "
+            "./scout analyze firmware.bin --rootfs /path/to/extracted"
+        )
+        lines.append(
+            "  3. Preserve logs/extraction_guidance.txt and stages/extraction/binwalk.log "
+            "with any real_firmware_pair blocker report."
         )
 
     # ---------- documentation pointer ----------
@@ -941,6 +960,7 @@ def _recursive_nested_extraction(
     squashfs_queue: list[tuple[Path, int]] = [(extracted_dir, 0)]
     seen_squashfs: set[str] = set()
     all_squashfs_refs: list[str] = []
+    squashfs_lzma_sasquatch_required = False
 
     while squashfs_queue:
         current_root, depth = squashfs_queue.pop(0)
@@ -996,6 +1016,16 @@ def _recursive_nested_extraction(
                 _append_log(log_path, "--- recursive unsquashfs stderr (trunc) ---")
                 _append_log(log_path, cp.stderr[:4096])
             if cp.returncode != 0:
+                stderr_lower = (cp.stderr or "").lower()
+                if (
+                    "lzma" in stderr_lower
+                    and (
+                        "uncompress failed" in stderr_lower
+                        or "corruption detected" in stderr_lower
+                        or "sasquatch" in stderr_lower
+                    )
+                ):
+                    squashfs_lzma_sasquatch_required = True
                 limitations.append(
                     f"unsquashfs failed for {_rel_to_run_dir(run_dir, sq_path)} (rc={cp.returncode})"
                 )
@@ -1022,6 +1052,13 @@ def _recursive_nested_extraction(
     details["squashfs_candidate_count"] = int(len(all_squashfs_refs))
     details["squashfs_extract_ok"] = int(squash_ok)
     details["squashfs_depth_reached"] = int(max_squashfs_depth)
+    details["squashfs_lzma_sasquatch_required"] = bool(
+        squashfs_lzma_sasquatch_required
+    )
+    if squashfs_lzma_sasquatch_required:
+        limitations.append(
+            "Legacy LZMA SquashFS appears to require a sasquatch-compatible unsquashfs; provide sasquatch or --rootfs."
+        )
 
     archive_info, archive_limits, archive_evidence = _recursive_archive_extraction(
         run_dir=run_dir,
@@ -1412,6 +1449,11 @@ class ExtractionStage:
                 _guidance_code = "encrypted"
             elif extracted_files <= 0:
                 _guidance_code = "unknown_container"
+            elif (
+                isinstance(recursive_info, dict)
+                and recursive_info.get("squashfs_lzma_sasquatch_required") is True
+            ):
+                _guidance_code = "squashfs_lzma_sasquatch"
             else:
                 _guidance_code = "unknown_container"
 

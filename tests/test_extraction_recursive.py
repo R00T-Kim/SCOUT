@@ -82,6 +82,60 @@ def test_recursive_nested_extraction_reports_missing_optional_tools(
     assert any("unsquashfs is unavailable" in x for x in limits)
 
 
+def test_recursive_nested_extraction_flags_legacy_lzma_squashfs_sasquatch_blocker(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir = tmp_path / "run"
+    stage_dir = run_dir / "stages" / "extraction"
+    extracted_dir = stage_dir / "_firmware.bin.extracted"
+    extracted_dir.mkdir(parents=True, exist_ok=True)
+    log_path = stage_dir / "binwalk.log"
+    _ = log_path.write_text("", encoding="utf-8")
+    fw = run_dir / "input" / "firmware.bin"
+    fw.parent.mkdir(parents=True, exist_ok=True)
+    _ = fw.write_bytes(b"FW")
+    _ = (extracted_dir / "legacy.squashfs").write_bytes(b"hsqs....")
+
+    def fake_which(name: str) -> str | None:
+        if name == "unsquashfs":
+            return "/fake/unsquashfs"
+        return None
+
+    def fake_run(
+        argv: list[str],
+        *,
+        cwd: str | None = None,
+        text: bool = True,
+        capture_output: bool = True,
+        check: bool = False,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = cwd, text, capture_output, check, timeout
+        assert argv[0].endswith("unsquashfs")
+        return subprocess.CompletedProcess(
+            argv,
+            1,
+            stdout="",
+            stderr="lzma uncompress failed\nFATAL ERROR: File system corruption detected; install sasquatch\n",
+        )
+
+    monkeypatch.setattr("aiedge.extraction.shutil.which", fake_which)
+    monkeypatch.setattr("aiedge.extraction.subprocess.run", fake_run)
+
+    details, limits, _ = _recursive_nested_extraction(
+        run_dir=run_dir,
+        stage_dir=stage_dir,
+        extracted_dir=extracted_dir,
+        firmware_path=fw,
+        log_path=log_path,
+        timeout_s=30.0,
+    )
+
+    assert details.get("squashfs_lzma_sasquatch_required") is True
+    assert int(details.get("squashfs_extract_ok", 0)) == 0
+    assert any("sasquatch-compatible unsquashfs" in x for x in limits)
+
+
 def test_recursive_nested_extraction_uses_ubireader_and_unsquashfs(
     tmp_path: Path, monkeypatch
 ) -> None:

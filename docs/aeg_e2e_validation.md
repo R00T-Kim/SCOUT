@@ -67,6 +67,13 @@ the card-level evidence through the recorder rather than manually editing the
 pattern card:
 
 ```bash
+python scripts/check_real_firmware_pair_aeg.py \
+  --pair-id <manifest-pair-id> \
+  --vulnerable-run-dir aiedge-runs/<known-vulnerable-run> \
+  --control-run-dir aiedge-runs/<patched-control-run> \
+  --pattern-id <pattern-id> \
+  --out docs/pov/<stable-pair-evidence>.json
+
 python scripts/record_pattern_pair_evidence.py <pattern-id> \
   --kind real_firmware_pair \
   --vulnerable-run-dir aiedge-runs/<known-vulnerable-run> \
@@ -78,12 +85,15 @@ python scripts/record_pattern_pair_evidence.py <pattern-id> \
   --apply
 ```
 
-This command re-runs the AEG E2E gate on both runs. It requires the vulnerable
-run to pass, requires complete gate artifacts on both sides, and requires the
-patched/control run to fail at least one dynamic proof check. For
-`real_firmware_pair`, the recorder also requires a stable evidence artifact,
-both firmware SHA-256 values, and a CVE or target-family label so ad-hoc lab
-runs cannot be mislabeled as release-grade firmware-pair proof.
+The preflight command emits a fail-closed pair report. It checks the manifest
+firmware SHA-256 values, re-runs the AEG E2E gate on both runs, lists missing
+gate artifacts, and only returns success when the pair is promotable. The
+recorder performs the same gate checks before mutating a card: vulnerable must
+pass, both sides must have complete gate artifacts, and patched/control must
+fail at least one dynamic proof check. For `real_firmware_pair`, the recorder
+also requires a stable evidence artifact, both firmware SHA-256 values, and a
+CVE or target-family label so ad-hoc lab runs cannot be mislabeled as
+release-grade firmware-pair proof.
 
 ## Real-run workflow
 

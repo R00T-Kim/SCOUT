@@ -77,6 +77,14 @@ def test_guidance_invalid_rootfs() -> None:
     assert "docs/runbook.md#extraction-failure" in msg
 
 
+def test_guidance_legacy_lzma_squashfs_points_to_sasquatch() -> None:
+    msg = _build_extraction_guidance(reason_code="squashfs_lzma_sasquatch")
+    assert "LZMA SquashFS" in msg
+    assert "sasquatch" in msg
+    assert "--rootfs" in msg
+    assert "docs/runbook.md#extraction-failure" in msg
+
+
 def test_guidance_vendor_tried_appears_in_output() -> None:
     msg = _build_extraction_guidance(
         reason_code="encrypted",
@@ -93,6 +101,7 @@ def test_guidance_non_empty_for_all_known_codes() -> None:
         "timeout",
         "no_binwalk",
         "invalid_rootfs",
+        "squashfs_lzma_sasquatch",
     ):
         msg = _build_extraction_guidance(reason_code=code)
         assert msg.strip(), f"guidance empty for reason_code={code}"
