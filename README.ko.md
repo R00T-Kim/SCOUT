@@ -56,9 +56,36 @@
 - **심층 익스플로잇 탐지**: `Web -> IPC -> Config -> Daemon` 또는 `Shell -> Binary`로 이어지는 복합 공격 체인을 탐지합니다.
 - **AEG-first AutoPoC**: **Exploit Pattern RAG**를 활용하여 펌웨어 증거에서 실험실 검증용 Proof-of-Vulnerability 모듈을 생성합니다.
   - SCOUT은 firmware-relevant CVE seed를 위해 PoC-in-GitHub 메타데이터 전용 importer와 human-review-required draft pattern-card promoter를 포함합니다.
-  - SCOUT은 raw 공개 PoC 저장소를 clone/실행/prompt 주입하지 않습니다. 플랫폼 수준 AEG claim은 [`docs/aeg_e2e_validation.md`](docs/aeg_e2e_validation.md)의 동적 증거/FP gate를 통과해야 합니다. 자세한 내용은 [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md)를 참고하세요.
+  - PoC-in-GitHub는 귀중한 upstream seed로 사용하되, SCOUT은 raw 공개 PoC 저장소를 clone/실행/prompt 주입하지 않습니다. 사람이 검토한 pattern card만 AutoPoC retrieval 대상이 됩니다.
+  - 플랫폼 수준 AEG claim은 [`docs/aeg_e2e_validation.md`](docs/aeg_e2e_validation.md)의 동적 증거/FP gate를 통과해야 합니다. 자세한 내용은 [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md)를 참고하세요.
 - **증거 기반 조사**: 글래스모피즘 웹 대시보드를 통해 디컴파일된 P-code와 쉘 로직을 시각적으로 조사합니다.
 - **감사/규제 대응형 보고**: SARIF, CycloneDX 1.6 SBOM+VEX, SLSA L2 증명서를 생성합니다.
+
+---
+
+<h2 id="aeg-rag-status">🧪 현재 AEG / Exploit RAG 검증 상태</h2>
+
+SCOUT v3.0.0-rc1의 1순위는 감사 리포팅이 아니라 **AEG(Automated Exploit Generation) 품질**입니다. 따라서 RAG 확장은 "공개 PoC를 많이 넣었다"가 아니라, 펌웨어 증거에서 재현 가능한 PoV를 만들고 patched/control에서 fail-closed 되는지로 판단합니다.
+
+| 항목 | 현재 상태 |
+|---|---|
+| 공개 RAG card | `memory_stateful_probe`, `cgi_param_cmd_injection`, `config_derived_cmd_injection` |
+| Synthetic vulnerable/control pair | 3개 card 모두 통과 |
+| Real known-vulnerable/patched firmware pair | 아직 0개 — broad AEG release claim 전 필수 |
+| PoC-in-GitHub 사용 방식 | CVE/repo metadata seed → 사람이 검토한 draft pattern card → retriever |
+| 금지 사항 | raw PoC clone/실행, raw PoC 전체 prompt 주입, reference endpoint/payload 복붙 |
+
+검증 명령:
+
+```bash
+# 모든 curated card가 최소 vulnerable/control pair evidence를 갖는지 확인
+python scripts/check_exploit_pattern_evidence.py --require-all
+
+# broad AEG claim 전에는 이 gate도 통과해야 함
+python scripts/check_exploit_pattern_evidence.py --require-real-firmware-pair
+```
+
+현재 `--require-all`은 synthetic pair evidence 기준으로 통과하지만, `--require-real-firmware-pair`는 실제 펌웨어 pair 증거가 기록되기 전까지 실패하는 것이 정상입니다.
 
 ---
 
