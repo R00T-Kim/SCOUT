@@ -7,14 +7,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Hybrid Analysis Engine (v3)**: Evolved the core pipeline to handle both ELF binaries and shell scripts simultaneously, bridging the gap between low-level execution and high-level logic.
-- **Shell Script Analyzer**: New 41st stage (`script_analysis`) providing comprehensive heuristic coverage for insecure `eval`, backticks, and unquoted variable usage across the entire firmware surface.
-- **Inventory Expansion**: Updated `inventory.py` to recursively collect all shell scripts (`#!`), ensuring 100% visibility into the script-based attack surface.
+- **Shell Script Analyzer**: Added `script_analysis` to the registered multi-stage pipeline, providing bounded heuristic coverage for insecure `eval`, backticks, command substitution, and unquoted variable usage in inventory-discovered shell scripts.
+- **Inventory Expansion**: Updated `inventory.py` to recursively collect shell scripts (`#!`), expanding visibility into the script-based attack surface while preserving inventory coverage metrics and limitations.
 - **Generic Reporting Logic**: Refactored `run.py` to support automatic merging of findings from arbitrary new stages, facilitating a unified view of hybrid threats.
+- **Exploit RAG package + PoC-in-GitHub seeds**: Split loader/retriever/contamination logic into `src/aiedge/exploit_rag/` and added a metadata-only PoC-in-GitHub importer plus firmware-relevant CVE seed list for curated pattern-card promotion.
 
 ### Verified
 - **TP-Link ER605 (v2.2.4) Full Run**:
-  - Achieved full visibility into **1,334 shell scripts** previously invisible to the binary-only engine.
-  - Successfully triaged massive heuristic pattern matches through the 41-stage pipeline to identify high-impact, manually verified True Positives (e.g., `ipsec`, `acme.sh` command injections).
+  - Expanded inventory coverage into **1,334 shell scripts** previously outside the binary-only engine's audit surface.
+  - Successfully triaged massive heuristic pattern matches through the registered multi-stage pipeline to identify high-impact, manually verified True Positives (e.g., `ipsec`, `acme.sh` command injections).
   - Confirmed stable merging of hybrid findings into the unified `report.json` without data loss.
 
 ## [Unreleased]

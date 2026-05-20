@@ -38,6 +38,7 @@ STAGE_DEPS: dict[str, frozenset[str]] = {
     "carving": frozenset({"extraction"}),
     "firmware_profile": frozenset({"extraction"}),
     "inventory": frozenset({"extraction"}),
+    "script_analysis": frozenset({"inventory"}),
     "ghidra_analysis": frozenset({"inventory"}),
     "semantic_classification": frozenset({"ghidra_analysis"}),
     "sbom": frozenset({"inventory"}),

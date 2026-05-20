@@ -104,6 +104,7 @@ _SINK_SYMBOLS: frozenset[str] = frozenset(
         "chown",
         "fchown",
         "fchownat",
+        "lchown",
         # -- Logical Sinks (SCOUT 2.0) --
         "curl_easy_setopt",
         "curl_easy_perform",

@@ -52,24 +52,26 @@
 
 <h2 id="what-you-can-do">🚀 SCOUT으로 할 수 있는 것</h2>
 
-- **하이브리드 분석**: 단일 파이프라인에서 ELF 바이너리와 쉘 스크립트를 통합 감사합니다.
+- **하이브리드 분석**: 단일 파이프라인에서 ELF 바이너리와 쉘 스크립트를 통합적으로 감사합니다.
 - **심층 익스플로잇 탐지**: `Web -> IPC -> Config -> Daemon` 또는 `Shell -> Binary`로 이어지는 복합 공격 체인을 탐지합니다.
-- **PoC 자동 생성**: **Exploit Pattern RAG**를 활용하여 즉시 검증 가능한 Proof-of-Vulnerability 모듈을 생성합니다.
+- **PoC 자동 생성**: **Exploit Pattern RAG**를 활용하여 실험실 검증용 Proof-of-Vulnerability 모듈을 생성합니다.
+  - SCOUT은 firmware-relevant CVE seed를 위해 PoC-in-GitHub 메타데이터 전용 importer를 포함하며, AutoPoC 검색에 쓰기 전 curated exploit pattern card로 승격하는 절차를 요구합니다.
+  - SCOUT은 raw 공개 PoC 저장소를 clone/실행/prompt 주입하지 않습니다. 자세한 내용은 [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md)를 참고하세요.
 - **증거 기반 조사**: 글래스모피즘 웹 대시보드를 통해 디컴파일된 P-code와 쉘 로직을 시각적으로 조사합니다.
-- **규제 준수 보고**: SARIF, CycloneDX 1.6 SBOM+VEX, SLSA L2 증명서를 생성합니다.
+- **감사/규제 대응형 보고**: SARIF, CycloneDX 1.6 SBOM+VEX, SLSA L2 증명서를 생성합니다.
 
 ---
 
 <h2 id="why-scout">💎 SCOUT의 강점</h2>
 
 > **[1] 하이브리드 분석 엔진 (v3)**
-> 바이너리 레벨의 실행과 상위 레벨의 쉘 로직 사이의 간극을 메웁니다. 펌웨어 실행 표면에 대한 100% 가시성을 제공합니다.
+> 바이너리 레벨의 실행과 상위 레벨의 쉘 로직 사이의 간극을 메우며, 바이너리 전용 파이프라인이 놓치기 쉬운 스크립트 기반 공격 표면까지 가시성을 확장합니다.
 
 > **[2] 해시 기반의 증거 추적성**
 > 모든 탐지 결과는 특정 파일 경로, 바이트 오프셋, SHA-256 해시와 연결됩니다. 블랙박스 기반의 추측이 아닌, 추적 가능한 추론 경로만을 제공합니다.
 
 > **[3] 지능형 분석가 코파일럿**
-> 내장된 LLM Tribunal(찬반 토론) 시스템이 41단계 검증을 통해 오탐(False Positive)을 99.3% 제거합니다.
+> 내장된 LLM Tribunal(찬반 토론) 시스템이 등록된 다단계 검증 파이프라인과 과거 Tier-2 벤치마크 기준으로 오탐(False Positive)을 99.3% 줄였습니다.
 
 > **[4] 의존성 제로 (Pure Stdlib)**
 > `pip install`의 번거로움이 없습니다. 파이썬 3.10+ 표준 라이브러리만으로 구현되어 폐쇄망이나 제한된 환경에서도 즉시 배포 가능합니다.
@@ -87,6 +89,9 @@
 
 # 터미널 UI(TUI)로 상세 조사
 ./scout ti
+
+# PoC-in-GitHub 메타데이터만 사용해 Exploit Pattern RAG 후보 seed 생성
+python scripts/import_poc_in_github_candidates.py --dry-run
 ```
 
 ---
@@ -101,5 +106,6 @@
 | :dart: | **공격 표면 분석** | Source→sink 경로 추적, 웹 서버 자동 탐지, 5개 유형의 바이너리 간 IPC 체인 구성 |
 | :brain: | **테인 분석** | HTTP 컨텍스트를 이해하는 절차 간 테인 분석, P-code SSA 데이터플로우 시각화 |
 | :robot: | **LLM 엔진** | 4개의 백엔드 지원 + 중앙 집중식 시스템 프롬프트 + 구조화된 JSON 출력 |
+| :books: | **Exploit Pattern RAG** | 큐레이션된 pattern-card 검색 + PoC-in-GitHub 메타데이터 기반 firmware 후보 seed |
 | :crossed_swords: | **LLM 찬반 토론** | Advocate/Critic 모델 간의 토론을 통한 고신뢰도 오탐 제거 |
 | :bar_chart: | **웹 뷰어** | KPI 바, IPC 맵, 위험 히트맵 및 증거 탐색 기능을 갖춘 대시보드 제공 |

@@ -1672,7 +1672,11 @@ def _apply_stage_result_to_report(
             "status": stage_result.status,
             "findings": findings,
             "summary": {
+                "scripts_discovered": int(details.get("scripts_discovered", 0)),
                 "scripts_analyzed": int(details.get("scripts_analyzed", 0)),
+                "scripts_missing": int(details.get("scripts_missing", 0)),
+                "scripts_read_failed": int(details.get("scripts_read_failed", 0)),
+                "findings_truncated": bool(details.get("findings_truncated", False)),
                 "total_findings": len(findings),
             },
         }

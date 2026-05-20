@@ -55,21 +55,23 @@
 - **Hybrid Triage**: Audit both ELF binaries and shell scripts in a single unified pipeline.
 - **Deep Exploit Discovery**: Find complex `Web -> IPC -> Config -> Daemon` or `Shell -> Binary` chains.
 - **Auto-Generate PoCs**: Leverage the **Exploit Pattern RAG** to generate lab-ready Proof-of-Vulnerability modules.
+  - SCOUT now includes a metadata-only PoC-in-GitHub importer for firmware-relevant CVE seeds, then requires curated promotion into exploit pattern cards before AutoPoC retrieval.
+  - SCOUT does **not** clone, execute, or prompt-inject raw public PoC repositories for copy-based exploitation. See [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md).
 - **Evidence Investigation**: Use the Glassmorphism Web Dashboard to walk through decompiled P-code and shell logic.
-- **Compliance reporting**: Generate SARIF, CycloneDX 1.6 SBOM+VEX, and SLSA L2 attestations.
+- **Audit/compliance-compatible reporting**: Generate SARIF, CycloneDX 1.6 SBOM+VEX, and SLSA L2 attestations.
 
 ---
 
 <h2 id="why-scout">💎 The SCOUT Advantage</h2>
 
 > **[1] Hybrid Analysis Engine (v3)**
-> Bridges the gap between binary-level execution and high-level shell logic. 100% visibility into the firmware execution surface.
+> Bridges the gap between binary-level execution and high-level shell logic, expanding coverage into script-driven firmware attack surfaces that binary-only pipelines miss.
 
 > **[2] Hash-Anchored Evidence Lineage**
 > Every finding is tied to a specific file path, byte offset, and SHA-256 hash. No black-box guesses.
 
 > **[3] Intelligent Analyst Copilot**
-> Built-in LLM tribunal (Advocate/Critic) reduces false positives by 99.3% using 41-stage triage.
+> Built-in LLM tribunal (Advocate/Critic) reduces false positives by 99.3% on the historical Tier-2 benchmark using the registered multi-stage triage pipeline.
 
 > **[4] Zero Dependency (Pure Stdlib)**
 > No `pip install` nightmares. Deploy instantly in air-gapped labs or restricted environments.
@@ -87,6 +89,9 @@
 
 # Deep dive in the Terminal UI
 ./scout ti
+
+# Seed Exploit Pattern RAG candidates from PoC-in-GitHub metadata only
+python scripts/import_poc_in_github_candidates.py --dry-run
 ```
 
 ---
@@ -101,5 +106,6 @@
 | :dart: | **Attack Surface** | Source→sink tracing, web server auto-detection, cross-binary IPC chains (5 types) |
 | :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint, P-code SSA dataflow, call chain visualization |
 | :robot: | **LLM Engine** | 4 backends + centralized system prompts + structured JSON output + 5-stage parser |
+| :books: | **Exploit Pattern RAG** | Curated pattern-card retrieval plus PoC-in-GitHub metadata seeds for firmware-relevant candidates |
 | :crossed_swords: | **LLM-Adjudicated Debate** | Advocate/Critic LLM debate for high-fidelity FPR reduction |
 | :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap, and evidence navigation |

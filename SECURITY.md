@@ -4,7 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | Yes       |
+| 3.0.0-rc1 | Pre-release, best-effort support |
+| 2.8.x   | Security fixes only |
+| <=2.7.x | No |
 
 ## Reporting a Vulnerability
 
