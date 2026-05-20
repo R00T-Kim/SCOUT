@@ -10,7 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Shell Script Analyzer**: Added `script_analysis` to the registered multi-stage pipeline, providing bounded heuristic coverage for insecure `eval`, backticks, command substitution, and unquoted variable usage in inventory-discovered shell scripts.
 - **Inventory Expansion**: Updated `inventory.py` to recursively collect shell scripts (`#!`), expanding visibility into the script-based attack surface while preserving inventory coverage metrics and limitations.
 - **Generic Reporting Logic**: Refactored `run.py` to support automatic merging of findings from arbitrary new stages, facilitating a unified view of hybrid threats.
-- **Exploit RAG package + PoC-in-GitHub seeds**: Split loader/retriever/contamination logic into `src/aiedge/exploit_rag/` and added a metadata-only PoC-in-GitHub importer plus firmware-relevant CVE seed list for curated pattern-card promotion.
+- **AEG-first Exploit RAG package + PoC-in-GitHub seeds**: Split loader/retriever/contamination logic into `src/aiedge/exploit_rag/` and added a metadata-only PoC-in-GitHub importer plus firmware-relevant CVE seed list for curated pattern-card promotion.
+- **Pattern-card draft promotion path**: Added `scripts/draft_exploit_pattern_card.py` and `aiedge.exploit_rag.promoter` so unreviewed PoC-in-GitHub candidates can become human-review-required draft cards before any AutoPoC retrieval.
+- **Expanded curated RAG corpus contract**: Added explicit `preconditions`, `forbidden_reuse`, and `source_refs` fields to promoted cards and seeded a generic CGI-parameter command-injection pattern for firmware AEG retrieval.
+- **AEG E2E gate**: Added `scripts/aeg_e2e_gate.py` plus docs/tests to require real-run AutoPoC pass, reproducible PoC validation, verified-chain isolation, run-level FPR ceiling, and high/critical FP rejection checks before claiming AEG success.
 
 ### Verified
 - **TP-Link ER605 (v2.2.4) Full Run**:

@@ -5,11 +5,11 @@
 
 # SCOUT (v3.0.0-rc1)
 
-### Hybrid Firmware Security Analyst Copilot with Deterministic Evidence Lineage
+### AEG-First Firmware Exploitability Platform with Deterministic Evidence Lineage
 
-**SCOUT is a deep-analysis pipeline that transforms raw firmware blobs into actionable, evidence-anchored security dossiers. Now featuring a Hybrid Analysis Engine for both Binary and Shell Script auditing.**
+**SCOUT is an AEG-first firmware analysis platform that transforms raw firmware blobs into evidence-anchored exploitability chains, lab-bounded Proof-of-Vulnerability modules, and audit-ready dossiers. Now featuring a Hybrid Analysis Engine for both Binary and Shell Script auditing.**
 
-*While traditional scanners prioritize bulk and speed, SCOUT acts as a high-fidelity copilot for analysts. It doesn't just give you a list of CVEs; it reconstructs exploit chains across ELF binaries and shell scripts, explains its reasoning with evidence trails, and generates verified PoCs.*
+*While traditional scanners prioritize bulk and speed, SCOUT acts as a high-fidelity AEG copilot: it reconstructs exploit chains across ELF binaries and shell scripts, explains its reasoning with evidence trails, and generates lab-bounded PoV/PoC modules rather than raw public-PoC copies.*
 
 <br />
 
@@ -54,9 +54,9 @@
 
 - **Hybrid Triage**: Audit both ELF binaries and shell scripts in a single unified pipeline.
 - **Deep Exploit Discovery**: Find complex `Web -> IPC -> Config -> Daemon` or `Shell -> Binary` chains.
-- **Auto-Generate PoCs**: Leverage the **Exploit Pattern RAG** to generate lab-ready Proof-of-Vulnerability modules.
-  - SCOUT now includes a metadata-only PoC-in-GitHub importer for firmware-relevant CVE seeds, then requires curated promotion into exploit pattern cards before AutoPoC retrieval.
-  - SCOUT does **not** clone, execute, or prompt-inject raw public PoC repositories for copy-based exploitation. See [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md).
+- **AEG-first AutoPoC**: Leverage the **Exploit Pattern RAG** to generate lab-ready Proof-of-Vulnerability modules from firmware evidence.
+  - SCOUT now includes a metadata-only PoC-in-GitHub importer and a human-review-required draft pattern-card promoter for firmware-relevant CVE seeds before AutoPoC retrieval.
+  - SCOUT does **not** clone, execute, or prompt-inject raw public PoC repositories for copy-based exploitation. A platform-level AEG claim must pass the E2E dynamic/FP gate in [`docs/aeg_e2e_validation.md`](docs/aeg_e2e_validation.md). See also [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md).
 - **Evidence Investigation**: Use the Glassmorphism Web Dashboard to walk through decompiled P-code and shell logic.
 - **Audit/compliance-compatible reporting**: Generate SARIF, CycloneDX 1.6 SBOM+VEX, and SLSA L2 attestations.
 
@@ -92,6 +92,12 @@
 
 # Seed Exploit Pattern RAG candidates from PoC-in-GitHub metadata only
 python scripts/import_poc_in_github_candidates.py --dry-run
+
+# Draft a human-review-required pattern card from one candidate
+python scripts/draft_exploit_pattern_card.py data/exploit_references/candidates/poc_in_github/cve-2024-1781.json --print-json
+
+# After a real authorized lab run, enforce dynamic proof + FP/FPR evidence
+python scripts/aeg_e2e_gate.py aiedge-runs/<run_id>
 ```
 
 ---
@@ -106,6 +112,6 @@ python scripts/import_poc_in_github_candidates.py --dry-run
 | :dart: | **Attack Surface** | Source→sink tracing, web server auto-detection, cross-binary IPC chains (5 types) |
 | :brain: | **Taint Analysis** | HTTP-aware inter-procedural taint, P-code SSA dataflow, call chain visualization |
 | :robot: | **LLM Engine** | 4 backends + centralized system prompts + structured JSON output + 5-stage parser |
-| :books: | **Exploit Pattern RAG** | Curated pattern-card retrieval plus PoC-in-GitHub metadata seeds for firmware-relevant candidates |
+| :books: | **Exploit Pattern RAG** | Curated pattern-card retrieval plus PoC-in-GitHub metadata seeds and reviewed draft promotion for firmware-relevant AEG candidates |
 | :crossed_swords: | **LLM-Adjudicated Debate** | Advocate/Critic LLM debate for high-fidelity FPR reduction |
 | :bar_chart: | **Web Viewer** | Glassmorphism dashboard with KPI bar, IPC map, risk heatmap, and evidence navigation |
