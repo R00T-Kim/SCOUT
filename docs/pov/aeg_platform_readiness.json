@@ -1,0 +1,191 @@
+{
+  "blocked_reasons": [],
+  "checks": [
+    {
+      "message": "Exploit Pattern RAG must contain curated pattern cards.",
+      "name": "curated_pattern_cards_present",
+      "passed": true,
+      "pattern_count": 4
+    },
+    {
+      "message": "Every curated pattern card must have vulnerable/control pair evidence for platform readiness.",
+      "missing_pair_evidence": [],
+      "name": "curated_patterns_pair_validated",
+      "passed": true,
+      "require_all_patterns": true
+    },
+    {
+      "message": "At least one known-vulnerable/patched real firmware pair must be validated.",
+      "min_real_firmware_pairs": 1,
+      "name": "real_firmware_pair_floor",
+      "passed": true,
+      "real_firmware_pair_validated": 1
+    },
+    {
+      "message": "Pattern cards must expose real_firmware_pair evidence items, not only aggregate counters.",
+      "min_real_firmware_pairs": 1,
+      "name": "real_firmware_pair_evidence_items_present",
+      "passed": true,
+      "real_firmware_pair_evidence_items": 1
+    },
+    {
+      "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+      "message": "stable real firmware pair report must be promotable and use the expected schema.",
+      "name": "real_firmware_evidence_artifact_promotable",
+      "passed": true,
+      "pattern_id": "netgear_passwordrecovered_auth_bypass",
+      "verdict": "promotable"
+    },
+    {
+      "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+      "evidence_target_family": "netgear_passwordrecovered_auth_bypass",
+      "message": "stable report and pattern-card evidence must bind to the same pattern family.",
+      "name": "real_firmware_evidence_pattern_binding",
+      "passed": true,
+      "pattern_id": "netgear_passwordrecovered_auth_bypass",
+      "report_pattern_id": "netgear_passwordrecovered_auth_bypass"
+    },
+    {
+      "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+      "message": "pattern-card firmware hashes must match the stable pair report and local firmware status must be hash-matched when present.",
+      "name": "real_firmware_evidence_sha_binding",
+      "passed": true,
+      "pattern_id": "netgear_passwordrecovered_auth_bypass"
+    },
+    {
+      "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+      "message": "vulnerable firmware must pass and patched/control firmware must fail a dynamic proof check.",
+      "name": "real_firmware_evidence_fail_closed_pair",
+      "passed": true,
+      "patched_dynamic_failed_checks": [
+        "autopoc_runner_pass",
+        "poc_validation_reproducible",
+        "verified_chain_pass"
+      ],
+      "pattern_id": "netgear_passwordrecovered_auth_bypass"
+    }
+  ],
+  "pattern_evidence": {
+    "missing_pair_evidence": [],
+    "passed": true,
+    "pattern_count": 4,
+    "patterns": [
+      {
+        "bridge_channel": "direct_request",
+        "entry_channel": "web_api",
+        "family": "cmd_injection",
+        "id": "cgi_param_cmd_injection",
+        "pair_validated": true,
+        "real_firmware_pair_validated": false,
+        "synthetic_pair_validated": true,
+        "trigger_model": "direct_request",
+        "validation_evidence": [
+          {
+            "artifact": "scripts/run_aeg_synthetic_pair.py --pattern cgi_param_cmd_injection",
+            "control_gate_failed": true,
+            "evidence_id": "synthetic_cgi_param_cmd_injection_pair",
+            "kind": "synthetic_pair",
+            "notes": "Loopback vulnerable CGI command-injection profile returns uid= shell readback for bounded cmd probes while patched/control accepts the same probes without shell readback; patched/control fails runner, PoC validation, verified-chain, FPR, and FP checks.",
+            "status": "pass",
+            "vulnerable_gate_passed": true
+          }
+        ]
+      },
+      {
+        "bridge_channel": "config",
+        "entry_channel": "web_api",
+        "family": "cmd_injection",
+        "id": "config_derived_cmd_injection",
+        "pair_validated": true,
+        "real_firmware_pair_validated": false,
+        "synthetic_pair_validated": true,
+        "trigger_model": "delayed_parse",
+        "validation_evidence": [
+          {
+            "artifact": "scripts/run_aeg_synthetic_pair.py --pattern config_derived_cmd_injection",
+            "control_gate_failed": true,
+            "evidence_id": "synthetic_config_derived_cmd_injection_pair",
+            "kind": "synthetic_pair",
+            "notes": "Loopback config-derived command-injection profile seeds web_api -> config -> delayed_parse evidence and returns uid= shell readback on the vulnerable target while patched/control accepts probes without shell readback; patched/control fails runner, PoC validation, verified-chain, FPR, and FP checks.",
+            "status": "pass",
+            "vulnerable_gate_passed": true
+          }
+        ]
+      },
+      {
+        "bridge_channel": "direct_request",
+        "entry_channel": "web_api",
+        "family": "memory_corruption_candidate",
+        "id": "memory_stateful_probe",
+        "pair_validated": true,
+        "real_firmware_pair_validated": false,
+        "synthetic_pair_validated": true,
+        "trigger_model": "direct_request",
+        "validation_evidence": [
+          {
+            "artifact": "scripts/run_aeg_synthetic_pair.py",
+            "control_gate_failed": true,
+            "evidence_id": "synthetic_memory_stateful_probe_pair",
+            "kind": "synthetic_pair",
+            "notes": "Loopback vulnerable service returns SCOUT_LEAK while patched/control accepts the same probes without leaking; the patched/control gate fails runner, PoC validation, verified-chain, FPR, and FP checks.",
+            "status": "pass",
+            "vulnerable_gate_passed": true
+          }
+        ]
+      },
+      {
+        "bridge_channel": "http_cgi_handler",
+        "entry_channel": "web_api",
+        "family": "auth_bypass",
+        "id": "netgear_passwordrecovered_auth_bypass",
+        "pair_validated": true,
+        "real_firmware_pair_validated": true,
+        "synthetic_pair_validated": false,
+        "trigger_model": "direct_request_to_password_recovery_cgi",
+        "validation_evidence": [
+          {
+            "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+            "control_firmware_sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+            "control_gate": {
+              "failed_checks": [
+                "autopoc_runner_pass",
+                "poc_validation_reproducible",
+                "verified_chain_pass"
+              ],
+              "passed": false,
+              "schema_version": "aeg-e2e-gate-v1",
+              "verdict": "fail"
+            },
+            "control_gate_failed": true,
+            "control_run_dir": "aiedge-runs/2026-05-20_2150_sha256-6309264efce0",
+            "cve": "CVE-2017-5521",
+            "evidence_id": "netgear_r7000_cve_2017_5521_real_pair",
+            "kind": "real_firmware_pair",
+            "notes": "Netgear R7000 V1.0.5.70 known-vulnerable firmware passes the AEG dynamic/FP gate via pair-bound qemu-user httpd handler evidence while V1.0.9.34 patched/control fails the AutoPoC, PoC validation, and verified-chain dynamic checks.",
+            "status": "pass",
+            "target_family": "netgear_passwordrecovered_auth_bypass",
+            "vulnerable_firmware_sha256": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0",
+            "vulnerable_gate": {
+              "failed_checks": [],
+              "passed": true,
+              "schema_version": "aeg-e2e-gate-v1",
+              "verdict": "pass"
+            },
+            "vulnerable_gate_passed": true,
+            "vulnerable_run_dir": "aiedge-runs/2026-05-20_2222_sha256-c025ce21eabc"
+          }
+        ]
+      }
+    ],
+    "real_firmware_pair_validated": 1,
+    "schema_version": "exploit-pattern-evidence-report-v1",
+    "synthetic_pair_validated": 3
+  },
+  "policy": {
+    "min_real_firmware_pairs": 1,
+    "require_all_patterns": true
+  },
+  "ready": true,
+  "schema_version": "aeg-platform-readiness-v1",
+  "verdict": "platform-ready"
+}

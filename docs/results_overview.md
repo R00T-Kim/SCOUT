@@ -13,6 +13,7 @@ The Tier 1 corpus refresh and the first local-7 reviewer eval lane are now compl
 - follow-on evaluation lanes:
   - `docs/benchmark_pair_gap.md`
   - `docs/pair_eval_lane.md`
+- AEG platform readiness audit: `docs/pov/aeg_platform_readiness.json`
 - demo write-up target: `docs/results_overview.md`
 
 ## 1) Target list
@@ -118,6 +119,7 @@ pair-labeled vuln/patched runs that come from extraction-success inputs.
 - **Pair type**: all M0 pairs are **version-paired** within the same vendor model line. Patch-level pairs (minor build number diffs) are parked under §5 of `docs/pair_corpus_candidates.md` as P3 future expansion.
 - **Local-7 actual numbers are now populated** from `benchmark-results/pair-eval/pair_eval_summary.json`. Gap pairs (e.g. DIR-859) remain a follow-on expansion step.
 - **AEG real-pair proof**: Netgear R7000 CVE-2017-5521 now has a stable known-vulnerable/patched promotion report at `docs/pov/netgear-r7000-cve-2017-5521_real_pair.json`; the vulnerable V1.0.5.70 run passes AutoPoC, reproducible PoC validation, verified-chain, and FP/FPR gates while patched V1.0.9.34 fails closed on dynamic proof checks.
+- **AEG platform readiness audit**: `docs/pov/aeg_platform_readiness.json` records the integrated fail-closed audit across all curated pattern cards, the real firmware-pair floor, stable artifact binding, firmware SHA binding, and vulnerable/pass vs patched/dynamic-fail-closed separation.
 
 ## 5) Calibration
 

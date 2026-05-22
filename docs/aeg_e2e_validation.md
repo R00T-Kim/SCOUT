@@ -63,6 +63,21 @@ The harness currently validates `memory_stateful_probe`, `cgi_param_cmd_injectio
 python scripts/check_exploit_pattern_evidence.py
 ```
 
+For a release-facing AEG platform readiness audit, use the stricter integrated
+gate. It requires every curated pattern to have vulnerable/control pair evidence,
+at least one real known-vulnerable/patched firmware pair, and a stable real-pair
+artifact whose report proves the vulnerable side passed while patched/control
+failed a dynamic proof check:
+
+```bash
+python scripts/check_aeg_platform_readiness.py --out docs/pov/aeg_platform_readiness.json
+```
+
+The current checked-in readiness snapshot is
+`docs/pov/aeg_platform_readiness.json`; it is an offline audit artifact, not a
+substitute for rerunning the real firmware-pair harness when firmware inputs or
+AutoPoC behavior changes.
+
 When a known-vulnerable/patched firmware pair has completed the same gate, record
 the card-level evidence through the recorder rather than manually editing the
 pattern card:
