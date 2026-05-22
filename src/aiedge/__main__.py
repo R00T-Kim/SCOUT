@@ -6,6 +6,7 @@ Allows: python -m aiedge
 from __future__ import annotations
 
 import importlib
+import importlib.util as importlib_util
 import json
 import sys
 import time
@@ -59,6 +60,61 @@ from .quality_policy import (
     write_quality_gate,
 )
 from .schema import JsonValue
+
+
+def _repo_script_main(script_name: str) -> Callable[[list[str] | None], int]:
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / script_name
+    spec = importlib_util.spec_from_file_location(script_name.removesuffix(".py"), script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"script not found: {script_path}")
+    module = importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    main_func = getattr(module, "main", None)
+    if not callable(main_func):
+        raise RuntimeError(f"script has no callable main(): {script_path}")
+    return cast(Callable[[list[str] | None], int], main_func)
+
+
+def _append_option(argv: list[str], flag: str, value: object) -> None:
+    if value is not None:
+        argv.extend([flag, str(value)])
+
+
+def _append_bool(argv: list[str], flag: str, enabled: bool) -> None:
+    if enabled:
+        argv.append(flag)
+
+
+def _aeg_real_pair_argv(args: object) -> list[str]:
+    argv: list[str] = []
+    _append_option(argv, "--pairs", getattr(args, "pairs", None))
+    _append_option(argv, "--pair-id", getattr(args, "pair_id", None))
+    _append_option(argv, "--results-dir", getattr(args, "results_dir", None))
+    _append_option(argv, "--profile", getattr(args, "profile", None))
+    _append_option(argv, "--driver", getattr(args, "driver", None))
+    _append_option(argv, "--time-budget-s", getattr(args, "time_budget_s", None))
+    _append_bool(argv, "--no-llm", bool(getattr(args, "no_llm", False)))
+    if bool(getattr(args, "quiet", True)):
+        argv.append("--quiet")
+    else:
+        argv.append("--no-quiet")
+    _append_bool(argv, "--fetch", bool(getattr(args, "fetch", False)))
+    _append_bool(argv, "--force-fetch", bool(getattr(args, "force_fetch", False)))
+    _append_bool(argv, "--dry-run", bool(getattr(args, "dry_run", False)))
+    _append_bool(argv, "--skip-analyze", bool(getattr(args, "skip_analyze", False)))
+    _append_option(argv, "--post-stages", getattr(args, "post_stages", None))
+    _append_option(argv, "--post-time-budget-s", getattr(args, "post_time_budget_s", None))
+    _append_bool(argv, "--skip-post-stages", bool(getattr(args, "skip_post_stages", False)))
+    _append_bool(argv, "--skip-quality-metrics", bool(getattr(args, "skip_quality_metrics", False)))
+    _append_bool(argv, "--skip-verified-chain", bool(getattr(args, "skip_verified_chain", False)))
+    _append_option(argv, "--vulnerable-run-dir", getattr(args, "vulnerable_run_dir", None))
+    _append_option(argv, "--control-run-dir", getattr(args, "control_run_dir", None))
+    _append_option(argv, "--patched-run-dir", getattr(args, "patched_run_dir", None))
+    _append_option(argv, "--pattern-id", getattr(args, "pattern_id", None))
+    _append_option(argv, "--out", getattr(args, "out", None))
+    _append_option(argv, "--fpr-max", getattr(args, "fpr_max", None))
+    _append_option(argv, "--min-runner-pass", getattr(args, "min_runner_pass", None))
+    return argv
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -593,6 +649,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         print(format_quality_metrics(payload), end="")
         return 0
+
+    if command == "aeg-real-pair":
+        try:
+            script_main = _repo_script_main("run_real_firmware_pair_aeg.py")
+            return script_main(_aeg_real_pair_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
 
     if command == "aeg-readiness":
         repo_root_raw = cast(str | None, getattr(args, "repo_root", None))

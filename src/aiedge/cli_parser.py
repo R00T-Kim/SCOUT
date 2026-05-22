@@ -499,6 +499,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path for readiness report JSON output artifact (default: docs/pov/aeg_platform_readiness.json).",
     )
 
+    aeg_real_pair = sub.add_parser(
+        "aeg-real-pair",
+        help=(
+            "Run or reuse a known-vulnerable/patched firmware pair and emit real_firmware_pair AEG proof."
+        ),
+    )
+    _ = aeg_real_pair.add_argument("--pairs", default="benchmarks/pair-eval/pairs.json", metavar="PATH")
+    _ = aeg_real_pair.add_argument("--pair-id", required=True)
+    _ = aeg_real_pair.add_argument("--results-dir", default="benchmark-results/aeg-real-pair", metavar="PATH")
+    _ = aeg_real_pair.add_argument("--profile", default="exploit")
+    _ = aeg_real_pair.add_argument("--driver", default="codex")
+    _ = aeg_real_pair.add_argument("--time-budget-s", type=int, default=1800)
+    _ = aeg_real_pair.add_argument("--no-llm", action="store_true")
+    _ = aeg_real_pair.add_argument("--quiet", action="store_true", default=True)
+    _ = aeg_real_pair.add_argument("--no-quiet", dest="quiet", action="store_false")
+    _ = aeg_real_pair.add_argument("--fetch", action="store_true")
+    _ = aeg_real_pair.add_argument("--force-fetch", action="store_true")
+    _ = aeg_real_pair.add_argument("--dry-run", action="store_true")
+    _ = aeg_real_pair.add_argument("--skip-analyze", action="store_true")
+    _ = aeg_real_pair.add_argument(
+        "--post-stages",
+        default="fp_verification,exploit_autopoc,poc_validation,exploit_policy",
+        help="Comma-separated stages to rerun after analysis/reuse before pair preflight.",
+    )
+    _ = aeg_real_pair.add_argument("--post-time-budget-s", type=int, default=1800)
+    _ = aeg_real_pair.add_argument("--skip-post-stages", action="store_true")
+    _ = aeg_real_pair.add_argument("--skip-quality-metrics", action="store_true")
+    _ = aeg_real_pair.add_argument("--skip-verified-chain", action="store_true")
+    _ = aeg_real_pair.add_argument("--vulnerable-run-dir", default=None, metavar="PATH")
+    _ = aeg_real_pair.add_argument("--control-run-dir", default=None, metavar="PATH")
+    _ = aeg_real_pair.add_argument("--patched-run-dir", default=None, metavar="PATH")
+    _ = aeg_real_pair.add_argument("--pattern-id", default=None)
+    _ = aeg_real_pair.add_argument("--out", default=None, metavar="PATH")
+    _ = aeg_real_pair.add_argument("--fpr-max", type=float, default=0.10)
+    _ = aeg_real_pair.add_argument("--min-runner-pass", type=int, default=1)
+
     release_quality_gate = sub.add_parser(
         "release-quality-gate",
         help=(

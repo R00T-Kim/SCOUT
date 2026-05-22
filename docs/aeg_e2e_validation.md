@@ -84,7 +84,7 @@ the card-level evidence through the recorder rather than manually editing the
 pattern card:
 
 ```bash
-python scripts/run_real_firmware_pair_aeg.py \
+./scout aeg-real-pair \
   --pair-id <manifest-pair-id> \
   --fetch --no-llm \
   --pattern-id <pattern-id> \

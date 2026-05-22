@@ -8,6 +8,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
+from aiedge.__main__ import main as aiedge_main
+
 
 def _load_script() -> ModuleType:
     path = Path(__file__).resolve().parents[1] / "scripts" / "run_real_firmware_pair_aeg.py"
@@ -253,3 +255,41 @@ def test_runner_derives_quality_metrics_from_fp_verification_summary(tmp_path: P
     assert payload["schema_version"] == "aeg-derived-quality-metrics-v1"
     assert payload["overall"]["fpr"] == 0.1
     assert payload["source"]["kind"] == "fp_verification.summary"
+
+
+def test_aeg_real_pair_cli_reuses_existing_runs(tmp_path: Path, capsys: Any) -> None:
+    manifest = _pair_manifest(tmp_path)
+    vulnerable = tmp_path / "runs" / "vulnerable"
+    control = tmp_path / "runs" / "control"
+    _build_passing_run(vulnerable)
+    _build_control_run(control)
+    out = tmp_path / "cli-report.json"
+
+    rc = aiedge_main(
+        [
+            "aeg-real-pair",
+            "--pairs",
+            str(manifest),
+            "--pair-id",
+            "vendor-model-cve-0000-0001",
+            "--results-dir",
+            str(tmp_path / "results"),
+            "--vulnerable-run-dir",
+            str(vulnerable),
+            "--control-run-dir",
+            str(control),
+            "--pattern-id",
+            "cgi_param_cmd_injection",
+            "--skip-post-stages",
+            "--skip-verified-chain",
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "real-firmware-pair-aeg-run-v1"
+    assert payload["promotable_real_firmware_pair"] is True
+    assert payload["pair_gate"]["verdict"] == "promotable"
+    assert json.loads(capsys.readouterr().out)["verdict"] == "promotable"
