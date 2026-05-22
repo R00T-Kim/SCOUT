@@ -18,6 +18,7 @@ Commands
   serve <run_dir>              Launch web report viewer
   mcp --project-id <id>        Start MCP server for AI agents
   tui <run_dir>                Terminal UI dashboard
+  aeg-e2e-gate                Evaluate a completed run against the AEG gate
   aeg-readiness                Audit AEG platform readiness evidence
   aeg-real-pair                Run/reuse known-vulnerable/patched AEG pair
 
@@ -27,6 +28,7 @@ Examples
   ./scout analyze firmware.bin --rootfs /path/to   # pre-extracted rootfs
   ./scout serve aiedge-runs/<run_id> --port 8080   # web viewer
   ./scout tui aiedge-runs/<run_id> -w -t 2         # TUI watch mode
+  ./scout aeg-e2e-gate aiedge-runs/<run_id> --out aiedge-runs/<run_id>/aeg_e2e_gate.json
   ./scout aeg-readiness --out docs/pov/aeg_platform_readiness.json
   ./scout aeg-real-pair --pair-id netgear-r7000-cve-2017-5521 --fetch --no-llm
   ./scout ti                                       # TUI interactive (latest)

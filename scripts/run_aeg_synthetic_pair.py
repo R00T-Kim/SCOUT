@@ -18,8 +18,8 @@ if str(_REPO_ROOT) not in sys.path:
 if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
+from aiedge.aeg_e2e_gate import evaluate_aeg_e2e_gate  # noqa: E402
 from aiedge.run import create_run, run_subset  # noqa: E402
-from scripts.aeg_e2e_gate import evaluate_aeg_e2e_gate  # noqa: E402
 from scripts.build_verified_chain import build_verified_chain  # noqa: E402
 
 
@@ -273,7 +273,7 @@ def _run_autopoc_against_handler(
     server = _ReusableTCPServer(("127.0.0.1", 0), handler_cls)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    _, port = server.server_address
+    _, port = cast(tuple[str, int], server.server_address)
     _write_json(run_dir, "stages/dynamic_validation/network/ports.json", {"open_ports": [int(port)]})
     try:
         rep = run_subset(info, ["exploit_autopoc"], time_budget_s=10, no_llm=True)

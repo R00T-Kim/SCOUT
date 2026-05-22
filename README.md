@@ -97,7 +97,7 @@ python scripts/import_poc_in_github_candidates.py --dry-run
 python scripts/draft_exploit_pattern_card.py data/exploit_references/candidates/poc_in_github/cve-2024-1781.json --print-json
 
 # After a real authorized lab run, enforce dynamic proof + FP/FPR evidence
-python scripts/aeg_e2e_gate.py aiedge-runs/<run_id>
+./scout aeg-e2e-gate aiedge-runs/<run_id>
 
 # CI-safe AEG regression: vulnerable lab service must pass, patched control must fail closed
 python scripts/run_aeg_synthetic_pair.py --work-root /tmp/scout-aeg-synthetic-pair

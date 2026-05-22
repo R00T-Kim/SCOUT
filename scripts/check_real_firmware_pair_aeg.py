@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -14,6 +13,7 @@ _SRC_ROOT = _REPO_ROOT / "src"
 if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
+from aiedge.aeg_e2e_gate import evaluate_aeg_e2e_gate  # noqa: E402
 from aiedge.pair_eval import PairSpec, load_pairs_manifest  # noqa: E402
 
 _DYNAMIC_PROOF_CHECKS = {
@@ -30,15 +30,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         encoding="utf-8",
     )
 
-
-def _load_gate() -> Any:
-    script_path = Path(__file__).resolve().with_name("aeg_e2e_gate.py")
-    spec = importlib.util.spec_from_file_location("aeg_e2e_gate", script_path)
-    if spec is None or spec.loader is None:  # pragma: no cover - defensive
-        raise RuntimeError("scripts/aeg_e2e_gate.py is required")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.evaluate_aeg_e2e_gate
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -170,7 +161,7 @@ def build_pair_gate_report(
     min_runner_pass: int = 1,
     pattern_id: str | None = None,
 ) -> dict[str, Any]:
-    evaluate_gate = _load_gate()
+    evaluate_gate = evaluate_aeg_e2e_gate
     firmware = {
         "vulnerable": _firmware_status(
             pair.vulnerable.firmware_path, pair.vulnerable.sha256

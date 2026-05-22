@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType
 
-
-def _load_gate_script() -> ModuleType:
-    path = Path(__file__).resolve().parents[1] / "scripts" / "aeg_e2e_gate.py"
-    spec = importlib.util.spec_from_file_location("aeg_e2e_gate", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from aiedge.__main__ import main as aiedge_main
+from aiedge.aeg_e2e_gate import evaluate_aeg_e2e_gate
+from aiedge.aeg_e2e_gate import main as gate_main
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -42,11 +34,10 @@ def _build_passing_run(run_dir: Path) -> None:
 
 
 def test_aeg_e2e_gate_passes_only_with_dynamic_proof_and_fp_evidence(tmp_path: Path) -> None:
-    module = _load_gate_script()
     run_dir = tmp_path / "run"
     _build_passing_run(run_dir)
 
-    payload = module.evaluate_aeg_e2e_gate(run_dir)
+    payload = evaluate_aeg_e2e_gate(run_dir)
 
     assert payload["passed"] is True
     assert payload["verdict"] == "pass"
@@ -60,7 +51,6 @@ def test_aeg_e2e_gate_passes_only_with_dynamic_proof_and_fp_evidence(tmp_path: P
 
 
 def test_aeg_e2e_gate_fails_closed_without_reproducible_poc_validation(tmp_path: Path) -> None:
-    module = _load_gate_script()
     run_dir = tmp_path / "run"
     _build_passing_run(run_dir)
     _write_json(
@@ -68,7 +58,7 @@ def test_aeg_e2e_gate_fails_closed_without_reproducible_poc_validation(tmp_path:
         {"status": "failed", "checks": [], "verification_reason_codes": ["poc_repro_failed"]},
     )
 
-    payload = module.evaluate_aeg_e2e_gate(run_dir)
+    payload = evaluate_aeg_e2e_gate(run_dir)
 
     assert payload["passed"] is False
     failed = {check["name"] for check in payload["checks"] if not check["passed"]}
@@ -76,7 +66,6 @@ def test_aeg_e2e_gate_fails_closed_without_reproducible_poc_validation(tmp_path:
 
 
 def test_aeg_e2e_gate_fails_on_high_severity_fp(tmp_path: Path) -> None:
-    module = _load_gate_script()
     run_dir = tmp_path / "run"
     _build_passing_run(run_dir)
     _write_json(
@@ -84,7 +73,7 @@ def test_aeg_e2e_gate_fails_on_high_severity_fp(tmp_path: Path) -> None:
         {"status": "ok", "verified_alerts": [{"severity": "critical", "fp_verdict": "FP"}]},
     )
 
-    payload = module.evaluate_aeg_e2e_gate(run_dir)
+    payload = evaluate_aeg_e2e_gate(run_dir)
 
     assert payload["passed"] is False
     failed = {check["name"] for check in payload["checks"] if not check["passed"]}
@@ -92,13 +81,25 @@ def test_aeg_e2e_gate_fails_on_high_severity_fp(tmp_path: Path) -> None:
 
 
 def test_aeg_e2e_gate_cli_writes_payload_and_returns_failure(tmp_path: Path, capsys) -> None:
-    module = _load_gate_script()
     out = tmp_path / "gate.json"
 
-    rc = module.main([str(tmp_path / "missing-run"), "--out", str(out)])
+    rc = gate_main([str(tmp_path / "missing-run"), "--out", str(out)])
 
     assert rc == 31
     assert out.exists()
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["passed"] is False
     assert json.loads(capsys.readouterr().out)["schema_version"] == "aeg-e2e-gate-v1"
+
+
+def test_aeg_e2e_gate_product_cli_writes_payload(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "run"
+    _build_passing_run(run_dir)
+    out = tmp_path / "cli-gate.json"
+
+    rc = aiedge_main(["aeg-e2e-gate", str(run_dir), "--out", str(out)])
+
+    assert rc == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert json.loads(capsys.readouterr().out)["verdict"] == "pass"

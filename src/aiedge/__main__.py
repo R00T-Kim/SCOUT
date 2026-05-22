@@ -14,6 +14,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Callable, cast
 
+from .aeg_e2e_gate import main as aeg_e2e_gate_main
 from .aeg_readiness import (
     build_readiness_report,
     format_readiness_report,
@@ -70,6 +71,14 @@ def _append_option(argv: list[str], flag: str, value: object) -> None:
 def _append_bool(argv: list[str], flag: str, enabled: bool) -> None:
     if enabled:
         argv.append(flag)
+
+
+def _aeg_e2e_gate_argv(args: object) -> list[str]:
+    argv: list[str] = [str(getattr(args, "run_dir"))]
+    _append_option(argv, "--out", getattr(args, "out", None))
+    _append_option(argv, "--fpr-max", getattr(args, "fpr_max", None))
+    _append_option(argv, "--min-runner-pass", getattr(args, "min_runner_pass", None))
+    return argv
 
 
 def _aeg_real_pair_argv(args: object) -> list[str]:
@@ -636,6 +645,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         print(format_quality_metrics(payload), end="")
         return 0
+
+    if command == "aeg-e2e-gate":
+        try:
+            return aeg_e2e_gate_main(_aeg_e2e_gate_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
 
     if command == "aeg-real-pair":
         try:

@@ -462,6 +462,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path for gate verdict JSON output artifact (default: quality_gate.json).",
     )
 
+    aeg_e2e_gate = sub.add_parser(
+        "aeg-e2e-gate",
+        help="Evaluate a completed SCOUT run against the fail-closed AEG E2E dynamic/FP gate.",
+    )
+    _ = aeg_e2e_gate.add_argument("run_dir", metavar="RUN_DIR")
+    _ = aeg_e2e_gate.add_argument("--out", default=None, metavar="PATH")
+    _ = aeg_e2e_gate.add_argument("--fpr-max", type=float, default=0.10)
+    _ = aeg_e2e_gate.add_argument("--min-runner-pass", type=int, default=1)
+
     aeg_readiness = sub.add_parser(
         "aeg-readiness",
         help=(

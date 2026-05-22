@@ -28,10 +28,10 @@ A passing AEG run must provide all of the following artifacts:
 After a real lab run finishes:
 
 ```bash
-python scripts/aeg_e2e_gate.py aiedge-runs/<run_id> --out aiedge-runs/<run_id>/aeg_e2e_gate.json
+./scout aeg-e2e-gate aiedge-runs/<run_id> --out aiedge-runs/<run_id>/aeg_e2e_gate.json
 ```
 
-The script exits `0` only when every dynamic proof and FP/FPR check passes. It exits `31` on fail-closed evidence gaps.
+The product CLI exits `0` only when every dynamic proof and FP/FPR check passes. It exits `31` on fail-closed evidence gaps. `python scripts/aeg_e2e_gate.py ...` remains available as a compatibility wrapper.
 
 ## Synthetic vulnerable/control pair
 
@@ -136,7 +136,7 @@ python scripts/build_verified_chain.py --run-dir aiedge-runs/<run_id>
 python scripts/verify_verified_chain.py --run-dir aiedge-runs/<run_id>
 
 # 4. Enforce AEG platform gate: dynamic proof + FP/FPR evidence.
-python scripts/aeg_e2e_gate.py aiedge-runs/<run_id>
+./scout aeg-e2e-gate aiedge-runs/<run_id>
 ```
 
 ## Pair/FP evaluation expectation
