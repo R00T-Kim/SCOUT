@@ -212,3 +212,42 @@ def test_aeg_platform_readiness_blocks_absolute_real_pair_artifact(tmp_path: Pat
 
     assert payload["ready"] is False
     assert "real_firmware_evidence_artifact_repo_relative" in payload["blocked_reasons"]
+
+
+def test_aeg_readiness_cli_writes_report_and_returns_fail_closed_status(
+    tmp_path: Path, capsys
+) -> None:
+    from aiedge.__main__ import main
+
+    patterns_dir = tmp_path / "patterns"
+    _write_pattern(patterns_dir, "metadata_only_pattern", [])
+    out = tmp_path / "readiness.json"
+
+    rc = main(
+        [
+            "aeg-readiness",
+            "--repo-root",
+            str(tmp_path),
+            "--patterns-dir",
+            str(patterns_dir),
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert rc == 35
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["ready"] is False
+    assert payload["verdict"] == "blocked"
+    assert "curated_patterns_pair_validated" in payload["blocked_reasons"]
+    assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_aeg_readiness_cli_rejects_invalid_real_pair_floor(capsys) -> None:
+    from aiedge.__main__ import main
+
+    rc = main(["aeg-readiness", "--min-real-firmware-pairs", "-1"])
+
+    assert rc == 20
+    err = json.loads(capsys.readouterr().err)
+    assert err["error_token"] == "AEG_READINESS_INVALID_POLICY"

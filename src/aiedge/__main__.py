@@ -14,6 +14,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Callable, cast
 
+from .aeg_readiness import (
+    build_readiness_report,
+    format_readiness_report,
+    write_readiness_report,
+)
 from .cli_common import (
     _CANONICAL_8MB_SHA256,
     _CANONICAL_8MB_SIZE_BYTES,
@@ -588,6 +593,35 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         print(format_quality_metrics(payload), end="")
         return 0
+
+    if command == "aeg-readiness":
+        repo_root_raw = cast(str | None, getattr(args, "repo_root", None))
+        patterns_dir_raw = cast(str | None, getattr(args, "patterns_dir", None))
+        out_raw = cast(str, getattr(args, "out"))
+        min_real_firmware_pairs = cast(int, getattr(args, "min_real_firmware_pairs"))
+        allow_unvalidated_patterns = bool(getattr(args, "allow_unvalidated_patterns", False))
+
+        if min_real_firmware_pairs < 0:
+            err = {
+                "error_token": "AEG_READINESS_INVALID_POLICY",
+                "message": "--min-real-firmware-pairs must be >= 0",
+            }
+            print(json.dumps(err, sort_keys=True, ensure_ascii=True), file=sys.stderr)
+            return 20
+
+        repo_root = Path(repo_root_raw) if repo_root_raw is not None else Path.cwd()
+        patterns_dir = Path(patterns_dir_raw) if patterns_dir_raw is not None else None
+        out_path = Path(out_raw)
+
+        payload = build_readiness_report(
+            repo_root=repo_root,
+            patterns_dir=patterns_dir,
+            require_all_patterns=not allow_unvalidated_patterns,
+            min_real_firmware_pairs=min_real_firmware_pairs,
+        )
+        write_readiness_report(out_path, payload)
+        print(format_readiness_report(payload), end="")
+        return 0 if payload.get("ready") is True else 35
 
     if command in ("quality-gate", "release-quality-gate"):
         metrics_raw = cast(str, getattr(args, "metrics"))

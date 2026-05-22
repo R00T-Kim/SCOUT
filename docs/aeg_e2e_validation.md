@@ -70,13 +70,14 @@ artifact whose report proves the vulnerable side passed while patched/control
 failed a dynamic proof check:
 
 ```bash
-python scripts/check_aeg_platform_readiness.py --out docs/pov/aeg_platform_readiness.json
+./scout aeg-readiness --out docs/pov/aeg_platform_readiness.json
 ```
 
 The current checked-in readiness snapshot is
 `docs/pov/aeg_platform_readiness.json`; it is an offline audit artifact, not a
 substitute for rerunning the real firmware-pair harness when firmware inputs or
-AutoPoC behavior changes.
+AutoPoC behavior changes. The lower-level script entry point remains available
+as `python scripts/check_aeg_platform_readiness.py` for direct automation and compatibility.
 
 When a known-vulnerable/patched firmware pair has completed the same gate, record
 the card-level evidence through the recorder rather than manually editing the

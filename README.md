@@ -109,7 +109,7 @@ python scripts/check_exploit_pattern_evidence.py
 python scripts/check_exploit_pattern_evidence.py --require-real-firmware-pair
 
 # Audit AEG platform readiness from card evidence + stable real-firmware pair proof
-python scripts/check_aeg_platform_readiness.py --out docs/pov/aeg_platform_readiness.json
+./scout aeg-readiness --out docs/pov/aeg_platform_readiness.json
 
 # Run/reuse an official known-vulnerable/patched firmware pair and emit the fail-closed gate report.
 python scripts/run_real_firmware_pair_aeg.py --pair-id <manifest-pair-id> --fetch --no-llm \

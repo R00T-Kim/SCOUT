@@ -75,4 +75,4 @@ jobs:
           )
           python3 scripts/validate_stage_outputs.py --run-dir "$RUN_DIR"
       - name: AEG platform readiness audit
-        run: python3 scripts/check_aeg_platform_readiness.py --out /tmp/aeg_platform_readiness.json
+        run: aiedge aeg-readiness --out /tmp/aeg_platform_readiness.json

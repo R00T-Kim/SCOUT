@@ -462,6 +462,43 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path for gate verdict JSON output artifact (default: quality_gate.json).",
     )
 
+    aeg_readiness = sub.add_parser(
+        "aeg-readiness",
+        help=(
+            "Audit AEG platform readiness from curated pattern evidence and stable real-firmware pair proof."
+        ),
+    )
+    _ = aeg_readiness.add_argument(
+        "--repo-root",
+        default=None,
+        metavar="PATH",
+        help="Repository root for resolving stable evidence artifacts (default: current working directory).",
+    )
+    _ = aeg_readiness.add_argument(
+        "--patterns-dir",
+        default=None,
+        metavar="PATH",
+        help="Override exploit pattern-card directory (default: data/exploit_references/patterns).",
+    )
+    _ = aeg_readiness.add_argument(
+        "--min-real-firmware-pairs",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Minimum real known-vulnerable/patched firmware pairs required (default: 1).",
+    )
+    _ = aeg_readiness.add_argument(
+        "--allow-unvalidated-patterns",
+        action="store_true",
+        help="Do not require every curated pattern card to have vulnerable/control evidence.",
+    )
+    _ = aeg_readiness.add_argument(
+        "--out",
+        default="docs/pov/aeg_platform_readiness.json",
+        metavar="PATH",
+        help="Path for readiness report JSON output artifact (default: docs/pov/aeg_platform_readiness.json).",
+    )
+
     release_quality_gate = sub.add_parser(
         "release-quality-gate",
         help=(
