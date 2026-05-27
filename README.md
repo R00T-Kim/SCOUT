@@ -7,9 +7,9 @@
 
 ### AEG-First Firmware Exploitability Platform with Deterministic Evidence Lineage
 
-**SCOUT is an AEG-first firmware analysis platform that transforms raw firmware blobs into evidence-anchored exploitability chains, lab-bounded Proof-of-Vulnerability modules, and audit-ready dossiers. Now featuring a Hybrid Analysis Engine for both Binary and Shell Script auditing.**
+**SCOUT is an AEG-first firmware analysis platform that transforms raw firmware blobs into evidence-anchored exploitability chains, lab-bounded Proof-of-Vulnerability modules, controlled weaponization packages for authorized internal red teams, and audit-ready dossiers. Now featuring a Hybrid Analysis Engine for both Binary and Shell Script auditing.**
 
-*While traditional scanners prioritize bulk and speed, SCOUT acts as a high-fidelity AEG copilot: it reconstructs exploit chains across ELF binaries and shell scripts, explains its reasoning with evidence trails, and generates lab-bounded PoV/PoC modules rather than raw public-PoC copies.*
+*While traditional scanners prioritize bulk and speed, SCOUT acts as a high-fidelity AEG copilot for product-security and internal red-team workflows: it reconstructs exploit chains across ELF binaries and shell scripts, explains its reasoning with evidence trails, and promotes lab-bounded PoV/PoC results toward scoped, private, evidence-led weaponization rather than raw public-PoC copies.*
 
 <br />
 
@@ -57,7 +57,9 @@
 - **AEG-first AutoPoC**: Leverage the **Exploit Pattern RAG** to generate lab-ready Proof-of-Vulnerability modules from firmware evidence.
   - SCOUT now includes a metadata-only PoC-in-GitHub importer and a human-review-required draft pattern-card promoter for firmware-relevant CVE seeds before AutoPoC retrieval.
   - SCOUT does **not** clone, execute, or prompt-inject raw public PoC repositories for copy-based exploitation. A platform-level AEG claim must pass the E2E dynamic/FP gate in [`docs/aeg_e2e_validation.md`](docs/aeg_e2e_validation.md). See also [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md).
+  - For internal red-team use, SCOUT treats weaponization as a **controlled, private, authorization-bound promotion layer**: scoped target profiling, precondition solving, reproducibility, cleanup, and evidence ledgers. See [`docs/controlled_weaponization_layer.md`](docs/controlled_weaponization_layer.md).
 - **Evidence Investigation**: Use the Glassmorphism Web Dashboard to walk through decompiled P-code and shell logic.
+- **Controlled Weaponization Readiness**: Promote verified PoV evidence into private, scope-bound exploit packages for authorized internal red teams without publishing working payloads.
 - **Audit/compliance-compatible reporting**: Generate SARIF, CycloneDX 1.6 SBOM+VEX, and SLSA L2 attestations.
 
 ---
@@ -88,7 +90,7 @@
 ./scout serve aiedge-runs/<run_id> --port 8080
 
 # Deep dive in the Terminal UI
-./scout ti
+./scout tui
 
 # Seed Exploit Pattern RAG candidates from PoC-in-GitHub metadata only
 python scripts/import_poc_in_github_candidates.py --dry-run
@@ -98,6 +100,53 @@ python scripts/draft_exploit_pattern_card.py data/exploit_references/candidates/
 
 # After a real authorized lab run, enforce dynamic proof + FP/FPR evidence
 ./scout aeg-e2e-gate aiedge-runs/<run_id>
+
+# Lower evidence + private package metadata into a bounded SCOUT-W Plan IR,
+# then fail closed on scope/profile/precondition checks before private execution.
+./scout weaponization-plan aiedge-runs/<run_id> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/weaponization_plan.json
+./scout weaponization-preflight aiedge-runs/<run_id> \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/weaponization_preflight.json
+
+# Lint and register private package metadata in a hash-only vault allowlist.
+./scout weaponization-package lint \
+  --package-manifest /secure/private/package.manifest.json \
+  --out /secure/private/package.lint.json
+./scout weaponization-package register \
+  --registry /secure/private/package_vault.json \
+  --package-manifest /secure/private/package.manifest.json
+
+# Promote a private internal red-team package only after scope, firmware binding,
+# cleanup, control-pair, and AEG evidence gates pass (no exploit source is loaded).
+./scout weaponization-readiness aiedge-runs/<run_id> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/controlled_weaponization_readiness.json
+
+# Execute the private package only after plan/preflight/readiness gates pass,
+# then write the L6/L7 execution ledger.
+./scout weaponization-execute aiedge-runs/<run_id> \
+  --exploit-dir /secure/private/exploits \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --preflight aiedge-runs/<run_id>/weaponization_preflight.json \
+  --readiness aiedge-runs/<run_id>/controlled_weaponization_readiness.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --vault-registry /secure/private/package_vault.json \
+  --approval /secure/private/engagement_approval.json \
+  --out-ledger aiedge-runs/<run_id>/weaponization_ledger.json
+
+# Or aggregate already-captured execution evidence, cleanup proof,
+# and optional engagement approval into the L6/L7 ledger.
+./scout weaponization-ledger aiedge-runs/<run_id> \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --preflight aiedge-runs/<run_id>/weaponization_preflight.json \
+  --readiness aiedge-runs/<run_id>/controlled_weaponization_readiness.json \
+  --execution-evidence aiedge-runs/<run_id>/exploits/chain_<id>/evidence_bundle.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --approval /secure/private/engagement_approval.json \
+  --out aiedge-runs/<run_id>/weaponization_ledger.json
 
 # CI-safe AEG regression: vulnerable lab service must pass, patched control must fail closed
 python scripts/run_aeg_synthetic_pair.py --work-root /tmp/scout-aeg-synthetic-pair

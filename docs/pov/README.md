@@ -17,9 +17,12 @@ planning. The allowed proof ladder is:
 3. `shell` — harmless command-output proof such as `id`/`whoami`/nonce echo.
 
 Blueprint-only artifacts are useful planning evidence but do not pass PoV
-validation. Indiscriminate weaponization remains out of scope: no persistence,
-no destructive writes, no third-party callbacks, no overlong/ROP payloads unless
-they are analyst-private and explicitly authorized in an isolated lab.
+validation. Controlled weaponization is an explicit internal red-team product
+goal, but it is a later promotion level: private package, authorized scope,
+firmware-hash binding, precondition checks, reproducibility, cleanup evidence,
+and vulnerable/control fail-closed proof are required. Indiscriminate
+weaponization remains out of scope: no persistence, no destructive writes, no
+third-party callbacks, and no unknown-target execution.
 
 ## Reproducing a PoV run
 
@@ -33,6 +36,7 @@ they are analyst-private and explicitly authorized in an isolated lab.
    Such evidence must include `trigger_observed=1` and channel context such as
    `channel_count`, `plan_hash`, `response`, or `parser`. `private_exploits/`
    is gitignored; treat it as analyst-private.
+   If the plugin is intended to become a controlled weaponization package, also bind it to a manifest with supported firmware hashes, primitive class, cleanup requirement, and scope policy as described in [`../controlled_weaponization_layer.md`](../controlled_weaponization_layer.md).
 
 2. **Narrow candidate selection to a single chain**:
    ```

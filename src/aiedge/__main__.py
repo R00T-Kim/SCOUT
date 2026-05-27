@@ -36,6 +36,7 @@ from .cli_parser import _build_parser
 from .cli_serve import _serve_report_directory
 from .cli_tui import _run_tui
 from .codex_probe import resolve_llm_gate_input
+from .controlled_weaponization import main as controlled_weaponization_main
 from .corpus import (
     CorpusValidationError,
     corpus_summary,
@@ -62,6 +63,10 @@ from .quality_policy import (
 from .real_firmware_pair_aeg import main as real_firmware_pair_aeg_main
 from .real_firmware_pair_gate import main as real_firmware_pair_gate_main
 from .schema import JsonValue
+from .weaponization_execute import main as weaponization_execute_main
+from .weaponization_ledger import main as weaponization_ledger_main
+from .weaponization_package import main as weaponization_package_main
+from .weaponization_plan import main as weaponization_plan_main
 
 
 def _append_option(argv: list[str], flag: str, value: object) -> None:
@@ -79,6 +84,86 @@ def _aeg_e2e_gate_argv(args: object) -> list[str]:
     _append_option(argv, "--out", getattr(args, "out", None))
     _append_option(argv, "--fpr-max", getattr(args, "fpr_max", None))
     _append_option(argv, "--min-runner-pass", getattr(args, "min_runner_pass", None))
+    return argv
+
+
+def _controlled_weaponization_argv(args: object) -> list[str]:
+    argv: list[str] = [str(getattr(args, "run_dir"))]
+    _append_option(argv, "--package-manifest", getattr(args, "package_manifest", None))
+    _append_option(argv, "--out", getattr(args, "out", None))
+    _append_option(argv, "--fpr-max", getattr(args, "fpr_max", None))
+    _append_option(argv, "--min-runner-pass", getattr(args, "min_runner_pass", None))
+    _append_bool(
+        argv,
+        "--allow-missing-control-pair",
+        bool(getattr(args, "allow_missing_control_pair", False)),
+    )
+    _append_bool(
+        argv,
+        "--allow-missing-cleanup",
+        bool(getattr(args, "allow_missing_cleanup", False)),
+    )
+    return argv
+
+
+def _weaponization_plan_argv(args: object) -> list[str]:
+    argv: list[str] = ["plan", str(getattr(args, "run_dir"))]
+    _append_option(argv, "--package-manifest", getattr(args, "package_manifest", None))
+    _append_option(argv, "--chain-id", getattr(args, "chain_id", None))
+    _append_option(argv, "--repro-required", getattr(args, "repro_required", None))
+    _append_option(argv, "--out", getattr(args, "out", None))
+    return argv
+
+
+def _weaponization_preflight_argv(args: object) -> list[str]:
+    argv: list[str] = ["preflight", str(getattr(args, "run_dir"))]
+    _append_option(argv, "--plan", getattr(args, "plan", None))
+    _append_option(argv, "--package-manifest", getattr(args, "package_manifest", None))
+    _append_option(argv, "--out", getattr(args, "out", None))
+    return argv
+
+
+def _weaponization_ledger_argv(args: object) -> list[str]:
+    argv: list[str] = [str(getattr(args, "run_dir"))]
+    _append_option(argv, "--plan", getattr(args, "plan", None))
+    _append_option(argv, "--preflight", getattr(args, "preflight", None))
+    _append_option(argv, "--readiness", getattr(args, "readiness", None))
+    evidence_paths = getattr(args, "execution_evidence", None)
+    if isinstance(evidence_paths, list):
+        for path in evidence_paths:
+            _append_option(argv, "--execution-evidence", path)
+    _append_option(argv, "--cleanup-log", getattr(args, "cleanup_log", None))
+    _append_option(argv, "--approval", getattr(args, "approval", None))
+    _append_option(argv, "--out", getattr(args, "out", None))
+    return argv
+
+
+def _weaponization_execute_argv(args: object) -> list[str]:
+    argv: list[str] = [str(getattr(args, "run_dir"))]
+    _append_option(argv, "--exploit-dir", getattr(args, "exploit_dir", None))
+    _append_option(argv, "--plan", getattr(args, "plan", None))
+    _append_option(argv, "--preflight", getattr(args, "preflight", None))
+    _append_option(argv, "--readiness", getattr(args, "readiness", None))
+    _append_option(argv, "--cleanup-log", getattr(args, "cleanup_log", None))
+    _append_option(argv, "--approval", getattr(args, "approval", None))
+    _append_option(argv, "--vault-registry", getattr(args, "vault_registry", None))
+    _append_option(argv, "--package-hash", getattr(args, "package_hash", None))
+    _append_option(argv, "--chain-id", getattr(args, "chain_id", None))
+    _append_option(argv, "--repro", getattr(args, "repro", None))
+    _append_option(argv, "--out-ledger", getattr(args, "out_ledger", None))
+    return argv
+
+
+def _weaponization_package_argv(args: object) -> list[str]:
+    package_command = getattr(args, "package_command", None)
+    argv: list[str] = [str(package_command)] if package_command is not None else []
+    _append_option(argv, "--registry", getattr(args, "registry", None))
+    _append_option(argv, "--package-manifest", getattr(args, "package_manifest", None))
+    _append_option(argv, "--package-hash", getattr(args, "package_hash", None))
+    _append_option(argv, "--firmware-sha256", getattr(args, "firmware_sha256", None))
+    _append_option(argv, "--pattern-id", getattr(args, "pattern_id", None))
+    _append_option(argv, "--chain-id", getattr(args, "chain_id", None))
+    _append_option(argv, "--out", getattr(args, "out", None))
     return argv
 
 
@@ -665,6 +750,48 @@ def main(argv: Sequence[str] | None = None) -> int:
     if command == "aeg-e2e-gate":
         try:
             return aeg_e2e_gate_main(_aeg_e2e_gate_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "weaponization-readiness":
+        try:
+            return controlled_weaponization_main(_controlled_weaponization_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "weaponization-plan":
+        try:
+            return weaponization_plan_main(_weaponization_plan_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "weaponization-preflight":
+        try:
+            return weaponization_plan_main(_weaponization_preflight_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "weaponization-ledger":
+        try:
+            return weaponization_ledger_main(_weaponization_ledger_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "weaponization-execute":
+        try:
+            return weaponization_execute_main(_weaponization_execute_argv(args))
+        except Exception as e:
+            print(f"Fatal error: {e}", file=sys.stderr)
+            return 20
+
+    if command == "weaponization-package":
+        try:
+            return weaponization_package_main(_weaponization_package_argv(args))
         except Exception as e:
             print(f"Fatal error: {e}", file=sys.stderr)
             return 20

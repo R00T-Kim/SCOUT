@@ -45,6 +45,8 @@
   - reviewer item [B-2]용 R7000 end-to-end demo walkthrough skeleton
 - `docs/results_overview.md`
   - reviewer 공유용 corpus baseline / pair-eval / calibration / E2E demo 단일 진입점
+- `docs/controlled_weaponization_layer.md`
+  - 허가된 랩/고객 범위에서 PoV 이후 controlled weaponization까지 확장하기 위한 SCOUT-W 설계, promotion level, private package lint/vault contract, scope/evidence/approval ledger gate
 
 ## 4) 저수준 계약(Contracts)
 
@@ -70,15 +72,19 @@
 - **Benchmark fidelity**: `benchmark_eval.py`, `scripts/reevaluate_benchmark_results.py`, `scripts/rerun_benchmark_stages.py`
   - archived bundle verifier, analyst-readiness, legacy bundle normalize/rerun
 
-## 6) 파이프라인 (42 stages)
+## 6) 파이프라인 (49 stages)
 
 ```
-tooling → extraction → structure → carving → firmware_profile → inventory
-→ ghidra_analysis → sbom → cve_scan → reachability
-→ endpoints → surfaces → web_ui → graph → attack_surface
-→ functional_spec → threat_model → findings → llm_triage → llm_synthesis
-→ attribution → emulation → dynamic_validation → fuzzing
-→ exploit_gate → exploit_chain → exploit_autopoc → poc_validation → exploit_policy
+tooling → ota → ota_payload → ota_fs → ota_roots → ota_boottriage
+→ extraction → firmware_lineage → structure → carving → firmware_profile → inventory
+→ script_analysis → ghidra_analysis → semantic_classification → sbom → cve_scan → reachability
+→ endpoints → surfaces → enhanced_source → csource_identification → taint_propagation
+→ fp_verification → adversarial_triage → web_ui → graph → attack_surface
+→ functional_spec → threat_model → llm_triage → llm_synthesis → attribution
+→ emulation → dynamic_validation → fuzzing → poc_refinement → chain_construction
+→ exploitability_dossier → protocol_model → exploit_state_machine → crash_replay
+→ primitive_verifier → exploit_gate → exploit_chain → exploit_autopoc
+→ poc_validation → exploit_policy → compliance_report
 ```
 
 ## 7) Release / semantics

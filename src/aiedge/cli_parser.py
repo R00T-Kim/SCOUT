@@ -471,6 +471,148 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = aeg_e2e_gate.add_argument("--fpr-max", type=float, default=0.10)
     _ = aeg_e2e_gate.add_argument("--min-runner-pass", type=int, default=1)
 
+    weaponization_readiness = sub.add_parser(
+        "weaponization-readiness",
+        help=(
+            "Certify a private controlled weaponization package against a completed authorized SCOUT AEG run."
+        ),
+    )
+    _ = weaponization_readiness.add_argument("run_dir", metavar="RUN_DIR")
+    _ = weaponization_readiness.add_argument(
+        "--package-manifest",
+        required=True,
+        metavar="PATH",
+        help="Private package manifest JSON; exploit payload source is never loaded or executed.",
+    )
+    _ = weaponization_readiness.add_argument("--out", default=None, metavar="PATH")
+    _ = weaponization_readiness.add_argument("--fpr-max", type=float, default=0.10)
+    _ = weaponization_readiness.add_argument("--min-runner-pass", type=int, default=1)
+    _ = weaponization_readiness.add_argument(
+        "--allow-missing-control-pair",
+        action="store_true",
+        help="Treat missing vulnerable/control fail-closed proof as an explicit policy exception.",
+    )
+    _ = weaponization_readiness.add_argument(
+        "--allow-missing-cleanup",
+        action="store_true",
+        help="Do not require cleanup strategy and verification metadata for this readiness check.",
+    )
+
+    weaponization_plan = sub.add_parser(
+        "weaponization-plan",
+        help="Build a controlled weaponization Plan IR from SCOUT run evidence and private package metadata.",
+    )
+    _ = weaponization_plan.add_argument("run_dir", metavar="RUN_DIR")
+    _ = weaponization_plan.add_argument(
+        "--package-manifest",
+        default=None,
+        metavar="PATH",
+        help="Optional private package manifest JSON used for binding metadata.",
+    )
+    _ = weaponization_plan.add_argument("--chain-id", default=None)
+    _ = weaponization_plan.add_argument("--repro-required", type=int, default=3)
+    _ = weaponization_plan.add_argument("--out", default=None, metavar="PATH")
+
+    weaponization_preflight = sub.add_parser(
+        "weaponization-preflight",
+        help="Fail-closed scope/profile/precondition gate before private controlled weaponization execution.",
+    )
+    _ = weaponization_preflight.add_argument("run_dir", metavar="RUN_DIR")
+    _ = weaponization_preflight.add_argument("--plan", required=True, metavar="PATH")
+    _ = weaponization_preflight.add_argument(
+        "--package-manifest",
+        default=None,
+        metavar="PATH",
+        help="Optional private package manifest JSON used for firmware binding checks.",
+    )
+    _ = weaponization_preflight.add_argument("--out", default=None, metavar="PATH")
+
+    weaponization_ledger = sub.add_parser(
+        "weaponization-ledger",
+        help=(
+            "Build the controlled weaponization execution ledger and optional L7 engagement approval record."
+        ),
+    )
+    _ = weaponization_ledger.add_argument("run_dir", metavar="RUN_DIR")
+    _ = weaponization_ledger.add_argument("--plan", required=True, metavar="PATH")
+    _ = weaponization_ledger.add_argument("--preflight", required=True, metavar="PATH")
+    _ = weaponization_ledger.add_argument("--readiness", required=True, metavar="PATH")
+    _ = weaponization_ledger.add_argument(
+        "--execution-evidence",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "exploit-evidence-v1 bundle path; may be repeated. Defaults to "
+            "RUN_DIR/exploits/chain_*/evidence_bundle.json when omitted."
+        ),
+    )
+    _ = weaponization_ledger.add_argument("--cleanup-log", default=None, metavar="PATH")
+    _ = weaponization_ledger.add_argument(
+        "--approval",
+        default=None,
+        metavar="PATH",
+        help="Optional scout-engagement-approval-v1 manifest for L7 promotion.",
+    )
+    _ = weaponization_ledger.add_argument("--out", default=None, metavar="PATH")
+
+    weaponization_execute = sub.add_parser(
+        "weaponization-execute",
+        help=(
+            "Run a private plugin only after SCOUT-W plan/preflight/readiness gates pass, then write the ledger."
+        ),
+    )
+    _ = weaponization_execute.add_argument("run_dir", metavar="RUN_DIR")
+    _ = weaponization_execute.add_argument(
+        "--exploit-dir",
+        required=True,
+        metavar="PATH",
+        help="Private exploit package directory; public SCOUT never stores the payload source.",
+    )
+    _ = weaponization_execute.add_argument("--plan", required=True, metavar="PATH")
+    _ = weaponization_execute.add_argument("--preflight", required=True, metavar="PATH")
+    _ = weaponization_execute.add_argument("--readiness", required=True, metavar="PATH")
+    _ = weaponization_execute.add_argument("--cleanup-log", required=True, metavar="PATH")
+    _ = weaponization_execute.add_argument("--approval", default=None, metavar="PATH")
+    _ = weaponization_execute.add_argument(
+        "--vault-registry",
+        default=None,
+        metavar="PATH",
+        help="Optional metadata-only package vault registry; package hash must be registered for this scope.",
+    )
+    _ = weaponization_execute.add_argument("--package-hash", default=None)
+    _ = weaponization_execute.add_argument("--chain-id", default=None)
+    _ = weaponization_execute.add_argument("--repro", default=None, type=int)
+    _ = weaponization_execute.add_argument("--out-ledger", default=None, metavar="PATH")
+
+    weaponization_package = sub.add_parser(
+        "weaponization-package",
+        help="Lint and register private controlled weaponization package metadata.",
+    )
+    package_sub = weaponization_package.add_subparsers(dest="package_command", required=True)
+    package_lint = package_sub.add_parser("lint", help="Validate a private package manifest.")
+    _ = package_lint.add_argument("--package-manifest", required=True, metavar="PATH")
+    _ = package_lint.add_argument("--out", default=None, metavar="PATH")
+
+    package_register = package_sub.add_parser(
+        "register",
+        help="Register a lint-passing package hash in a metadata-only vault registry.",
+    )
+    _ = package_register.add_argument("--registry", required=True, metavar="PATH")
+    _ = package_register.add_argument("--package-manifest", required=True, metavar="PATH")
+    _ = package_register.add_argument("--out", default=None, metavar="PATH")
+
+    package_verify = package_sub.add_parser(
+        "verify",
+        help="Verify a package hash is registered for an optional firmware/pattern/chain scope.",
+    )
+    _ = package_verify.add_argument("--registry", required=True, metavar="PATH")
+    _ = package_verify.add_argument("--package-hash", required=True)
+    _ = package_verify.add_argument("--firmware-sha256", default=None)
+    _ = package_verify.add_argument("--pattern-id", default=None)
+    _ = package_verify.add_argument("--chain-id", default=None)
+    _ = package_verify.add_argument("--out", default=None, metavar="PATH")
+
     aeg_readiness = sub.add_parser(
         "aeg-readiness",
         help=(

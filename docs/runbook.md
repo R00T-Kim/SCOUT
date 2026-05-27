@@ -173,16 +173,16 @@ export AIEDGE_PRIV_RUNNER='./scripts/priv-run'
   4) parent directories of run_dir
 - If unresolved, SCOUT falls back to `sudo -n` and records `privileged_runner_unavailable`.
 
-## 3) Inject private exploit code and capture evidence-only artifacts
+## 3) Inject private exploit code and capture controlled weaponization evidence
 
-`profile=exploit` runs now auto-generate and execute non-weaponized PoC probes for
-`chain_id`-backed candidates (`stages/exploit_autopoc/*` and `exploits/chain_*/evidence_bundle.json`).
+`profile=exploit` runs auto-generate and execute lab-bounded PoC probes for
+`chain_id`-backed candidates (`stages/exploit_autopoc/*` and `exploits/chain_*/evidence_bundle.json`). For internal red-team product use, this is the PoV lane that feeds a separate controlled weaponization layer rather than a public payload corpus.
 
 - Default path: LLM codegen (`codex exec`) creates plugin code from candidate context, then runner executes it.
 - Fail-safe path: if LLM CLI is unavailable/invalid, SCOUT falls back to deterministic template plugin and still executes.
 - LLM chain synthesis is re-run after findings generation, so `exploit_candidates.json` and LLM chain hypotheses are reflected in the final report/autopoc input.
 - If chain-backed candidates are missing, SCOUT uses LLM-chain seeds first and then promotes strong non-chain candidates into synthetic chain IDs for best-effort PoC execution.
-- Both paths remain evidence-only (lab-only, authorized gate required) and do not emit weaponized payloads.
+- Public SCOUT paths remain evidence-led and gate-bound (lab-only or explicitly authorized scope required). They may feed controlled weaponization readiness, but working weaponized logic belongs in private packages/plugins, not the public repo.
 
 Re-run only this step when needed:
 
@@ -190,7 +190,7 @@ Re-run only this step when needed:
 ./scout stages <run_dir> --stages exploit_autopoc
 ```
 
-Use manual/private plugin injection only when you want to override with your own exploit logic:
+Use manual/private plugin injection when an internal red-team package must override generated PoV logic. The package should be scope-bound, firmware-hash-bound, cleanup-aware, and ledgered as described in `docs/controlled_weaponization_layer.md`:
 
 ```bash
 python3 exploit_runner.py \
@@ -199,6 +199,107 @@ python3 exploit_runner.py \
   --chain-id ER-e50_v3.0.1:rce_cgi_injection \
   --repro 3
 ```
+
+Promotion beyond PoV should not be inferred from runner success alone. Treat controlled weaponization as ready only after the run also has target profile binding, precondition decision trace, reproducibility evidence, cleanup result, and vulnerable/control fail-closed evidence.
+
+Before any private package executor is considered, lower the selected chain and
+private package metadata into a bounded SCOUT-W Plan IR, then run the preflight
+gate:
+
+```bash
+./scout weaponization-plan <run_dir> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out <run_dir>/weaponization_plan.json
+
+./scout weaponization-preflight <run_dir> \
+  --plan <run_dir>/weaponization_plan.json \
+  --package-manifest /secure/private/package.manifest.json \
+  --out <run_dir>/weaponization_preflight.json
+```
+
+`weaponization-preflight` exits `0` only when the plan is scoped,
+firmware-bound, chain/pattern-bound, safe-primitive-only, preconditioned,
+unknown-target-denying, and cleanup-aware. Exit `37` blocks the private execution
+lane and records a decision such as `BLOCKED_SCOPE`,
+`SKIP_UNSUPPORTED_VERSION`, or `NEEDS_STATE_SETUP`.
+
+Before readiness or execution, lint the private package manifest and register
+the reviewed package hash in a metadata-only vault allowlist:
+
+```bash
+./scout weaponization-package lint \
+  --package-manifest /secure/private/package.manifest.json \
+  --out /secure/private/package.lint.json
+
+./scout weaponization-package register \
+  --registry /secure/private/package_vault.json \
+  --package-manifest /secure/private/package.manifest.json
+
+./scout weaponization-package verify \
+  --registry /secure/private/package_vault.json \
+  --package-hash <package_sha256> \
+  --firmware-sha256 <firmware_sha256> \
+  --pattern-id <pattern_id> \
+  --chain-id <chain_id>
+```
+
+The registry stores package metadata and hashes only. Exit `40` means manifest
+lint failed; exit `41` means registration or verification failed.
+
+SCOUT enforces that promotion with a fail-closed readiness gate. The gate reads
+only package metadata and evidence hashes; it does not load or execute private
+exploit source:
+
+```bash
+./scout weaponization-readiness <run_dir> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out <run_dir>/controlled_weaponization_readiness.json
+```
+
+Exit `0` means `L6_CONTROLLED_WEAPONIZATION_PACKAGE`. Exit `36` means the
+package remains blocked below L6 and the JSON report lists the missing scope,
+firmware-binding, cleanup, control-pair, or evidence-ledger condition.
+
+When an operator wants SCOUT to orchestrate the controlled private step, use the
+gated execution wrapper. The wrapper checks Plan IR, preflight, and readiness
+before delegating to the existing private plugin runner, then writes the ledger:
+
+```bash
+./scout weaponization-execute <run_dir> \
+  --exploit-dir /secure/private/exploits \
+  --plan <run_dir>/weaponization_plan.json \
+  --preflight <run_dir>/weaponization_preflight.json \
+  --readiness <run_dir>/controlled_weaponization_readiness.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --vault-registry /secure/private/package_vault.json \
+  --approval /secure/private/engagement_approval.json \
+  --out-ledger <run_dir>/weaponization_ledger.json
+```
+
+Exit `39` means the pre-execution gate blocked private execution before the
+runner was invoked. The command still never stores private payload source in the
+public run directory; the downstream evidence bundle records hashes and logs.
+
+If private execution already happened through another approved path, record the
+execution ledger directly. This step hashes existing evidence bundles, cleanup
+proof, and an optional engagement approval manifest:
+
+```bash
+./scout weaponization-ledger <run_dir> \
+  --plan <run_dir>/weaponization_plan.json \
+  --preflight <run_dir>/weaponization_preflight.json \
+  --readiness <run_dir>/controlled_weaponization_readiness.json \
+  --execution-evidence <run_dir>/exploits/chain_<id>/evidence_bundle.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --approval /secure/private/engagement_approval.json \
+  --out <run_dir>/weaponization_ledger.json
+```
+
+Exit `0` means the ledger is either `L6_EXECUTION_LEDGER_READY` or, when a
+valid `scout-engagement-approval-v1` manifest is supplied,
+`L7_ENGAGEMENT_APPROVED_PACKAGE`. Exit `38` means the ledger is blocked by
+missing execution evidence, insufficient reproducibility, cleanup errors,
+preflight/readiness failure, or invalid approval metadata.
 
 ## 4) Assemble verified_chain contract
 
@@ -284,7 +385,7 @@ Terminal-only workflow (no browser required):
 
 ```bash
 ./scout tui <run_dir>                     # auto mode
-./scout ti <run_dir>                     # interactive mode (q to quit)
+./scout tui <run_dir>                     # interactive mode (q to quit)
 ./scout tw <run_dir> -t 2 -n 20         # live watch
 ./scout to <run_dir>                     # one-shot (explicit once mode)
 ```

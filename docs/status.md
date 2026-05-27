@@ -2,6 +2,14 @@
 
 이 문서는 "현재 구현 상태"를 솔직하게 기록합니다.
 
+## v3.0.0-rc1 현재 기준 (2026-05-27, AEG + controlled weaponization 방향)
+
+- SCOUT의 1순위 제품 라인은 AEG-first firmware-to-exploit evidence engine이다. Compliance/Audit/CRA는 AEG evidence를 신뢰·납품·감사 가능하게 만드는 보조 출력이다.
+- 내부 레드팀이 실제로 활용할 제품이 목표이므로 PoV에서 멈추지 않고 controlled weaponization readiness와 execution/approval ledger까지 문서화한다. 단, 공개 repo에는 working weaponized payload를 두지 않고 private package/plugin/vault와 scope/evidence gate로 분리한다.
+- 현재 registry 기준 stage 수는 49개이며 `docs/index.md`는 registry 기준 count로 동기화한다.
+- `docs/controlled_weaponization_layer.md`가 SCOUT-W의 scope guard, target profiler, precondition solver, private package lint/vault registry, gated private execution wrapper, primitive adapter, reliability harness, cleanup manager, evidence/approval ledger, private package contract, promotion level을 정의한다.
+- AEG readiness는 checked-in R7000 CVE-2017-5521 real known-vulnerable/patched pair proof와 `docs/pov/aeg_platform_readiness.json`을 기준으로 판단한다.
+
 
 ## v2.8.0 업데이트 (2026-05-18, Exploit Pattern RAG)
 

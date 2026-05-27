@@ -10,8 +10,10 @@
 - **결정론(Deterministic)**: LLM이 없어도 stage 산출물이 재현 가능해야 함 (`--no-llm`)
 - **승격(confirmed)에는 동적 검증 증거가 필수**: static 분석만으로는 high-confidence여도 confirmed가 될 수 없음
 - **Exploit-chain은 lab-gated**: 승인된 범위에서만 실행; 목적은 재현 가능한 검증 evidence 생성
+- **내부 레드팀 제품 목표에는 controlled weaponization 포함**: PoV에서 끝내지 않고, 허가된 scope/firmware hash/precondition/reliability/cleanup/evidence/approval ledger를 만족한 private package로 승격할 수 있어야 함
 - **Benchmark는 archived bundle까지 포함해 평가**: success/partial 수치만이 아니라 archived run replica가 verifier를 통과하는지까지 품질 계약에 포함
 - **LLM은 제안자, verifier는 결정자**: CoT/repair/fallback은 후보 생성·정렬 보조층이며 최종 판정은 deterministic evidence gate가 닫아야 함
+- **공개 corpus와 private weaponization 분리**: 공개 repo는 pattern/contract/evidence와 package hash registry gate를 보관하고, working exploit logic은 승인된 private package/vault에서 관리
 
 ## 구성요소
 
@@ -30,6 +32,15 @@
   - 필요한 stage만 재실행(부분 실행)
   - tribunal/judge로 후보를 평가(비용/캐시 포함)
   - validator로 동적 증거 생성 및 confirmed 승격 정책을 enforce
+
+### SCOUT-W (controlled weaponization extension)
+
+- 입력: verified PoV run_dir + exploit Plan IR + authorized scope metadata
+- 역할:
+  - scope guard, target profiler, precondition solver로 실행 가능성을 먼저 판정
+  - private exploit package/plugin을 firmware hash와 chain evidence에 바인딩
+  - reproducibility, cleanup, fail-closed control, evidence redaction을 gate로 삼아 내부 레드팀 사용 가능 상태로 승격
+- 상세 설계: `docs/controlled_weaponization_layer.md`
 
 ## 데이터 흐름(요약)
 

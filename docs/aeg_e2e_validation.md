@@ -2,6 +2,8 @@
 
 SCOUT is AEG-first. A RAG/AutoPoC change is not considered platform-ready just because unit tests pass or a plugin is generated. The claim must be evaluated against an authorized lab run that proves exploitability and rejects false positives.
 
+For the internal red-team product, this gate is also the minimum substrate for controlled weaponization. A package can be considered weaponization-ready only after the AEG proof is reproducible, isolated, fail-closed against patched/control, cleanup-aware, and bound to an authorized target scope. The detailed promotion model lives in [`controlled_weaponization_layer.md`](controlled_weaponization_layer.md).
+
 ## Required E2E evidence
 
 A passing AEG run must provide all of the following artifacts:
@@ -23,6 +25,8 @@ A passing AEG run must provide all of the following artifacts:
 5. `stages/fp_verification/verified_alerts.json`
    - no high/critical alert used for the AEG claim may be marked `fp_verdict == "FP"`.
 
+Weaponization promotion adds private-package requirements on top of these artifacts: target profile binding, precondition decision trace, package/plugin hash, cleanup result, and operator-visible scope metadata.
+
 ## Gate command
 
 After a real lab run finishes:
@@ -32,6 +36,65 @@ After a real lab run finishes:
 ```
 
 The product CLI exits `0` only when every dynamic proof and FP/FPR check passes. It exits `31` on fail-closed evidence gaps. `python scripts/aeg_e2e_gate.py ...` remains available as a compatibility wrapper.
+
+For internal red-team controlled weaponization, run the package promotion gate
+after the E2E gate and real/control evidence exist. First build and preflight
+the SCOUT-W Plan IR:
+
+```bash
+./scout weaponization-plan aiedge-runs/<run_id> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/weaponization_plan.json
+
+./scout weaponization-preflight aiedge-runs/<run_id> \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/weaponization_preflight.json
+
+./scout weaponization-package lint \
+  --package-manifest /secure/private/package.manifest.json \
+  --out /secure/private/package.lint.json
+
+./scout weaponization-package register \
+  --registry /secure/private/package_vault.json \
+  --package-manifest /secure/private/package.manifest.json
+```
+
+Then certify readiness:
+
+```bash
+./scout weaponization-readiness aiedge-runs/<run_id> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/controlled_weaponization_readiness.json
+
+./scout weaponization-execute aiedge-runs/<run_id> \
+  --exploit-dir /secure/private/exploits \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --preflight aiedge-runs/<run_id>/weaponization_preflight.json \
+  --readiness aiedge-runs/<run_id>/controlled_weaponization_readiness.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --vault-registry /secure/private/package_vault.json \
+  --approval /secure/private/engagement_approval.json \
+  --out-ledger aiedge-runs/<run_id>/weaponization_ledger.json
+
+./scout weaponization-ledger aiedge-runs/<run_id> \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --preflight aiedge-runs/<run_id>/weaponization_preflight.json \
+  --readiness aiedge-runs/<run_id>/controlled_weaponization_readiness.json \
+  --execution-evidence aiedge-runs/<run_id>/exploits/chain_<id>/evidence_bundle.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --approval /secure/private/engagement_approval.json \
+  --out aiedge-runs/<run_id>/weaponization_ledger.json
+```
+
+This command never loads exploit source. It certifies package metadata, exact
+firmware hash binding, scoped authorization, safe primitive declaration,
+cleanup evidence, control-pair proof, and the embedded AEG E2E result before
+returning `L6_CONTROLLED_WEAPONIZATION_PACKAGE`. The ledger command then records
+post-run reproducibility, cleanup, evidence bundle hashes, and optional
+engagement approval for `L6_EXECUTION_LEDGER_READY` or
+`L7_ENGAGEMENT_APPROVED_PACKAGE`. `weaponization-execute` is the gated wrapper
+that invokes the private runner only after those preconditions are already true.
 
 ## Synthetic vulnerable/control pair
 

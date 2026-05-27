@@ -7,9 +7,9 @@
 
 ### 결정론적 증거 계보를 갖춘 AEG-First 펌웨어 익스플로잇 가능성 플랫폼
 
-**SCOUT은 가공되지 않은 펌웨어 바이너리를 증거 기반 익스플로잇 가능성 체인, 실험실 한정 Proof-of-Vulnerability 모듈, 감사 가능한 보고서로 변환하는 AEG-first 펌웨어 분석 플랫폼입니다. 이제 바이너리와 쉘 스크립트를 동시에 감사하는 하이브리드 분석 엔진을 탑재했습니다.**
+**SCOUT은 가공되지 않은 펌웨어 바이너리를 증거 기반 익스플로잇 가능성 체인, 실험실 한정 Proof-of-Vulnerability 모듈, 내부 레드팀용 controlled weaponization package, 감사 가능한 보고서로 변환하는 AEG-first 펌웨어 분석 플랫폼입니다. 이제 바이너리와 쉘 스크립트를 동시에 감사하는 하이브리드 분석 엔진을 탑재했습니다.**
 
-*기존의 스캐너들이 탐지 수량과 속도에만 치중할 때, SCOUT은 고신뢰도 AEG 코파일럿 역할을 수행합니다. 단순한 CVE 목록을 나열하는 대신, ELF 바이너리와 쉘 스크립트를 가로지르는 익스플로잇 체인을 재구성하고, 증거 기반 추론과 실험실 한정 PoV/PoC 검증으로 연결합니다.*
+*기존의 스캐너들이 탐지 수량과 속도에만 치중할 때, SCOUT은 제품보안/내부 레드팀을 위한 고신뢰도 AEG 코파일럿 역할을 수행합니다. 단순한 CVE 목록을 나열하는 대신, ELF 바이너리와 쉘 스크립트를 가로지르는 익스플로잇 체인을 재구성하고, 증거 기반 추론과 실험실 한정 PoV/PoC 검증을 거쳐 private·scope-bound weaponization으로 승격할 수 있게 합니다.*
 
 <br />
 
@@ -58,7 +58,9 @@
   - SCOUT은 firmware-relevant CVE seed를 위해 PoC-in-GitHub 메타데이터 전용 importer와 human-review-required draft pattern-card promoter를 포함합니다.
   - PoC-in-GitHub는 귀중한 upstream seed로 사용하되, SCOUT은 raw 공개 PoC 저장소를 clone/실행/prompt 주입하지 않습니다. 사람이 검토한 pattern card만 AutoPoC retrieval 대상이 됩니다.
   - 플랫폼 수준 AEG claim은 [`docs/aeg_e2e_validation.md`](docs/aeg_e2e_validation.md)의 동적 증거/FP gate를 통과해야 합니다. 자세한 내용은 [`docs/exploit-pattern-rag.md`](docs/exploit-pattern-rag.md)를 참고하세요.
+  - 내부 레드팀 활용에서 weaponization은 공개 payload 배포가 아니라 **허가된 범위의 controlled promotion layer**입니다. 대상 scope, firmware hash, precondition, 재현성, cleanup, evidence ledger를 묶는 설계는 [`docs/controlled_weaponization_layer.md`](docs/controlled_weaponization_layer.md)에 정리합니다.
 - **증거 기반 조사**: 글래스모피즘 웹 대시보드를 통해 디컴파일된 P-code와 쉘 로직을 시각적으로 조사합니다.
+- **Controlled Weaponization 준비도**: 검증된 PoV evidence를 내부 레드팀이 사용할 private·scope-bound exploit package로 승격할 수 있게 설계합니다.
 - **감사/규제 대응형 보고**: SARIF, CycloneDX 1.6 SBOM+VEX, SLSA L2 증명서를 생성합니다.
 
 ---
@@ -69,11 +71,11 @@ SCOUT v3.0.0-rc1의 1순위는 감사 리포팅이 아니라 **AEG(Automated Exp
 
 | 항목 | 현재 상태 |
 |---|---|
-| 공개 RAG card | `memory_stateful_probe`, `cgi_param_cmd_injection`, `config_derived_cmd_injection` |
+| 공개 RAG card | `memory_stateful_probe`, `cgi_param_cmd_injection`, `config_derived_cmd_injection`, `netgear_passwordrecovered_auth_bypass` |
 | Synthetic vulnerable/control pair | 3개 card 모두 통과 |
-| Real known-vulnerable/patched firmware pair | 아직 0개 — broad AEG release claim 전 필수 |
+| Real known-vulnerable/patched firmware pair | 1개 — Netgear R7000 CVE-2017-5521 stable pair proof 기록됨 |
 | 공식 펌웨어 pair 확보 | NETGEAR R7000(CVE-2017-5521), D-Link DIR-859(CVE-2019-17621) official URL + SHA-256 manifest 기록됨 |
-| 실제 펌웨어 AEG 실행 상태 | R7000은 real firmware에서 RAG/AutoPoC 후보까지 도달했지만 동적 runner pass 0, DIR-859는 legacy LZMA SquashFS가 `sasquatch` 호환 extractor를 요구해 extraction 차단 |
+| 실제 펌웨어 AEG 실행 상태 | R7000 V1.0.5.70 vulnerable run은 AutoPoC/poc_validation/verified_chain/FP-FPR gate 통과, V1.0.9.34 patched/control은 dynamic proof fail-closed |
 | 승격 전 preflight | `scripts/run_real_firmware_pair_aeg.py`가 공식 pair 분석 실행/재사용 후 `scripts/check_real_firmware_pair_aeg.py`로 펌웨어 SHA-256, vulnerable gate, patched/control fail-closed, 누락 gate artifact를 한 번에 검사 |
 | PoC-in-GitHub 사용 방식 | CVE/repo metadata seed → 사람이 검토한 draft pattern card → retriever |
 | 금지 사항 | raw PoC clone/실행, raw PoC 전체 prompt 주입, reference endpoint/payload 복붙 |
@@ -88,7 +90,7 @@ python scripts/check_exploit_pattern_evidence.py --require-all
 python scripts/check_exploit_pattern_evidence.py --require-real-firmware-pair
 ```
 
-현재 `--require-all`은 synthetic pair evidence 기준으로 통과하지만, `--require-real-firmware-pair`는 실제 펌웨어 pair 증거가 기록되기 전까지 실패하는 것이 정상입니다.
+현재 `--require-all`과 `--require-real-firmware-pair`는 checked-in R7000 stable pair evidence 기준으로 통과해야 합니다. 새 firmware input, AutoPoC 동작, pattern card가 바뀌면 `./scout aeg-readiness --out docs/pov/aeg_platform_readiness.json`로 다시 감사해야 합니다.
 
 실제 펌웨어 pair는 **다운로드 가능성**과 **취약성 검증**을 분리해서 다룹니다. `benchmarks/pair-eval/pairs.json`에는 공식 펌웨어 URL과 기대 SHA-256을 기록하고, `scripts/fetch_pair_firmware.py`가 다운로드/기존 파일 검증을 담당합니다. 그러나 이 단계는 "입력 확보"일 뿐이며, `real_firmware_pair` 증거로 승격하려면 vulnerable run은 AEG E2E gate를 통과하고 patched/control run은 fail-closed를 입증해야 합니다.
 
@@ -120,7 +122,7 @@ python scripts/check_exploit_pattern_evidence.py --require-real-firmware-pair
 ./scout serve aiedge-runs/<run_id> --port 8080
 
 # 터미널 UI(TUI)로 상세 조사
-./scout ti
+./scout tui
 
 # PoC-in-GitHub 메타데이터만 사용해 Exploit Pattern RAG 후보 seed 생성
 python scripts/import_poc_in_github_candidates.py --dry-run
@@ -138,6 +140,54 @@ python scripts/fetch_pair_firmware.py \
 
 # 실제 승인된 lab run 이후 동적 증거 + FP/FPR gate 강제
 python scripts/aeg_e2e_gate.py aiedge-runs/<run_id>
+
+# evidence + private package metadata를 bounded SCOUT-W Plan IR로 낮춘 뒤,
+# private 실행 전에 scope/profile/precondition gate를 fail-closed로 검사합니다.
+./scout weaponization-plan aiedge-runs/<run_id> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/weaponization_plan.json
+./scout weaponization-preflight aiedge-runs/<run_id> \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/weaponization_preflight.json
+
+# private package metadata를 lint하고 hash-only vault allowlist에 등록합니다.
+./scout weaponization-package lint \
+  --package-manifest /secure/private/package.manifest.json \
+  --out /secure/private/package.lint.json
+./scout weaponization-package register \
+  --registry /secure/private/package_vault.json \
+  --package-manifest /secure/private/package.manifest.json
+
+# 내부 레드팀 private package는 scope, firmware binding, cleanup,
+# control-pair, AEG evidence gate 통과 후에만 L6으로 승격합니다.
+# 이 명령은 exploit source를 로드하거나 실행하지 않습니다.
+./scout weaponization-readiness aiedge-runs/<run_id> \
+  --package-manifest /secure/private/package.manifest.json \
+  --out aiedge-runs/<run_id>/controlled_weaponization_readiness.json
+
+# plan/preflight/readiness gate 통과 후에만 private package를 실행하고,
+# 이어서 L6/L7 execution ledger를 작성합니다.
+./scout weaponization-execute aiedge-runs/<run_id> \
+  --exploit-dir /secure/private/exploits \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --preflight aiedge-runs/<run_id>/weaponization_preflight.json \
+  --readiness aiedge-runs/<run_id>/controlled_weaponization_readiness.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --vault-registry /secure/private/package_vault.json \
+  --approval /secure/private/engagement_approval.json \
+  --out-ledger aiedge-runs/<run_id>/weaponization_ledger.json
+
+# 또는 이미 캡처된 실행 증거, cleanup proof, 선택적 engagement approval을
+# L6/L7 ledger로 집계합니다.
+./scout weaponization-ledger aiedge-runs/<run_id> \
+  --plan aiedge-runs/<run_id>/weaponization_plan.json \
+  --preflight aiedge-runs/<run_id>/weaponization_preflight.json \
+  --readiness aiedge-runs/<run_id>/controlled_weaponization_readiness.json \
+  --execution-evidence aiedge-runs/<run_id>/exploits/chain_<id>/evidence_bundle.json \
+  --cleanup-log /secure/private/cleanup.log \
+  --approval /secure/private/engagement_approval.json \
+  --out aiedge-runs/<run_id>/weaponization_ledger.json
 
 # known-vulnerable/patched pair 분석 실행/재사용 + real_firmware_pair 승격 preflight
 python scripts/run_real_firmware_pair_aeg.py \
