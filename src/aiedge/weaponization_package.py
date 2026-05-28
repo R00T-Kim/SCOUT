@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -241,7 +241,7 @@ def _manifest_entry(manifest_path: Path, lint_report: dict[str, object]) -> dict
         "pattern_id": binding.get("pattern_id", ""),
         "primitive": capability.get("primitive", ""),
         "supported_firmware_sha256": lint_report.get("supported_firmware_sha256", []),
-        "registered_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "registered_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
 
 
