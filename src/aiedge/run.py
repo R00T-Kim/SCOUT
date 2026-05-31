@@ -21,6 +21,7 @@ from .duplicate_gate import (
     apply_duplicate_gate,
 )
 from .endpoints import EndpointsStage
+from .exploit_intel import ExploitIntelStage
 from .extraction import ExtractionStage
 from .findings import run_findings
 from .firmware_profile import FirmwareProfileStage
@@ -3315,6 +3316,7 @@ def analyze_run(
             remaining_budget_s=remaining_s,
             no_llm=no_llm,
         ),
+        ExploitIntelStage(),
         EndpointsStage(
             max_files=scan_max_files,
             max_total_matches=scan_max_matches,

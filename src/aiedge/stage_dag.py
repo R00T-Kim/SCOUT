@@ -43,6 +43,7 @@ STAGE_DEPS: dict[str, frozenset[str]] = {
     "semantic_classification": frozenset({"ghidra_analysis"}),
     "sbom": frozenset({"inventory"}),
     "cve_scan": frozenset({"sbom"}),
+    "exploit_intel": frozenset({"cve_scan"}),
     "reachability": frozenset({"sbom", "ghidra_analysis"}),
     "endpoints": frozenset({"inventory"}),
     "surfaces": frozenset({"endpoints", "inventory"}),
@@ -65,7 +66,7 @@ STAGE_DEPS: dict[str, frozenset[str]] = {
     "poc_refinement": frozenset({"fuzzing", "adversarial_triage"}),
     "chain_construction": frozenset({"adversarial_triage", "graph"}),
     "exploitability_dossier": frozenset(
-        {"attack_surface", "chain_construction", "cve_scan", "firmware_profile", "inventory"}
+        {"attack_surface", "chain_construction", "cve_scan", "exploit_intel", "firmware_profile", "inventory"}
     ),
     "protocol_model": frozenset({"attack_surface", "exploitability_dossier", "inventory"}),
     "exploit_state_machine": frozenset({"exploitability_dossier", "protocol_model"}),
@@ -73,7 +74,7 @@ STAGE_DEPS: dict[str, frozenset[str]] = {
     "primitive_verifier": frozenset({"crash_replay", "exploit_state_machine"}),
     "exploit_gate": frozenset({"chain_construction"}),
     "exploit_chain": frozenset({"exploit_gate"}),
-    "exploit_autopoc": frozenset({"exploit_chain", "exploitability_dossier", "exploit_state_machine"}),
+    "exploit_autopoc": frozenset({"exploit_chain", "exploit_intel", "exploitability_dossier", "exploit_state_machine"}),
     "poc_validation": frozenset({"exploit_autopoc", "exploit_chain"}),
     "exploit_policy": frozenset({"poc_validation"}),
     "compliance_report": frozenset({"exploit_policy", "sbom", "cve_scan"}),

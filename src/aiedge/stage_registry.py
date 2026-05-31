@@ -531,6 +531,18 @@ def _make_cve_scan_stage(
     )
 
 
+def _make_exploit_intel_stage(
+    info: _RunInfoLike,
+    source_input_path: str | None,
+    remaining_s: Callable[[], float],
+    no_llm: bool,
+) -> Stage:
+    from .exploit_intel import ExploitIntelStage
+
+    _ = info, source_input_path, remaining_s, no_llm
+    return ExploitIntelStage()
+
+
 def _make_reachability_stage(
     info: _RunInfoLike,
     source_input_path: str | None,
@@ -753,6 +765,7 @@ _STAGE_FACTORIES: dict[str, StageFactory] = {
     "semantic_classification": _make_semantic_classification_stage,
     "sbom": _make_sbom_stage,
     "cve_scan": _make_cve_scan_stage,
+    "exploit_intel": _make_exploit_intel_stage,
     "reachability": _make_reachability_stage,
     "endpoints": _make_endpoints_stage,
     "surfaces": _make_surfaces_stage,

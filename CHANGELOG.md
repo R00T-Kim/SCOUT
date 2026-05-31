@@ -24,6 +24,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Runtime exploit intelligence seeds**: Added the `exploit_intel` stage, Aqua `vuln-list-update`/NVD enrichment, local `AIEDGE_VULN_LIST_DIR` support, and AutoPoC seed loading so CVEs found during a SCOUT run can pull metadata-only public PoC/advisory context without cloning, executing, or prompt-injecting raw public PoC code.
 - **Private package lint + hash-only vault registry**: Added `./scout weaponization-package lint|register|verify` and `aiedge.weaponization_package` so private controlled weaponization package manifests can be validated, registered, and scope-checked by package hash before gated execution. The registry stores metadata only and never stores exploit payload source.
 - **Gated controlled weaponization executor**: Added `./scout weaponization-execute` and `aiedge.weaponization_execute` to refuse private runner invocation unless Plan IR, preflight, and L6 readiness are valid, then delegate to the existing private plugin runner and write the execution/approval ledger. The wrapper adds product-grade orchestration without adding public payload logic.
 - **Controlled weaponization execution ledger + engagement approval gate**: Added `./scout weaponization-ledger` and `aiedge.weaponization_ledger` to aggregate Plan IR, preflight, readiness, exploit-evidence bundles, cleanup proof, and optional `scout-engagement-approval-v1` metadata into L6/L7 promotion records without loading private exploit source.
