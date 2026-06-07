@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .pair_eval import PairSpec, load_pairs_manifest
 from .phase01_readiness import build_repo_metadata
@@ -252,8 +252,11 @@ def build_phase2_novelty_dossier(
     metadata = build_repo_metadata(root, generated_at=generated_at)
     if phase_start_commit:
         metadata["phase_start_commit"] = phase_start_commit
-    rows = phase1_matrix.get("pairs") if isinstance(phase1_matrix.get("pairs"), list) else []
-    candidates = [_candidate_from_pair(row) for row in rows if isinstance(row, dict)]
+    raw_pairs = phase1_matrix.get("pairs")
+    rows: list[dict[str, Any]] = []
+    if isinstance(raw_pairs, list):
+        rows = [cast(dict[str, Any], row) for row in raw_pairs if isinstance(row, dict)]
+    candidates = [_candidate_from_pair(row) for row in rows]
     missing_required = [
         candidate["candidate_id"]
         for candidate in candidates
