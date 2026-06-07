@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 from aiedge.phase01_readiness import (
+    ArtifactSpec,
     build_artifact_entry,
     build_report_evidence_audit,
-    ArtifactSpec,
 )
 
 

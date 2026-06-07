@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
-import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +11,6 @@ from typing import Any
 
 from .aeg_readiness import build_readiness_report
 from .exploit_rag import evaluate_pattern_evidence
-
 
 DEFAULT_REPORT = Path("docs/scout_zero_day_aeg_develop_plan.md")
 DEFAULT_AEG_READINESS = Path("docs/pov/aeg_platform_readiness.json")
@@ -89,13 +88,21 @@ def _git(repo_root: Path, *args: str) -> str:
 
 def _package_version(repo_root: Path) -> str:
     try:
-        data = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-        project = data.get("project")
-        if isinstance(project, dict):
-            version = project.get("version")
-            return str(version) if version is not None else ""
+        pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
     except Exception:
         return ""
+    in_project = False
+    for line in pyproject.splitlines():
+        stripped = line.strip()
+        if stripped == "[project]":
+            in_project = True
+            continue
+        if in_project and stripped.startswith("["):
+            return ""
+        if in_project:
+            match = re.match(r'version\s*=\s*"([^"]+)"', stripped)
+            if match:
+                return match.group(1)
     return ""
 
 
