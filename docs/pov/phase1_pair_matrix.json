@@ -1,0 +1,450 @@
+{
+  "metadata": {
+    "branch": "main",
+    "commit": "e5722e0c6877952d10eda48521903d70d2a5e6c6",
+    "commit_date": "2026-06-07T23:55:43+09:00",
+    "generated_at": "2026-06-07T15:07:56Z",
+    "package": "scout-firmware",
+    "package_version": "3.0.0rc1",
+    "phase_start_commit": "e5722e0",
+    "repo_root": "/work/10-14_ACTIVE/12_build/12.02_agents/SCOUT"
+  },
+  "pairs": [
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2017-6190",
+      "dedupe_key": "cf590983cd6f52ab57e44a81931132d87581757c570eb5a06eaa93b4af3a8754:8b5d2a8ba245945027bda6d167d8e24ec2bf4dd7352ee4b82d1070d1036eafcd",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "8b5d2a8ba245945027bda6d167d8e24ec2bf4dd7352ee4b82d1070d1036eafcd",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR825B1_FW202SSB15beta01.bin",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "cf590983cd6f52ab57e44a81931132d87581757c570eb5a06eaa93b4af3a8754",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR825B1_FW201SS05_KR_.bin",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "DIR-825 B1",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "dlink-dir825b1-cve-2017-6190",
+      "patched_sha": "8b5d2a8ba245945027bda6d167d8e24ec2bf4dd7352ee4b82d1070d1036eafcd",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "dlink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "cf590983cd6f52ab57e44a81931132d87581757c570eb5a06eaa93b4af3a8754"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2019-6257",
+      "dedupe_key": "459090d3b03829f7292eb30e4954d935e3731f9349a468d2aff5c0846dc9bbe4:4fde7319a72c1d0b0f52995e09cb30e9edc84dd154d16aef5fb44d0aebd39f85",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "4fde7319a72c1d0b0f52995e09cb30e9edc84dd154d16aef5fb44d0aebd39f85",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR825C1_FW304b03.bin",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "459090d3b03829f7292eb30e4954d935e3731f9349a468d2aff5c0846dc9bbe4",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR825C1_FW301B12.bin",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "DIR-825 C1",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "dlink-dir825c1-cve-2019-6257",
+      "patched_sha": "4fde7319a72c1d0b0f52995e09cb30e9edc84dd154d16aef5fb44d0aebd39f85",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "dlink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "459090d3b03829f7292eb30e4954d935e3731f9349a468d2aff5c0846dc9bbe4"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2019-20213",
+      "dedupe_key": "46d9202431eb9bec1538ba6201caae3c0c896b376af86f2131453365a8dc5500:c607f7a90a482b365102242fa256e629708007403b2f7579a6dd1e27f1cf4c01",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "c607f7a90a482b365102242fa256e629708007403b2f7579a6dd1e27f1cf4c01",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR850L_FW115KRb05.bin",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "46d9202431eb9bec1538ba6201caae3c0c896b376af86f2131453365a8dc5500",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR850L_FW105KRb03_d4oi_20130425.bin",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "DIR-850L",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "dlink-dir850l-cve-2019-20213",
+      "patched_sha": "c607f7a90a482b365102242fa256e629708007403b2f7579a6dd1e27f1cf4c01",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "dlink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "46d9202431eb9bec1538ba6201caae3c0c896b376af86f2131453365a8dc5500"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2018-10970",
+      "dedupe_key": "fedabcafcf778da1bcfb7b30a5b544c2ca760572477d947b52f74c6d237b7185:903cdd1ce4c58c7478c348a06398118a212e7c5889130dcc8a6c9bcec7ad5ddf",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "903cdd1ce4c58c7478c348a06398118a212e7c5889130dcc8a6c9bcec7ad5ddf",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR868LWB1_FW200KR-K04.bin",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "fedabcafcf778da1bcfb7b30a5b544c2ca760572477d947b52f74c6d237b7185",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR868LB1_FW200KR-K02.bin",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "DIR-868L",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "dlink-dir868l-cve-2018-10970",
+      "patched_sha": "903cdd1ce4c58c7478c348a06398118a212e7c5889130dcc8a6c9bcec7ad5ddf",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "dlink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "fedabcafcf778da1bcfb7b30a5b544c2ca760572477d947b52f74c6d237b7185"
+    },
+    {
+      "control_fail_reason": "dynamic_fail_closed",
+      "counted_for_phase1_scale": true,
+      "cve_id": "CVE-2017-5521",
+      "dedupe_key": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0:6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": true,
+      "firmware": {
+        "patched": {
+          "actual_sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+          "exists": true,
+          "expected_sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+          "path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.9.34_10.2.36.zip",
+          "sha256_match": true
+        },
+        "vulnerable": {
+          "actual_sha256": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0",
+          "exists": true,
+          "expected_sha256": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0",
+          "path": "aiedge-inputs/firmae-benchmark/netgear/R7000-V1.0.5.70_1.1.91.zip",
+          "sha256_match": true
+        }
+      },
+      "local_firmware_ready": true,
+      "model": "R7000",
+      "next_action": "promoted",
+      "pair_id": "netgear-r7000-cve-2017-5521",
+      "patched_sha": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+      "promotable": true,
+      "real_pair_report": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+      "vendor": "netgear",
+      "verdict": "promotable",
+      "vuln_sha": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2017-13772",
+      "dedupe_key": "8dd10cc985de10e6c4c5a8f8fff737e3f8f9fd6d6e9f7038a06ba21eb1c4cf8f:9982f2318a093a394178638fc6fca8703ec741106696b88b1bc0b4ffad9df10d",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "9982f2318a093a394178638fc6fca8703ec741106696b88b1bc0b4ffad9df10d",
+          "path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_KR__V2_160912_1474960467427z.zip",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "8dd10cc985de10e6c4c5a8f8fff737e3f8f9fd6d6e9f7038a06ba21eb1c4cf8f",
+          "path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_V2_150311_KR.zip",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "Archer C7 v2",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "tplink-archerc7v2-cve-2017-13772",
+      "patched_sha": "9982f2318a093a394178638fc6fca8703ec741106696b88b1bc0b4ffad9df10d",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "tplink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "8dd10cc985de10e6c4c5a8f8fff737e3f8f9fd6d6e9f7038a06ba21eb1c4cf8f"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2019-17152",
+      "dedupe_key": "03c7ac4914b07500c68fcf195a79b85311021dce8b8db92782634329469b22ff:71f633b05ee34a258b1f10dfdc2af489a3f5c556a9f3bceaf79bd317cea15f06",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "71f633b05ee34a258b1f10dfdc2af489a3f5c556a9f3bceaf79bd317cea15f06",
+          "path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_US__V4_180425.zip",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "03c7ac4914b07500c68fcf195a79b85311021dce8b8db92782634329469b22ff",
+          "path": "aiedge-inputs/firmae-benchmark/tplink/Archer_C7_V4_170609.zip",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "Archer C7 v4",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "tplink-archerc7v4-cve-2019-17152",
+      "patched_sha": "71f633b05ee34a258b1f10dfdc2af489a3f5c556a9f3bceaf79bd317cea15f06",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "tplink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "03c7ac4914b07500c68fcf195a79b85311021dce8b8db92782634329469b22ff"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2019-17621",
+      "dedupe_key": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0:0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": "0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664",
+          "exists": true,
+          "expected_sha256": "0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_1.07B03_HOTFIX.zip",
+          "sha256_match": true
+        },
+        "vulnerable": {
+          "actual_sha256": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0",
+          "exists": true,
+          "expected_sha256": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR-859_REVA_FIRMWARE_1.05B03.zip",
+          "sha256_match": true
+        }
+      },
+      "local_firmware_ready": true,
+      "model": "DIR-859 RevA",
+      "next_action": "run_real_pair_gate",
+      "pair_id": "dlink-dir859-cve-2019-17621",
+      "patched_sha": "0c2f16ac3729e6cdc3831f464b9c84b243aefd1dabfcfe086f6ae470d5007664",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "dlink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "cd8a6411fdf5131b96bd932b0e5d554b4df4463d945cb12105cc8299187b30a0"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "DLINK-DIR878-BUFFER-OVERFLOW-HOTFIX",
+      "dedupe_key": "2bcd87ef190497b521c44eec390234e8f49f5b534df32506dbc5004241924bb7:1ecf5f7b8d9a10aafeda2cf303bd427862ce2565cf7df1d4d9e6eaa8592c72c5",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "1ecf5f7b8d9a10aafeda2cf303bd427862ce2565cf7df1d4d9e6eaa8592c72c5",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR-878_REVA_FIRMWARE_v1.30B08_FIX_BUFFER_OVERFLOW_HOTFIX.zip",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "2bcd87ef190497b521c44eec390234e8f49f5b534df32506dbc5004241924bb7",
+          "path": "aiedge-inputs/firmae-benchmark/dlink/DIR-878_REVA_FIRMWARE_v1.30B08.zip",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "DIR-878 RevA",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "dlink-dir878-buffer-overflow-hotfix",
+      "patched_sha": "1ecf5f7b8d9a10aafeda2cf303bd427862ce2565cf7df1d4d9e6eaa8592c72c5",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "dlink",
+      "verdict": "not_evaluated",
+      "vuln_sha": "2bcd87ef190497b521c44eec390234e8f49f5b534df32506dbc5004241924bb7"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "CVE-2020-15498",
+      "dedupe_key": "f83e86d537596b8ccb0e175a5c944d860cdbcf92de0829aece25d9e9a13a47df:6cea0a7a953af29c4af417e2e3b8de9c696aa2548cd27791368024d152693773",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "6cea0a7a953af29c4af417e2e3b8de9c696aa2548cd27791368024d152693773",
+          "path": "aiedge-inputs/firmae-benchmark/asus/FW_RT_AC68U_300438640558.zip",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "f83e86d537596b8ccb0e175a5c944d860cdbcf92de0829aece25d9e9a13a47df",
+          "path": "aiedge-inputs/firmae-benchmark/asus/FW_RT_AC68U_300438432799.zip",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "RT-AC68U",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "asus-rtac68u-cve-2020-15498",
+      "patched_sha": "6cea0a7a953af29c4af417e2e3b8de9c696aa2548cd27791368024d152693773",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "asus",
+      "verdict": "not_evaluated",
+      "vuln_sha": "f83e86d537596b8ccb0e175a5c944d860cdbcf92de0829aece25d9e9a13a47df"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "LINKSYS-WRT1900ACV2-PROGRESSION-2.0.8-2.0.9",
+      "dedupe_key": "6fc0f0db2d6870b9bd56d0549536c8baa78473d1091956d18a73fb033b212693:019ac476a7a0462baedfb85bb3de1a0fd314aa937f681468aa708ad9e1e66405",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "019ac476a7a0462baedfb85bb3de1a0fd314aa937f681468aa708ad9e1e66405",
+          "path": "aiedge-inputs/firmae-benchmark/linksys/237fbe6f8471b78843b8506cf9782722.img",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "6fc0f0db2d6870b9bd56d0549536c8baa78473d1091956d18a73fb033b212693",
+          "path": "aiedge-inputs/firmae-benchmark/linksys/9735ddc4661487aee1c1a57d851dd6bb.img",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "WRT1900AC v2",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "linksys-wrt1900acv2-progression",
+      "patched_sha": "019ac476a7a0462baedfb85bb3de1a0fd314aa937f681468aa708ad9e1e66405",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "linksys",
+      "verdict": "not_evaluated",
+      "vuln_sha": "6fc0f0db2d6870b9bd56d0549536c8baa78473d1091956d18a73fb033b212693"
+    },
+    {
+      "control_fail_reason": "not_evaluated",
+      "counted_for_phase1_scale": false,
+      "cve_id": "LINKSYS-EA6700-PROGRESSION-1.1.40-1.1.41",
+      "dedupe_key": "b933ab7e90979379368ac0edced22319f8813a0f4aff9f8abd372b738ee3e2ef:072e35e5ec2ce061001992644d83f267c3aea08c622311dd56b44f43b2663394",
+      "dedupe_key_scope": "firmware-package-sha-pair",
+      "duplicate_firmware_sha_pair": false,
+      "emulation_ready": null,
+      "firmware": {
+        "patched": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "072e35e5ec2ce061001992644d83f267c3aea08c622311dd56b44f43b2663394",
+          "path": "aiedge-inputs/firmae-benchmark/linksys/FW_EA6700_1.1.41.183873_prod.img",
+          "sha256_match": false
+        },
+        "vulnerable": {
+          "actual_sha256": null,
+          "exists": false,
+          "expected_sha256": "b933ab7e90979379368ac0edced22319f8813a0f4aff9f8abd372b738ee3e2ef",
+          "path": "aiedge-inputs/firmae-benchmark/linksys/FW_EA6700_1.1.40.176451_prod.img",
+          "sha256_match": false
+        }
+      },
+      "local_firmware_ready": false,
+      "model": "EA6700",
+      "next_action": "source_firmware_artifacts",
+      "pair_id": "linksys-ea6700-progression",
+      "patched_sha": "072e35e5ec2ce061001992644d83f267c3aea08c622311dd56b44f43b2663394",
+      "promotable": false,
+      "real_pair_report": null,
+      "vendor": "linksys",
+      "verdict": "not_evaluated",
+      "vuln_sha": "b933ab7e90979379368ac0edced22319f8813a0f4aff9f8abd372b738ee3e2ef"
+    }
+  ],
+  "policy": {
+    "control_environment_fail_policy": "service_unreachable/control artifacts missing means environment_unverified, not patched-clean.",
+    "dedupe_policy": "Pairs with identical vulnerable+patched firmware SHA tuple count once for scale targets.",
+    "phase1_scale_target_real_pairs": 3
+  },
+  "schema_version": "scout-phase1-pair-matrix-v1",
+  "status": "phase1-in-progress",
+  "summary": {
+    "local_firmware_pair_ready_count": 2,
+    "next_pair_run_queue": [
+      "dlink-dir859-cve-2019-17621"
+    ],
+    "pair_corpus_size": 12,
+    "phase1_scale_target_met": false,
+    "promotable_real_pair_count": 1
+  }
+}

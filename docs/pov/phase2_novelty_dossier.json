@@ -1,0 +1,316 @@
+{
+  "candidates": [
+    {
+      "candidate_id": "known_or_one_day:dlink-dir825b1-cve-2017-6190",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2017-6190",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "DIR-825 B1",
+      "pair_id": "dlink-dir825b1-cve-2017-6190",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "dlink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:dlink-dir825c1-cve-2019-6257",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2019-6257",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "DIR-825 C1",
+      "pair_id": "dlink-dir825c1-cve-2019-6257",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "dlink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:dlink-dir850l-cve-2019-20213",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2019-20213",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "DIR-850L",
+      "pair_id": "dlink-dir850l-cve-2019-20213",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "dlink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:dlink-dir868l-cve-2018-10970",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2018-10970",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "DIR-868L",
+      "pair_id": "dlink-dir868l-cve-2018-10970",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "dlink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:netgear-r7000-cve-2017-5521",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2017-5521",
+      "dynamic_reachability": "L5_lab_dynamic_proof",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "R7000",
+      "pair_id": "netgear-r7000-cve-2017-5521",
+      "pattern_seed_used": true,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "netgear",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:tplink-archerc7v2-cve-2017-13772",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2017-13772",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "Archer C7 v2",
+      "pair_id": "tplink-archerc7v2-cve-2017-13772",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "tplink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:tplink-archerc7v4-cve-2019-17152",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2019-17152",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "Archer C7 v4",
+      "pair_id": "tplink-archerc7v4-cve-2019-17152",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "tplink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:dlink-dir859-cve-2019-17621",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2019-17621",
+      "dynamic_reachability": "queued_pair_dynamic_gate",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "DIR-859 RevA",
+      "pair_id": "dlink-dir859-cve-2019-17621",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "dlink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:dlink-dir878-buffer-overflow-hotfix",
+      "classification": "known_or_one_day",
+      "cve_id": "DLINK-DIR878-BUFFER-OVERFLOW-HOTFIX",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": false,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "DIR-878 RevA",
+      "pair_id": "dlink-dir878-buffer-overflow-hotfix",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "dlink",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:asus-rtac68u-cve-2020-15498",
+      "classification": "known_or_one_day",
+      "cve_id": "CVE-2020-15498",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": true,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "RT-AC68U",
+      "pair_id": "asus-rtac68u-cve-2020-15498",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "asus",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:linksys-wrt1900acv2-progression",
+      "classification": "known_or_one_day",
+      "cve_id": "LINKSYS-WRT1900ACV2-PROGRESSION-2.0.8-2.0.9",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": false,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "WRT1900AC v2",
+      "pair_id": "linksys-wrt1900acv2-progression",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "linksys",
+      "zero_day_eligible": false
+    },
+    {
+      "candidate_id": "known_or_one_day:linksys-ea6700-progression",
+      "classification": "known_or_one_day",
+      "cve_id": "LINKSYS-EA6700-PROGRESSION-1.1.40-1.1.41",
+      "dynamic_reachability": "not_evaluated_missing_firmware",
+      "exclusion_reason": "known_or_seeded_overlap",
+      "known_cve_overlap": false,
+      "lineage_delta": "firmware_sha_delta_present",
+      "model": "EA6700",
+      "pair_id": "linksys-ea6700-progression",
+      "pattern_seed_used": false,
+      "public_advisory_overlap": true,
+      "source_taxonomy": [
+        "config_derived_input",
+        "cgi_environment",
+        "nvram_getter",
+        "shell_script_variable_expansion"
+      ],
+      "vendor": "linksys",
+      "zero_day_eligible": false
+    }
+  ],
+  "claim_boundary": "Known CVE/advisory/pattern-seeded candidates are tracked as one-day or validation seeds and excluded from zero-day KPIs.",
+  "dashboard": {
+    "candidate_count": 12,
+    "family_channel_target_met": false,
+    "known_or_one_day_count": 12,
+    "unknown_hypothesis_count": 0,
+    "zero_day_kpi_count": 0
+  },
+  "metadata": {
+    "branch": "main",
+    "commit": "e5722e0c6877952d10eda48521903d70d2a5e6c6",
+    "commit_date": "2026-06-07T23:55:43+09:00",
+    "generated_at": "2026-06-07T15:07:56Z",
+    "package": "scout-firmware",
+    "package_version": "3.0.0rc1",
+    "phase_start_commit": "e5722e0",
+    "repo_root": "/work/10-14_ACTIVE/12_build/12.02_agents/SCOUT"
+  },
+  "next_actions": [
+    "Run queued local Phase 1 pairs through real_firmware_pair_gate before counting scale progress.",
+    "Generate unknown candidates from firmware lineage/source-sink evidence, not from known CVE or public PoC seeds.",
+    "Promote only candidates with dynamic_reachability evidence or an explicit gap dossier."
+  ],
+  "promotion_gates": [
+    {
+      "failed_candidates": [],
+      "name": "required_novelty_fields_present",
+      "passed": true
+    },
+    {
+      "name": "known_overlap_excluded_from_zero_day_kpi",
+      "passed": true
+    },
+    {
+      "failed_candidates": [],
+      "name": "dynamic_reachability_required_for_unknown_shortlist",
+      "passed": true
+    },
+    {
+      "blocking": false,
+      "message": "Phase 2 lane is active, but the 3-family/channel unknown hypothesis target still needs new non-overlap candidates.",
+      "name": "three_family_channel_unknown_target",
+      "passed": false
+    }
+  ],
+  "required_candidate_fields": [
+    "known_cve_overlap",
+    "public_advisory_overlap",
+    "pattern_seed_used",
+    "lineage_delta",
+    "dynamic_reachability"
+  ],
+  "schema_version": "scout-zero-day-novelty-dossier-v1",
+  "source_taxonomy": [
+    "config_derived_input",
+    "cgi_environment",
+    "nvram_getter",
+    "shell_script_variable_expansion"
+  ],
+  "status": "phase2-started-known-unknown-split-active"
+}
