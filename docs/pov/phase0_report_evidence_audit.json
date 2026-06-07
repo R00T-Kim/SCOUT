@@ -1,0 +1,100 @@
+{
+  "artifact": {
+    "evidence_tier": "S0",
+    "exists": true,
+    "path": "docs/scout_zero_day_aeg_develop_plan.md",
+    "release_claim": false,
+    "release_claim_allowed": false,
+    "role": "phase0_phase1_report",
+    "sha256": "3d5f93b65a07479bac7e92651748e76c2b5fe1dfd46cdb541ed84c1c3de8231f"
+  },
+  "checks": [
+    {
+      "message": "Phase 0/1 report must exist.",
+      "name": "report_exists",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain report_date marker.",
+      "name": "report_contains_report_date",
+      "needle": "작성일: 2026-06-07 KST",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain update_date marker.",
+      "name": "report_contains_update_date",
+      "needle": "작성/반영일: 2026-06-07 KST",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain version_name marker.",
+      "name": "report_contains_version_name",
+      "needle": "scout-firmware 3.0.0rc1",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain version_tag marker.",
+      "name": "report_contains_version_tag",
+      "needle": "v3.0.0-rc1",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain commit marker.",
+      "name": "report_contains_commit",
+      "needle": "a7891f0",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain evidence_tier_s0 marker.",
+      "name": "report_contains_evidence_tier_s0",
+      "needle": "S0",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain evidence_tier_s1 marker.",
+      "name": "report_contains_evidence_tier_s1",
+      "needle": "S1",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain stale_artifact_policy marker.",
+      "name": "report_contains_stale_artifact_policy",
+      "needle": "stale",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain promotion_gate marker.",
+      "name": "report_contains_promotion_gate",
+      "needle": "승격 게이트",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain phase0 marker.",
+      "name": "report_contains_phase0",
+      "needle": "P0 Evidence Ledger",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    },
+    {
+      "message": "Report must contain phase1 marker.",
+      "name": "report_contains_phase1",
+      "needle": "P1 Pair Benchmark Floor",
+      "passed": true,
+      "path": "docs/scout_zero_day_aeg_develop_plan.md"
+    }
+  ],
+  "passed": true,
+  "report": "docs/scout_zero_day_aeg_develop_plan.md",
+  "schema_version": "scout-report-evidence-audit-v1",
+  "verdict": "pass"
+}

@@ -1,0 +1,401 @@
+{
+  "blocked_reasons": [],
+  "metadata": {
+    "branch": "main",
+    "commit": "a7891f029f6ecda8d6d4d36b411add45b849262f",
+    "commit_date": "2026-06-01T11:43:22+09:00",
+    "generated_at": "2026-06-07T14:44:47Z",
+    "package": "scout-firmware",
+    "package_version": "3.0.0rc1",
+    "repo_root": "/work/10-14_ACTIVE/12_build/12.02_agents/SCOUT"
+  },
+  "phase0": {
+    "artifacts": [
+      {
+        "evidence_tier": "S0",
+        "exists": true,
+        "path": "docs/scout_zero_day_aeg_develop_plan.md",
+        "release_claim": false,
+        "release_claim_allowed": false,
+        "role": "phase0_phase1_report",
+        "sha256": "3d5f93b65a07479bac7e92651748e76c2b5fe1dfd46cdb541ed84c1c3de8231f"
+      },
+      {
+        "evidence_tier": "S1",
+        "exists": true,
+        "path": "docs/pov/aeg_platform_readiness.json",
+        "release_claim": true,
+        "release_claim_allowed": true,
+        "role": "aeg_platform_readiness",
+        "sha256": "c2b68d3c01e01c89f4aa19f4ebf1f3592055a6875b8936262d26ba00ce4d6c46"
+      },
+      {
+        "evidence_tier": "S1",
+        "exists": true,
+        "path": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+        "release_claim": true,
+        "release_claim_allowed": true,
+        "role": "stable_real_firmware_pair",
+        "sha256": "138683659e9a15298f5c3fe6f7ae16366aeb95da495c70e868a3ff7c6f616086"
+      }
+    ],
+    "checks": [
+      {
+        "message": "Report includes mandatory date/version/commit/evidence-tier markers.",
+        "name": "report_evidence_audit_passed",
+        "passed": true
+      },
+      {
+        "blocked_artifacts": [],
+        "message": "Release-facing artifacts must exist and be S0/S1 only.",
+        "name": "release_artifacts_exist_and_are_s1_or_better",
+        "passed": true
+      }
+    ],
+    "ready": true,
+    "report_audit": {
+      "artifact": {
+        "evidence_tier": "S0",
+        "exists": true,
+        "path": "docs/scout_zero_day_aeg_develop_plan.md",
+        "release_claim": false,
+        "release_claim_allowed": false,
+        "role": "phase0_phase1_report",
+        "sha256": "3d5f93b65a07479bac7e92651748e76c2b5fe1dfd46cdb541ed84c1c3de8231f"
+      },
+      "checks": [
+        {
+          "message": "Phase 0/1 report must exist.",
+          "name": "report_exists",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain report_date marker.",
+          "name": "report_contains_report_date",
+          "needle": "작성일: 2026-06-07 KST",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain update_date marker.",
+          "name": "report_contains_update_date",
+          "needle": "작성/반영일: 2026-06-07 KST",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain version_name marker.",
+          "name": "report_contains_version_name",
+          "needle": "scout-firmware 3.0.0rc1",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain version_tag marker.",
+          "name": "report_contains_version_tag",
+          "needle": "v3.0.0-rc1",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain commit marker.",
+          "name": "report_contains_commit",
+          "needle": "a7891f0",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain evidence_tier_s0 marker.",
+          "name": "report_contains_evidence_tier_s0",
+          "needle": "S0",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain evidence_tier_s1 marker.",
+          "name": "report_contains_evidence_tier_s1",
+          "needle": "S1",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain stale_artifact_policy marker.",
+          "name": "report_contains_stale_artifact_policy",
+          "needle": "stale",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain promotion_gate marker.",
+          "name": "report_contains_promotion_gate",
+          "needle": "승격 게이트",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain phase0 marker.",
+          "name": "report_contains_phase0",
+          "needle": "P0 Evidence Ledger",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        },
+        {
+          "message": "Report must contain phase1 marker.",
+          "name": "report_contains_phase1",
+          "needle": "P1 Pair Benchmark Floor",
+          "passed": true,
+          "path": "docs/scout_zero_day_aeg_develop_plan.md"
+        }
+      ],
+      "passed": true,
+      "report": "docs/scout_zero_day_aeg_develop_plan.md",
+      "schema_version": "scout-report-evidence-audit-v1",
+      "verdict": "pass"
+    }
+  },
+  "phase1": {
+    "aeg_readiness": {
+      "blocked_reasons": [],
+      "checks": [
+        {
+          "message": "Exploit Pattern RAG must contain curated pattern cards.",
+          "name": "curated_pattern_cards_present",
+          "passed": true,
+          "pattern_count": 4
+        },
+        {
+          "message": "Every curated pattern card must have vulnerable/control pair evidence for platform readiness.",
+          "missing_pair_evidence": [],
+          "name": "curated_patterns_pair_validated",
+          "passed": true,
+          "require_all_patterns": true
+        },
+        {
+          "message": "At least one known-vulnerable/patched real firmware pair must be validated.",
+          "min_real_firmware_pairs": 1,
+          "name": "real_firmware_pair_floor",
+          "passed": true,
+          "real_firmware_pair_validated": 1
+        },
+        {
+          "message": "Pattern cards must expose real_firmware_pair evidence items, not only aggregate counters.",
+          "min_real_firmware_pairs": 1,
+          "name": "real_firmware_pair_evidence_items_present",
+          "passed": true,
+          "real_firmware_pair_evidence_items": 1
+        },
+        {
+          "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+          "message": "stable real firmware pair report must be promotable and use the expected schema.",
+          "name": "real_firmware_evidence_artifact_promotable",
+          "passed": true,
+          "pattern_id": "netgear_passwordrecovered_auth_bypass",
+          "verdict": "promotable"
+        },
+        {
+          "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+          "evidence_target_family": "netgear_passwordrecovered_auth_bypass",
+          "message": "stable report and pattern-card evidence must bind to the same pattern family.",
+          "name": "real_firmware_evidence_pattern_binding",
+          "passed": true,
+          "pattern_id": "netgear_passwordrecovered_auth_bypass",
+          "report_pattern_id": "netgear_passwordrecovered_auth_bypass"
+        },
+        {
+          "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+          "message": "pattern-card firmware hashes must match the stable pair report and local firmware status must be hash-matched when present.",
+          "name": "real_firmware_evidence_sha_binding",
+          "passed": true,
+          "pattern_id": "netgear_passwordrecovered_auth_bypass"
+        },
+        {
+          "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+          "message": "vulnerable firmware must pass and patched/control firmware must fail a dynamic proof check.",
+          "name": "real_firmware_evidence_fail_closed_pair",
+          "passed": true,
+          "patched_dynamic_failed_checks": [
+            "autopoc_runner_pass",
+            "poc_validation_reproducible",
+            "verified_chain_pass"
+          ],
+          "pattern_id": "netgear_passwordrecovered_auth_bypass"
+        }
+      ],
+      "pattern_evidence": {
+        "missing_pair_evidence": [],
+        "passed": true,
+        "pattern_count": 4,
+        "patterns": [
+          {
+            "bridge_channel": "direct_request",
+            "entry_channel": "web_api",
+            "family": "cmd_injection",
+            "id": "cgi_param_cmd_injection",
+            "pair_validated": true,
+            "real_firmware_pair_validated": false,
+            "synthetic_pair_validated": true,
+            "trigger_model": "direct_request",
+            "validation_evidence": [
+              {
+                "artifact": "scripts/run_aeg_synthetic_pair.py --pattern cgi_param_cmd_injection",
+                "control_gate_failed": true,
+                "evidence_id": "synthetic_cgi_param_cmd_injection_pair",
+                "kind": "synthetic_pair",
+                "notes": "Loopback vulnerable CGI command-injection profile returns uid= shell readback for bounded cmd probes while patched/control accepts the same probes without shell readback; patched/control fails runner, PoC validation, verified-chain, FPR, and FP checks.",
+                "status": "pass",
+                "vulnerable_gate_passed": true
+              }
+            ]
+          },
+          {
+            "bridge_channel": "config",
+            "entry_channel": "web_api",
+            "family": "cmd_injection",
+            "id": "config_derived_cmd_injection",
+            "pair_validated": true,
+            "real_firmware_pair_validated": false,
+            "synthetic_pair_validated": true,
+            "trigger_model": "delayed_parse",
+            "validation_evidence": [
+              {
+                "artifact": "scripts/run_aeg_synthetic_pair.py --pattern config_derived_cmd_injection",
+                "control_gate_failed": true,
+                "evidence_id": "synthetic_config_derived_cmd_injection_pair",
+                "kind": "synthetic_pair",
+                "notes": "Loopback config-derived command-injection profile seeds web_api -> config -> delayed_parse evidence and returns uid= shell readback on the vulnerable target while patched/control accepts probes without shell readback; patched/control fails runner, PoC validation, verified-chain, FPR, and FP checks.",
+                "status": "pass",
+                "vulnerable_gate_passed": true
+              }
+            ]
+          },
+          {
+            "bridge_channel": "direct_request",
+            "entry_channel": "web_api",
+            "family": "memory_corruption_candidate",
+            "id": "memory_stateful_probe",
+            "pair_validated": true,
+            "real_firmware_pair_validated": false,
+            "synthetic_pair_validated": true,
+            "trigger_model": "direct_request",
+            "validation_evidence": [
+              {
+                "artifact": "scripts/run_aeg_synthetic_pair.py",
+                "control_gate_failed": true,
+                "evidence_id": "synthetic_memory_stateful_probe_pair",
+                "kind": "synthetic_pair",
+                "notes": "Loopback vulnerable service returns SCOUT_LEAK while patched/control accepts the same probes without leaking; the patched/control gate fails runner, PoC validation, verified-chain, FPR, and FP checks.",
+                "status": "pass",
+                "vulnerable_gate_passed": true
+              }
+            ]
+          },
+          {
+            "bridge_channel": "http_cgi_handler",
+            "entry_channel": "web_api",
+            "family": "auth_bypass",
+            "id": "netgear_passwordrecovered_auth_bypass",
+            "pair_validated": true,
+            "real_firmware_pair_validated": true,
+            "synthetic_pair_validated": false,
+            "trigger_model": "direct_request_to_password_recovery_cgi",
+            "validation_evidence": [
+              {
+                "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+                "control_firmware_sha256": "6309264efce04ae651adb34bf7697089b273ebc6100ba2e78b0c1bf10e89281e",
+                "control_gate": {
+                  "failed_checks": [
+                    "autopoc_runner_pass",
+                    "poc_validation_reproducible",
+                    "verified_chain_pass"
+                  ],
+                  "passed": false,
+                  "schema_version": "aeg-e2e-gate-v1",
+                  "verdict": "fail"
+                },
+                "control_gate_failed": true,
+                "control_run_dir": "aiedge-runs/2026-05-20_2150_sha256-6309264efce0",
+                "cve": "CVE-2017-5521",
+                "evidence_id": "netgear_r7000_cve_2017_5521_real_pair",
+                "kind": "real_firmware_pair",
+                "notes": "Netgear R7000 V1.0.5.70 known-vulnerable firmware passes the AEG dynamic/FP gate via pair-bound qemu-user httpd handler evidence while V1.0.9.34 patched/control fails the AutoPoC, PoC validation, and verified-chain dynamic checks.",
+                "status": "pass",
+                "target_family": "netgear_passwordrecovered_auth_bypass",
+                "vulnerable_firmware_sha256": "c025ce21eabc4908caa9a4932f373174450df99662c66f388790e316b326cbc0",
+                "vulnerable_gate": {
+                  "failed_checks": [],
+                  "passed": true,
+                  "schema_version": "aeg-e2e-gate-v1",
+                  "verdict": "pass"
+                },
+                "vulnerable_gate_passed": true,
+                "vulnerable_run_dir": "aiedge-runs/2026-05-20_2222_sha256-c025ce21eabc"
+              }
+            ]
+          }
+        ],
+        "real_firmware_pair_validated": 1,
+        "schema_version": "exploit-pattern-evidence-report-v1",
+        "synthetic_pair_validated": 3
+      },
+      "policy": {
+        "min_real_firmware_pairs": 1,
+        "require_all_patterns": true
+      },
+      "ready": true,
+      "schema_version": "aeg-platform-readiness-v1",
+      "verdict": "platform-ready"
+    },
+    "checks": [
+      {
+        "message": "AEG platform readiness must pass with curated pattern and real-pair evidence.",
+        "name": "aeg_platform_readiness_passed",
+        "passed": true
+      },
+      {
+        "message": "At least 1 promotable real pair(s) must exist.",
+        "name": "minimum_real_pair_floor_met",
+        "passed": true,
+        "promotable_real_pairs": 1
+      },
+      {
+        "message": "Phase 1 scale target is 3 promotable real pairs; this is tracked separately from the minimum Phase 2 entry floor.",
+        "name": "phase1_scale_target_met",
+        "passed": false,
+        "promotable_real_pairs": 1,
+        "target": 3
+      }
+    ],
+    "minimum_ready": true,
+    "pair_matrix": [
+      {
+        "artifact": "docs/pov/netgear-r7000-cve-2017-5521_real_pair.json",
+        "control_dynamic_failed_checks": [
+          "autopoc_runner_pass",
+          "poc_validation_reproducible",
+          "verified_chain_pass"
+        ],
+        "control_gate_passed": false,
+        "cve_id": "CVE-2017-5521",
+        "evidence_id": null,
+        "exists": true,
+        "pair_id": "netgear-r7000-cve-2017-5521",
+        "pattern_id": "netgear_passwordrecovered_auth_bypass",
+        "promotable": true,
+        "verdict": "promotable",
+        "vulnerable_gate_passed": true
+      }
+    ],
+    "promotable_real_pair_count": 1,
+    "scale_target_met": false
+  },
+  "phase2_entry_ready": true,
+  "policy": {
+    "min_real_firmware_pairs_for_phase2_entry": 1,
+    "phase1_scale_target_is_blocking": false,
+    "phase1_scale_target_real_pairs": 3,
+    "stale_release_claim_policy": "S2/S3 artifacts may be recorded but cannot support release-facing claims."
+  },
+  "schema_version": "scout-phase0-phase1-readiness-v1",
+  "verdict": "phase2-entry-ready"
+}
