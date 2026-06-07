@@ -572,7 +572,66 @@ KPI:
 | 5 | P4 pattern corpus는 card 수보다 evidence-backed diversity 우선 | 20개 card라도 synthetic/control/real pair evidence가 없으면 AEG 일반화 주장에 약하다. |
 | 6 | P5 SCOUT-W는 L5 evidence가 안정화된 뒤 private package readiness로 제한 | 안전 경계와 제품 신뢰도를 위해 public payload 없는 manifest/hash/ledger 중심으로만 승격한다. |
 
-## 8. 결론
+## 8. Phase 1/2 진행 반영 — 2026-06-07 KST
+
+기준 버전은 `scout-firmware 3.0.0rc1` / `v3.0.0-rc1`이며, 기준 main commit은 PR #15 merge commit `e5722e0`이다. 이 섹션은 Phase 0/1 readiness merge 이후 같은 보고서에 이어 붙인 실행 업데이트다.
+
+### 8.1 Phase 1 실행 업데이트
+
+신규 산출물:
+
+- `src/aiedge/phase12_progress.py`
+- `scripts/build_phase1_phase2_progress.py`
+- `docs/pov/phase1_pair_matrix.json`
+- `docs/phase1_phase2_progress.md`
+
+`docs/pov/phase1_pair_matrix.json`은 `benchmarks/pair-eval/pairs.json`의 12개 pair를 다음 기준으로 재정렬한다.
+
+- `vuln_sha`, `patched_sha`를 명시한다.
+- local firmware file 존재 여부와 SHA match를 기록한다.
+- real-pair report가 있으면 `control_fail_reason`과 `emulation_ready`를 기록한다.
+- 같은 vulnerable/patched firmware SHA tuple은 `dedupe_key`로 묶어 scale target 중복 집계를 막는다.
+
+현재 Phase 1 실행 결과:
+
+| 항목 | 값 |
+| --- | --- |
+| pair corpus size | 12 |
+| local firmware pair ready | 2 |
+| promotable real pair | 1 |
+| Phase 1 scale target | 3 |
+| scale target met | false |
+| next run queue | `dlink-dir859-cve-2019-17621` |
+
+해석: Phase 1은 Phase 2 진입 최소 floor는 이미 통과했지만, scale target 3개는 아직 미충족이다. 이번 업데이트는 다음 pair를 추측이 아니라 local artifact/SHA 상태 기반 queue로 고정했다.
+
+### 8.2 Phase 2 실행 업데이트
+
+신규 산출물:
+
+- `docs/pov/phase2_novelty_dossier.json`
+
+`docs/pov/phase2_novelty_dossier.json`은 zero-day KPI에 known CVE, public advisory, pattern seed 기반 후보가 섞이지 않도록 다음 필드를 모든 candidate에 강제한다.
+
+- `known_cve_overlap`
+- `public_advisory_overlap`
+- `pattern_seed_used`
+- `lineage_delta`
+- `dynamic_reachability`
+
+현재 Phase 2 실행 결과:
+
+| 항목 | 값 |
+| --- | --- |
+| candidate count | 12 |
+| known/one-day count | 12 |
+| unknown hypothesis count | 0 |
+| zero-day KPI count | 0 |
+| 3-family/channel unknown target | false |
+
+해석: Phase 2는 unknown 후보를 과장해서 주장하지 않는다. 먼저 known-CVE/one-day/pattern-seeded 후보를 zero-day KPI에서 배제하는 dashboard와 gate를 만들었다. 다음 작업은 firmware lineage와 source→sink evidence에서 public advisory overlap이 없는 unknown candidate를 생성하고, dynamic reachability 또는 gap dossier로 승격하는 것이다.
+
+## 9. 결론
 
 SCOUT의 현재 강점은 “많이 찾는다”보다 **증거를 남기고, gate를 통과한 exploitability만 승격한다**는 점이다. 현재 코드로 재검증한 R7000 real firmware pair와 fresh synthetic pair 3종은 AEG gate의 핵심 구조가 작동함을 보여준다.
 
