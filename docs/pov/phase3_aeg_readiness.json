@@ -1,0 +1,129 @@
+{
+  "baseline_version": {
+    "artifact_date": "2026-06-08 KST",
+    "package": "scout-firmware",
+    "package_version": "3.0.0rc1",
+    "release_tag": "v3.0.0-rc1"
+  },
+  "checks": [
+    {
+      "name": "plan_ir_contract_required_fields",
+      "observed": [
+        "backend_plan",
+        "cleanup",
+        "execution",
+        "gate",
+        "preconditions",
+        "primitive",
+        "scope",
+        "target_profile",
+        "verification"
+      ],
+      "passed": true,
+      "required": [
+        "backend_plan",
+        "cleanup",
+        "execution",
+        "gate",
+        "preconditions",
+        "primitive",
+        "scope",
+        "target_profile",
+        "verification"
+      ]
+    },
+    {
+      "name": "candidate_selection_family_diversity_and_plan_ir_weighting",
+      "passed": true,
+      "probe": {
+        "families": [
+          "auth_or_credential",
+          "command_execution",
+          "file_or_path"
+        ],
+        "family_diverse": true,
+        "plan_ir_candidate_selected": true,
+        "selected_ids": [
+          "auth-a",
+          "cmd-a",
+          "path-a"
+        ]
+      }
+    },
+    {
+      "autopoc_variants": [
+        "baseline",
+        "cold_start",
+        "reboot",
+        "service_restart"
+      ],
+      "name": "reliability_variants_added",
+      "passed": true,
+      "runner_contract": {
+        "exists": true,
+        "has_cli_flag": true,
+        "has_run_exploit": true,
+        "reliability_variants": [
+          "baseline",
+          "cold_start",
+          "reboot",
+          "service_restart"
+        ]
+      }
+    },
+    {
+      "name": "backend_redundancy_map",
+      "observed": [
+        "full_system_emulation",
+        "hardware_in_loop",
+        "qemu_user",
+        "service_harness"
+      ],
+      "passed": true,
+      "required": [
+        "full_system_emulation",
+        "hardware_in_loop",
+        "qemu_user",
+        "service_harness"
+      ]
+    },
+    {
+      "name": "runner_failure_taxonomy_complete",
+      "observed": [
+        "environment",
+        "false_hypothesis",
+        "harness",
+        "passed",
+        "payload",
+        "precondition"
+      ],
+      "passed": true,
+      "probe": {
+        "sample_category": "precondition",
+        "sample_reason_codes": [
+          "blocked_by_unsolved_preconditions"
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "branch": "codex/phase3-aeg-plan-ir-20260608",
+    "commit": "1955ac3185a168111d5995560728f89cba1fdfc7",
+    "commit_date": "2026-06-08T00:27:12+09:00",
+    "generated_at": "2026-06-08T01:47:52Z",
+    "package": "scout-firmware",
+    "package_version": "3.0.0rc1",
+    "phase_start_commit": "1955ac3185a168111d5995560728f89cba1fdfc7",
+    "repo_root": "/work/10-14_ACTIVE/12_build/12.02_agents/SCOUT"
+  },
+  "phase": "Phase 3 — AEG robustness and Plan IR 중심화",
+  "phase3_contract_version": "scout-aeg-phase3-plan-ir-contract-v1",
+  "phase3_ready": true,
+  "policy": {
+    "failure_taxonomy_policy": "all runner_nonpass outcomes require payload/precondition/harness/false_hypothesis/environment reason category",
+    "reliability_policy": "baseline plus cold_start/service_restart/reboot variants are represented in Plan IR and runner evidence bundles",
+    "selection_policy": "priority + Plan IR presence + proof feasibility + family diversity"
+  },
+  "schema_version": "scout-phase3-aeg-readiness-v1",
+  "verdict": "phase3-complete"
+}

@@ -631,7 +631,41 @@ KPI:
 
 해석: Phase 2는 unknown 후보를 과장해서 주장하지 않는다. 먼저 known-CVE/one-day/pattern-seeded 후보를 zero-day KPI에서 배제하는 dashboard와 gate를 만들었다. 다음 작업은 firmware lineage와 source→sink evidence에서 public advisory overlap이 없는 unknown candidate를 생성하고, dynamic reachability 또는 gap dossier로 승격하는 것이다.
 
-## 9. 결론
+
+## 9. Phase 3 완료 반영 — 2026-06-08 KST
+
+기준 버전은 `scout-firmware 3.0.0rc1` / `v3.0.0-rc1`이며, Phase 3 시작 기준 main commit은 PR #16 merge commit `1955ac3185a168111d5995560728f89cba1fdfc7`이다. 이 섹션은 Phase 1/2 진행 반영 이후 같은 보고서에 이어 붙인 Phase 3 실행 업데이트다.
+
+신규 산출물:
+
+- `src/aiedge/phase3_readiness.py`
+- `scripts/build_phase3_aeg_readiness.py`
+- `docs/pov/phase3_aeg_readiness.json`
+- `docs/phase3_aeg_plan_ir.md`
+
+Phase 3 구현 반영:
+
+- AutoPoC candidate마다 `scout-aeg-phase3-plan-ir-contract-v1` Plan IR를 생성/정규화한다.
+- Plan IR 필수 필드는 `scope`, `target_profile`, `primitive`, `preconditions`, `execution`, `verification`, `cleanup`, `gate`, `backend_plan`이다.
+- candidate selection은 `priority + Plan IR presence + proof feasibility + family diversity` 순으로 보정되어 top-N이 같은 family에 collapse되지 않는다.
+- runner와 Plan IR 모두 `baseline`, `cold_start`, `service_restart`, `reboot` reliability variant를 기록한다.
+- backend map은 `service_harness`, `qemu_user`, `full_system_emulation`, `hardware_in_loop`을 명시한다.
+- runner nonpass는 `payload`, `precondition`, `harness`, `false_hypothesis`, `environment` taxonomy로 분류되고 summary coverage로 기록된다.
+
+현재 Phase 3 readiness 결과:
+
+| 항목 | 값 |
+| --- | --- |
+| artifact | `docs/pov/phase3_aeg_readiness.json` |
+| schema | `scout-phase3-aeg-readiness-v1` |
+| contract | `scout-aeg-phase3-plan-ir-contract-v1` |
+| phase3_ready | `true` |
+| verdict | `phase3-complete` |
+| artifact date | `2026-06-08 KST` |
+
+해석: Phase 3는 AutoPoC/runner contract 관점에서 완료되었다. 즉 Plan IR input contract, family-diverse selection, reliability variant evidence, backend redundancy map, nonpass failure taxonomy가 repo-local readiness artifact로 증명된다. 단, broad real-firmware pass-rate 일반화는 Phase 1 scale-out과 Phase 4 corpus expansion 이후 별도 측정해야 한다.
+
+## 10. 결론
 
 SCOUT의 현재 강점은 “많이 찾는다”보다 **증거를 남기고, gate를 통과한 exploitability만 승격한다**는 점이다. 현재 코드로 재검증한 R7000 real firmware pair와 fresh synthetic pair 3종은 AEG gate의 핵심 구조가 작동함을 보여준다.
 
